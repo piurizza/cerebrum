@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import posixpath
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import PurePosixPath
 
@@ -20,6 +22,21 @@ class InvalidNoteContentError(Exception):
     surface as a 400, never an unhandled 500."""
 
 
+def _normalize(path: PurePosixPath) -> str | None:
+    """Collapse `.`/`..`/empty segments in a combined (possibly relative)
+    path down to a normalized vault-relative path string."""
+    parts: list[str] = []
+    for part in path.parts:
+        if part in (".", ""):
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(part)
+    return str(PurePosixPath(*parts)) if parts else None
+
+
 def resolve_link_target(source_path: str, target: str) -> str | None:
     """Resolve a link target relative to the linking note's directory.
 
@@ -36,19 +53,7 @@ def resolve_link_target(source_path: str, target: str) -> str | None:
         return None
 
     source_dir = PurePosixPath(source_path).parent
-    combined = source_dir / target
-
-    parts: list[str] = []
-    for part in combined.parts:
-        if part in (".", ""):
-            continue
-        if part == "..":
-            if parts:
-                parts.pop()
-            continue
-        parts.append(part)
-
-    return str(PurePosixPath(*parts)) if parts else None
+    return _normalize(source_dir / target)
 
 
 def extract_links(source_path: str, body: str) -> list[ParsedLink]:
@@ -59,6 +64,77 @@ def extract_links(source_path: str, body: str) -> list[ParsedLink]:
         if resolved is not None:
             links.append(ParsedLink(target_path=resolved, link_text=link_text or None))
     return links
+
+
+def _rewrite_link_targets(body: str, resolver: Callable[[str], str | None]) -> str:
+    """Replace each markdown link's target text via `resolver`.
+
+    `resolver` receives the raw target string (e.g. `"other.md#section"`)
+    and returns the replacement raw target string, or None to leave that
+    link untouched.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        link_text, target = match.group(1), match.group(2)
+        replacement = resolver(target)
+        if replacement is None:
+            return match.group(0)
+        return f"[{link_text}]({replacement})"
+
+    return _LINK_PATTERN.sub(_replace, body)
+
+
+def _relative_link_text(
+    base_dir: PurePosixPath, absolute_target: str, fragment: str
+) -> str:
+    relative = posixpath.relpath(absolute_target, start=str(base_dir))
+    return f"{relative}#{fragment}" if fragment else relative
+
+
+def rebase_links(body: str, old_source_path: str, new_source_path: str) -> str:
+    """Rewrite this note's own outgoing relative links so they still
+    resolve to the same absolute targets after the note itself moves
+    from `old_source_path` to `new_source_path`.
+    """
+    old_dir = PurePosixPath(old_source_path).parent
+    new_dir = PurePosixPath(new_source_path).parent
+    if old_dir == new_dir:
+        return body
+
+    def resolver(target: str) -> str | None:
+        if target.startswith(_EXTERNAL_PREFIXES):
+            return None
+        path_part, _, fragment = target.partition("#")
+        if not path_part.endswith(".md"):
+            return None
+        absolute = _normalize(old_dir / path_part)
+        if absolute is None:
+            return None
+        return _relative_link_text(new_dir, absolute, fragment)
+
+    return _rewrite_link_targets(body, resolver)
+
+
+def retarget_links(
+    body: str, source_path: str, old_target: str, new_target: str
+) -> str:
+    """Rewrite any link in this note that currently resolves to
+    `old_target` so it instead resolves to `new_target` (used when
+    ANOTHER note moves from `old_target` to `new_target`).
+    """
+    source_dir = PurePosixPath(source_path).parent
+
+    def resolver(target: str) -> str | None:
+        if target.startswith(_EXTERNAL_PREFIXES):
+            return None
+        path_part, _, fragment = target.partition("#")
+        if not path_part.endswith(".md"):
+            return None
+        if _normalize(source_dir / path_part) != old_target:
+            return None
+        return _relative_link_text(source_dir, new_target, fragment)
+
+    return _rewrite_link_targets(body, resolver)
 
 
 def _parse_datetime(value: object) -> datetime | None:

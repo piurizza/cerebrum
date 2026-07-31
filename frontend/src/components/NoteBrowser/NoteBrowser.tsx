@@ -1,7 +1,9 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
-import { encodeNotePath, listNotes, putNote } from "../../api/client";
-import type { NoteMeta } from "../../types/note";
+import { type FormEvent, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { encodeNotePath, putNote } from "../../api/client";
+import { useNotes } from "../../context/NotesContext";
+import { buildNoteTree } from "../../lib/noteTree";
+import { NoteTreeList } from "./NoteTreeList";
 
 function normalizeNotePath(input: string): string {
   const trimmed = input.trim();
@@ -9,11 +11,11 @@ function normalizeNotePath(input: string): string {
 }
 
 export function NoteBrowser() {
-  const [notes, setNotes] = useState<NoteMeta[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { notes, error, refreshNotes } = useNotes();
   const [isCreating, setIsCreating] = useState(false);
   const [newPath, setNewPath] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
 
   // Titles aren't unique -- two notes in different folders can share a
@@ -29,15 +31,19 @@ export function NoteBrowser() {
     );
   }, [notes]);
 
-  const refreshNotes = useCallback(() => {
-    listNotes()
-      .then(setNotes)
-      .catch((err: unknown) => setError(String(err)));
-  }, []);
+  const tree = useMemo(() => buildNoteTree(notes), [notes]);
 
-  useEffect(() => {
-    refreshNotes();
-  }, [refreshNotes]);
+  function toggleFolder(folderPath: string) {
+    setCollapsedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(folderPath)) {
+        next.delete(folderPath);
+      } else {
+        next.add(folderPath);
+      }
+      return next;
+    });
+  }
 
   function cancelCreate() {
     setIsCreating(false);
@@ -115,24 +121,12 @@ export function NoteBrowser() {
       {notes.length === 0 ? (
         <p className="empty-hint">No notes yet.</p>
       ) : (
-        <ul className="note-list">
-          {notes.map((note) => (
-            <li key={note.path}>
-              <NavLink
-                to={`/notes/${encodeNotePath(note.path)}`}
-                title={note.path}
-                className={({ isActive }) =>
-                  isActive ? "note-link is-active" : "note-link"
-                }
-              >
-                <span className="note-title">{note.title}</span>
-                {duplicateTitles.has(note.title) && (
-                  <span className="note-path-hint">{note.path}</span>
-                )}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
+        <NoteTreeList
+          nodes={tree}
+          duplicateTitles={duplicateTitles}
+          collapsedFolders={collapsedFolders}
+          onToggleFolder={toggleFolder}
+        />
       )}
     </nav>
   );

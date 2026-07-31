@@ -4,6 +4,7 @@ import logging
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel
 
 from cerebrum.api.deps import get_db
 from cerebrum.index.db import list_notes
@@ -13,8 +14,10 @@ from cerebrum.notes.models import Note, NoteMeta
 from cerebrum.notes.parser import InvalidNoteContentError
 from cerebrum.notes.service import (
     InvalidNotePathError,
+    NoteAlreadyExistsError,
     NoteNotFoundError,
     delete_note,
+    move_note,
     read_note,
     write_note,
 )
@@ -23,6 +26,10 @@ from cerebrum.settings import get_settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class MoveNoteRequest(BaseModel):
+    new_path: str
 
 
 @router.get("/notes", response_model=list[NoteMeta])
@@ -86,3 +93,40 @@ def delete_note_endpoint(
             "Failed to update index for %s after a successful delete", path
         )
     return Response(status_code=204)
+
+
+@router.post("/notes/{path:path}/move", response_model=Note)
+def move_note_endpoint(
+    path: str, body: MoveNoteRequest, db: sqlite3.Connection = Depends(get_db)
+) -> Note:
+    settings = get_settings()
+    try:
+        note, retargeted_paths = move_note(
+            settings.cerebrum_vault_path, path, body.new_path
+        )
+    except NoteNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Note not found") from exc
+    except NoteAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=409, detail=f"A note already exists at {exc}"
+        ) from exc
+    except InvalidNotePathError as exc:
+        raise HTTPException(status_code=400, detail="Invalid note path") from exc
+    except InvalidNoteContentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # The file(s) (source of truth) are already saved -- the moved note
+    # itself, plus any other note whose links were retargeted. An
+    # index-write failure here must not turn a successful move into a
+    # misleading error response -- the index is a disposable cache and
+    # self-heals on the next startup rescan (see SPEC.md).
+    try:
+        remove_note_from_index(db, path)
+        upsert_note_in_index(db, settings.cerebrum_vault_path, body.new_path)
+        for retargeted_path in retargeted_paths:
+            upsert_note_in_index(db, settings.cerebrum_vault_path, retargeted_path)
+    except Exception:  # noqa: BLE001 -- index is a rebuildable cache (see SPEC.md)
+        logger.exception(
+            "Failed to update index after moving %s to %s", path, body.new_path
+        )
+    return note

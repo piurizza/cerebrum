@@ -14,7 +14,11 @@ def get_graph(conn: sqlite3.Connection) -> GraphResponse:
         for row in note_rows
     }
 
-    link_rows = conn.execute("SELECT source_path, target_path FROM links").fetchall()
+    # DISTINCT: a note can have multiple markdown links to the same
+    # target (different link text/fragment) -- those are still one edge.
+    link_rows = conn.execute(
+        "SELECT DISTINCT source_path, target_path FROM links"
+    ).fetchall()
     edges = [
         GraphEdge(source=row["source_path"], target=row["target_path"])
         for row in link_rows
@@ -33,9 +37,12 @@ def get_graph(conn: sqlite3.Connection) -> GraphResponse:
 
 
 def get_backlinks(conn: sqlite3.Connection, path: str) -> list[NoteMeta]:
+    # DISTINCT: a note can have multiple markdown links to the same
+    # target (different link text/fragment) -- it should still appear
+    # as one backlink, not once per link.
     rows = conn.execute(
         """
-        SELECT n.path, n.title, n.tags, n.created, n.updated
+        SELECT DISTINCT n.path, n.title, n.tags, n.created, n.updated
         FROM links l
         JOIN notes n ON n.path = l.source_path
         WHERE l.target_path = ?

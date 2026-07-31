@@ -124,6 +124,7 @@ All endpoints under `/api`.
 | GET | `/api/notes/{path:path}` | Fetch one note: raw markdown + parsed metadata |
 | PUT | `/api/notes/{path:path}` | Create or update a note (body = raw markdown) |
 | DELETE | `/api/notes/{path:path}` | Delete a note file + its index rows |
+| POST | `/api/notes/{path:path}/move` | Relocate a note (`{"new_path": "..."}` body) and rewrite every note's markdown links that pointed at it; 404 if source missing, 409 if destination exists |
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 
@@ -226,7 +227,19 @@ history.
 - [x] edit a note's content and save changes
 - [x] create a new note (pick a title/path, start writing)
 - [ ] delete a note
-- [ ] rename or move a note to a different path/folder
+- [x] rename or move a note to a different path/folder, **link-aware**:
+      `POST /api/notes/{path}/move` physically relocates the file,
+      preserves `created`, re-bases the moved note's own outgoing
+      relative links so they still resolve to the same targets (they're
+      relative to its folder, which just changed), and repoints every
+      other note's links that targeted the old path so they resolve to
+      the new one instead -- link text and any `#fragment` are rewritten
+      in place, everything else in the linking note is left untouched. A
+      note with unreadable content is skipped (logged) rather than
+      aborting the whole move. Scans every note in the vault to find
+      incoming links rather than trusting the (disposable, possibly
+      stale) index, at O(n) cost per move -- fine at personal-vault
+      scale, worth revisiting if that ever becomes the bottleneck.
 - [ ] see when a note was created/last updated, surfaced in the UI
 - [x] see the note's own vault-relative path, not just its title -- two
       notes can share a title (e.g. two different `CAD.md` notes in
@@ -239,7 +252,9 @@ history.
 
 ### Organization & discovery
 
-- [x] browse all notes in a list
+- [x] browse all notes grouped in a collapsible folder tree mirroring
+      their vault paths (folders sort before notes, alphabetical within
+      each level; expand/collapse state is per-session, not persisted)
 - [ ] search notes by content (full-text, backed by the already-scaffolded
       `notes_fts` table — see [Index/cache architecture](#4-indexcache-architecture))
 - [ ] filter notes by tag. **Scope decision: filtering only** — no
@@ -270,7 +285,7 @@ history.
 
 ### Editing experience
 
-- [ ] see whether they have unsaved changes
+- [x] see whether they have unsaved changes
 - [ ] save via a keyboard shortcut (e.g. Cmd/Ctrl+S)
 
 ### Attachments (later, unscheduled)

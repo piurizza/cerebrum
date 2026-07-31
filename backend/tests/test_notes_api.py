@@ -53,3 +53,57 @@ def test_put_malformed_frontmatter_returns_400_not_500(client: TestClient) -> No
     )
 
     assert response.status_code == 400
+
+
+def test_move_note_relocates_and_updates_index(client: TestClient) -> None:
+    client.put("/api/notes/a.md", content="---\ntitle: A\n---\nBody.\n")
+
+    move_response = client.post(
+        "/api/notes/a.md/move", json={"new_path": "folder/b.md"}
+    )
+    assert move_response.status_code == 200
+    assert move_response.json()["path"] == "folder/b.md"
+
+    assert client.get("/api/notes/a.md").status_code == 404
+    assert client.get("/api/notes/folder/b.md").status_code == 200
+
+    list_response = client.get("/api/notes")
+    assert [note["path"] for note in list_response.json()] == ["folder/b.md"]
+
+
+def test_move_note_missing_source_returns_404(client: TestClient) -> None:
+    response = client.post("/api/notes/missing.md/move", json={"new_path": "target.md"})
+
+    assert response.status_code == 404
+
+
+def test_move_note_existing_destination_returns_409(client: TestClient) -> None:
+    client.put("/api/notes/a.md", content="content")
+    client.put("/api/notes/b.md", content="content")
+
+    response = client.post("/api/notes/a.md/move", json={"new_path": "b.md"})
+
+    assert response.status_code == 409
+
+
+def test_move_note_retargets_other_notes_incoming_links(client: TestClient) -> None:
+    # Moving a note rewrites other notes' link text so it keeps pointing
+    # at the moved note -- not just the file on disk, but the index too
+    # (backlinks/graph must reflect the new path, not a broken old one).
+    client.put("/api/notes/a.md", content="See [B](b.md).")
+    client.put("/api/notes/b.md", content="content")
+
+    client.post("/api/notes/b.md/move", json={"new_path": "folder/b.md"})
+
+    assert "[B](folder/b.md)" in client.get("/api/notes/a.md").json()["content"]
+
+    backlinks_old_path = client.get("/api/notes/b.md/backlinks")
+    assert backlinks_old_path.json() == []
+
+    backlinks_new_path = client.get("/api/notes/folder/b.md/backlinks")
+    assert [note["path"] for note in backlinks_new_path.json()] == ["a.md"]
+
+    graph = client.get("/api/graph").json()
+    nodes_by_path = {node["path"]: node for node in graph["nodes"]}
+    assert "b.md" not in nodes_by_path  # no longer a ghost node either
+    assert nodes_by_path["folder/b.md"]["exists"] is True

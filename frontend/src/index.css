@@ -180,6 +180,74 @@ a {
   opacity: 0.85;
 }
 
+.note-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.note-tree .note-tree {
+  margin-left: 0.9rem;
+  margin-top: 0.15rem;
+}
+
+.note-folder {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.3rem 0.6rem;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-family: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-folder:hover {
+  background: var(--bg-subtle);
+}
+
+.folder-caret {
+  display: inline-block;
+  transition: transform 0.1s ease;
+  font-size: 0.7rem;
+}
+
+.folder-caret.is-expanded {
+  transform: rotate(90deg);
+}
+
+.rename-form {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.rename-form input {
+  flex: 1;
+  min-width: 120px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+
+.rename-error {
+  flex-basis: 100%;
+}
+
 .new-note-form {
   display: flex;
   flex-direction: column;

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 from cerebrum.notes.models import Note
-from cerebrum.notes.parser import parse_note, render_note
+from cerebrum.notes.parser import parse_note, rebase_links, render_note, retarget_links
+
+logger = logging.getLogger(__name__)
 
 
 class NoteNotFoundError(Exception):
@@ -13,6 +16,10 @@ class NoteNotFoundError(Exception):
 
 
 class InvalidNotePathError(Exception):
+    pass
+
+
+class NoteAlreadyExistsError(Exception):
     pass
 
 
@@ -85,3 +92,73 @@ def delete_note(vault_root: Path, path: str) -> None:
     if not file_path.is_file():
         raise NoteNotFoundError(path)
     file_path.unlink()
+
+
+def move_note(vault_root: Path, path: str, new_path: str) -> tuple[Note, list[str]]:
+    """Relocate a note on disk and keep markdown links pointing at it correct.
+
+    Rewrites the moved note's own outgoing relative links so they still
+    resolve to the same absolute targets (they're relative to its own
+    folder, which just changed), and repoints every OTHER note's links
+    that targeted the old path so they resolve to the new one instead.
+    A note with unreadable/malformed content is skipped (logged, not
+    fatal) rather than aborting the whole move -- see rebuild_index for
+    the same defensive pattern.
+
+    Returns the moved note and the vault-relative paths of any OTHER
+    notes whose link text was rewritten, so the caller can keep the
+    index in sync for those too.
+    """
+    source = resolve_note_path(vault_root, path)
+    destination = resolve_note_path(vault_root, new_path)
+
+    if not source.is_file():
+        raise NoteNotFoundError(path)
+    if destination.exists():
+        raise NoteAlreadyExistsError(new_path)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(destination)
+
+    raw_content = destination.read_text(encoding="utf-8")
+    parsed = parse_note(new_path, raw_content)
+    rebased_body = rebase_links(parsed.body, path, new_path)
+    if rebased_body != parsed.body:
+        parsed.body = rebased_body
+        parsed.updated = datetime.now(UTC)
+        raw_content = render_note(parsed)
+        destination.write_text(raw_content, encoding="utf-8")
+
+    retargeted: list[str] = []
+    for other_path in iter_note_paths(vault_root):
+        if other_path == new_path:
+            continue
+        other_file = vault_root / other_path
+        try:
+            other_raw = other_file.read_text(encoding="utf-8")
+            other_parsed = parse_note(other_path, other_raw)
+        except Exception:  # noqa: BLE001 -- one bad note must not abort the move
+            logger.exception(
+                "Failed to check %s for links to relink; skipping", other_path
+            )
+            continue
+
+        new_body = retarget_links(other_parsed.body, other_path, path, new_path)
+        if new_body == other_parsed.body:
+            continue
+        other_parsed.body = new_body
+        other_parsed.updated = datetime.now(UTC)
+        other_file.write_text(render_note(other_parsed), encoding="utf-8")
+        retargeted.append(other_path)
+
+    return (
+        Note(
+            path=new_path,
+            title=parsed.title,
+            tags=parsed.tags,
+            created=parsed.created,
+            updated=parsed.updated,
+            content=raw_content,
+        ),
+        retargeted,
+    )

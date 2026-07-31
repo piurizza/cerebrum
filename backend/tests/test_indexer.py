@@ -90,6 +90,34 @@ def test_upsert_note_dedupes_duplicate_links(
     assert [note.path for note in backlinks] == ["a.md"]
 
 
+def test_get_backlinks_dedupes_multiple_distinct_links_from_same_note(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    # Two DIFFERENT links (different text/fragment) from the same note to
+    # the same target are two rows in `links`, but still one backlink.
+    write_note(vault, "a.md", "See [Home](b.md) and also [Elsewhere](b.md#section).")
+    write_note(vault, "b.md", "content")
+    upsert_note(db, vault, "a.md")
+    upsert_note(db, vault, "b.md")
+
+    backlinks = get_backlinks(db, "b.md")
+
+    assert [note.path for note in backlinks] == ["a.md"]
+
+
+def test_get_graph_dedupes_multiple_distinct_links_between_same_notes(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "a.md", "See [Home](b.md) and also [Elsewhere](b.md#section).")
+    write_note(vault, "b.md", "content")
+    upsert_note(db, vault, "a.md")
+    upsert_note(db, vault, "b.md")
+
+    graph = get_graph(db)
+
+    assert [(edge.source, edge.target) for edge in graph.edges] == [("a.md", "b.md")]
+
+
 def test_rebuild_index_skips_unchanged_note(
     vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1,0 +1,30 @@
+{
+  "editor.codeActionsOnSave": {
+    "source.fixAll.ruff": "explicit",
+    "source.organizeImports.ruff": "explicit"
+  },
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true
+  },
+  "[typescript][typescriptreact][javascript][javascriptreact][json]": {
+    "editor.defaultFormatter": "biomejs.biome",
+    "editor.formatOnSave": true
+  },
+  "files.exclude": {
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true
+  },
+  "mypy-type-checker.args": [
+    "--config-file=${workspaceFolder}/backend/pyproject.toml"
+  ],
+  "mypy-type-checker.cwd": "${workspaceFolder}/backend",
+  "python.analysis.typeCheckingMode": "strict",
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+  "python.testing.pytestArgs": [
+    "backend/tests"
+  ],
+  "python.testing.pytestEnabled": true,
+  "ruff.configuration": "${workspaceFolder}/backend/pyproject.toml"
+}

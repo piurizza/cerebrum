@@ -1,0 +1,22 @@
+# Python (backend)
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Node (frontend)
+node_modules/
+frontend/dist/
+frontend/.env
+
+# Vault data (user notes + derived index) — never commit personal notes
+/vault/*
+!/vault/.gitkeep

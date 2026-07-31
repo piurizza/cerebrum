@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      CEREBRUM_VAULT_PATH: /data/vault
+    volumes:
+      - ${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${CEREBRUM_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy

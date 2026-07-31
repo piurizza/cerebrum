@@ -52,3 +52,15 @@ body {
 .graph-view {
   height: calc(100vh - 2rem);
 }
+
+.new-note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.new-note-actions {
+  display: flex;
+  gap: 0.5rem;
+}

@@ -10,6 +10,7 @@ from cerebrum.index.db import list_notes
 from cerebrum.index.indexer import remove_note as remove_note_from_index
 from cerebrum.index.indexer import upsert_note as upsert_note_in_index
 from cerebrum.notes.models import Note, NoteMeta
+from cerebrum.notes.parser import InvalidNoteContentError
 from cerebrum.notes.service import (
     InvalidNotePathError,
     NoteNotFoundError,
@@ -38,6 +39,8 @@ def get_note(path: str) -> Note:
         raise HTTPException(status_code=404, detail="Note not found") from exc
     except InvalidNotePathError as exc:
         raise HTTPException(status_code=400, detail="Invalid note path") from exc
+    except InvalidNoteContentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/notes/{path:path}", response_model=Note)
@@ -50,6 +53,8 @@ async def put_note(
         note = write_note(settings.cerebrum_vault_path, path, raw_content)
     except InvalidNotePathError as exc:
         raise HTTPException(status_code=400, detail="Invalid note path") from exc
+    except InvalidNoteContentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # The file (source of truth) is already saved. An index-write failure
     # here must not turn a successful save into a misleading error

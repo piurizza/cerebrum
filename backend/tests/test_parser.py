@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from cerebrum.notes.parser import parse_note, render_note, resolve_link_target
+import pytest
+
+from cerebrum.notes.parser import (
+    InvalidNoteContentError,
+    parse_note,
+    render_note,
+    resolve_link_target,
+)
 
 
 def test_resolve_link_target_relative_path() -> None:
@@ -57,3 +64,22 @@ def test_render_note_roundtrips_through_parse_note() -> None:
     assert reparsed.title == "Roundtrip"
     assert reparsed.tags == ["x"]
     assert reparsed.body.strip() == "Body text."
+
+
+def test_parse_note_raises_on_malformed_frontmatter() -> None:
+    # Regression: typing directly into the frontmatter block (e.g. right
+    # after "tags: []" with no newline) used to crash write_note with an
+    # unhandled 500 instead of a clean, catchable error.
+    raw = (
+        "---\ntags: []Hello from the create-note test.\ntitle: test-note\n---\nBody.\n"
+    )
+
+    with pytest.raises(InvalidNoteContentError):
+        parse_note("test-note.md", raw)
+
+
+def test_parse_note_raises_on_invalid_date() -> None:
+    raw = "---\ntitle: A\ncreated: not-a-date\n---\nBody.\n"
+
+    with pytest.raises(InvalidNoteContentError):
+        parse_note("a.md", raw)

@@ -5,11 +5,19 @@ from datetime import datetime
 from pathlib import PurePosixPath
 
 import frontmatter
+import yaml
 
 from cerebrum.notes.models import ParsedLink, ParsedNote
 
 _LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)\s]+)\)")
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
+
+
+class InvalidNoteContentError(Exception):
+    """Raised when a note's frontmatter can't be parsed (bad YAML, or a
+    non-ISO-8601 created/updated value). This is user-editable content --
+    a typo made directly in the editor -- not a server bug, so it should
+    surface as a 400, never an unhandled 500."""
 
 
 def resolve_link_target(source_path: str, target: str) -> str | None:
@@ -58,11 +66,17 @@ def _parse_datetime(value: object) -> datetime | None:
         return None
     if isinstance(value, datetime):
         return value
-    return datetime.fromisoformat(str(value))
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError as exc:
+        raise InvalidNoteContentError(f"invalid date value: {value!r}") from exc
 
 
 def parse_note(path: str, raw_content: str) -> ParsedNote:
-    post = frontmatter.loads(raw_content)
+    try:
+        post = frontmatter.loads(raw_content)
+    except yaml.YAMLError as exc:
+        raise InvalidNoteContentError(f"malformed frontmatter: {exc}") from exc
     metadata = post.metadata
 
     fallback_title = PurePosixPath(path).stem

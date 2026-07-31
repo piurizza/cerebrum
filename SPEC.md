@@ -217,7 +217,7 @@ history.
 
 - [x] view/read a note
 - [x] edit a note's content and save changes
-- [ ] create a new note (pick a title/path, start writing)
+- [x] create a new note (pick a title/path, start writing)
 - [ ] delete a note
 - [ ] rename or move a note to a different path/folder
 - [ ] see when a note was created/last updated, surfaced in the UI

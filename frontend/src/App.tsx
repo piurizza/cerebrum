@@ -8,14 +8,26 @@ function App() {
     <div className="app-layout">
       <aside className="app-sidebar">
         <h1>Cerebrum</h1>
-        <nav>
-          <NavLink to="/graph">Graph</NavLink>
+        <nav className="app-nav">
+          <NavLink
+            to="/graph"
+            className={({ isActive }) => (isActive ? "is-active" : undefined)}
+          >
+            Graph
+          </NavLink>
         </nav>
         <NoteBrowser />
       </aside>
       <main className="app-main">
         <Routes>
-          <Route path="/" element={<p>Select a note from the sidebar.</p>} />
+          <Route
+            path="/"
+            element={
+              <p className="empty-hint">
+                Select a note from the sidebar, or create a new one.
+              </p>
+            }
+          />
           <Route path="/notes/*" element={<NoteViewPage />} />
           <Route path="/graph" element={<GraphViewPage />} />
         </Routes>

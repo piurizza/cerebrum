@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { encodeNotePath, listNotes, putNote } from "../../api/client";
 import type { NoteMeta } from "../../types/note";
 
@@ -59,11 +59,15 @@ export function NoteBrowser() {
   }
 
   if (error) {
-    return <p role="alert">Failed to load notes: {error}</p>;
+    return (
+      <p className="error-text" role="alert">
+        Failed to load notes: {error}
+      </p>
+    );
   }
 
   return (
-    <nav aria-label="Notes">
+    <nav aria-label="Notes" className="note-browser">
       {isCreating ? (
         <form onSubmit={handleCreate} className="new-note-form">
           <input
@@ -73,25 +77,46 @@ export function NoteBrowser() {
             onChange={(event) => setNewPath(event.target.value)}
           />
           <div className="new-note-actions">
-            <button type="submit">Create</button>
-            <button type="button" onClick={cancelCreate}>
+            <button type="submit" className="btn btn-primary">
+              Create
+            </button>
+            <button type="button" className="btn" onClick={cancelCreate}>
               Cancel
             </button>
           </div>
-          {createError && <p role="alert">{createError}</p>}
+          {createError && (
+            <p className="error-text" role="alert">
+              {createError}
+            </p>
+          )}
         </form>
       ) : (
-        <button type="button" onClick={() => setIsCreating(true)}>
+        <button
+          type="button"
+          className="btn btn-block"
+          onClick={() => setIsCreating(true)}
+        >
           + New note
         </button>
       )}
-      <ul>
-        {notes.map((note) => (
-          <li key={note.path}>
-            <Link to={`/notes/${encodeNotePath(note.path)}`}>{note.title}</Link>
-          </li>
-        ))}
-      </ul>
+      {notes.length === 0 ? (
+        <p className="empty-hint">No notes yet.</p>
+      ) : (
+        <ul className="note-list">
+          {notes.map((note) => (
+            <li key={note.path}>
+              <NavLink
+                to={`/notes/${encodeNotePath(note.path)}`}
+                className={({ isActive }) =>
+                  isActive ? "note-link is-active" : "note-link"
+                }
+              >
+                {note.title}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      )}
     </nav>
   );
 }

@@ -15,6 +15,7 @@ export function NoteViewPage() {
   const navigate = useNavigate();
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
+  const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<ViewMode>("edit");
@@ -27,6 +28,7 @@ export function NoteViewPage() {
       .then((note) => {
         setContent(note.content);
         setSavedContent(note.content);
+        setTitle(note.title);
       })
       .finally(() => setLoading(false));
   }, [path]);
@@ -59,7 +61,15 @@ export function NoteViewPage() {
       <div className="note-editor">
         <NotePathHeader
           path={path}
-          onRenamed={(newPath) => navigate(`/notes/${encodeNotePath(newPath)}`)}
+          title={title}
+          onRenamed={(updated) => {
+            setContent(updated.content);
+            setSavedContent(updated.content);
+            setTitle(updated.title);
+            if (updated.path !== path) {
+              navigate(`/notes/${encodeNotePath(updated.path)}`);
+            }
+          }}
         />
         <div className="mode-toggle" role="tablist" aria-label="Editor mode">
           <button

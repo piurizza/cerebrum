@@ -37,11 +37,11 @@ export function deleteNote(path: string): Promise<void> {
   return request<void>(`/notes/${encodeNotePath(path)}`, { method: "DELETE" });
 }
 
-export function moveNote(path: string, newPath: string): Promise<Note> {
+export function moveNote(path: string, newPath: string, title?: string): Promise<Note> {
   return request<Note>(`/notes/${encodeNotePath(path)}/move`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ new_path: newPath }),
+    body: JSON.stringify({ new_path: newPath, title: title ?? null }),
   });
 }
 

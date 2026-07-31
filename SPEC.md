@@ -124,7 +124,7 @@ All endpoints under `/api`.
 | GET | `/api/notes/{path:path}` | Fetch one note: raw markdown + parsed metadata |
 | PUT | `/api/notes/{path:path}` | Create or update a note (body = raw markdown) |
 | DELETE | `/api/notes/{path:path}` | Delete a note file + its index rows |
-| POST | `/api/notes/{path:path}/move` | Relocate a note (`{"new_path": "..."}` body) and rewrite every note's markdown links that pointed at it; 404 if source missing, 409 if destination exists |
+| POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's markdown links that pointed at it; `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 
@@ -239,7 +239,14 @@ history.
       aborting the whole move. Scans every note in the vault to find
       incoming links rather than trusting the (disposable, possibly
       stale) index, at O(n) cost per move -- fine at personal-vault
-      scale, worth revisiting if that ever becomes the bottleneck.
+      scale, worth revisiting if that ever becomes the bottleneck. The
+      same rename UI (and the same `move` endpoint, via an optional
+      `title` field) also updates the note's frontmatter `title` --
+      moving a note's path alone never changed its title before, which
+      was surprising; now both can change together in one action, and
+      the new title is reflected immediately in the sidebar and the
+      graph (both read `title` from the index, refreshed as part of the
+      same move/rename request).
 - [ ] see when a note was created/last updated, surfaced in the UI
 - [x] see the note's own vault-relative path, not just its title -- two
       notes can share a title (e.g. two different `CAD.md` notes in

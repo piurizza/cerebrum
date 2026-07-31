@@ -165,3 +165,30 @@ def test_move_note_does_not_touch_unrelated_links(vault: Path) -> None:
 
     assert not retargeted
     assert "[C](c.md)" in read_note(vault, "linker.md").content
+
+
+def test_move_note_updates_title_alongside_path(vault: Path) -> None:
+    write_note(vault, "a.md", "---\ntitle: Old Title\n---\nBody.\n")
+
+    moved, _ = move_note(vault, "a.md", "folder/a.md", title="New Title")
+
+    assert moved.title == "New Title"
+    assert read_note(vault, "folder/a.md").title == "New Title"
+
+
+def test_move_note_can_update_title_only_without_relocating(vault: Path) -> None:
+    write_note(vault, "a.md", "---\ntitle: Old Title\n---\nBody.\n")
+
+    moved, retargeted = move_note(vault, "a.md", "a.md", title="New Title")
+
+    assert moved.path == "a.md"
+    assert moved.title == "New Title"
+    assert not retargeted
+    assert read_note(vault, "a.md").title == "New Title"
+
+
+def test_move_note_title_only_does_not_raise_already_exists(vault: Path) -> None:
+    write_note(vault, "a.md", "content")
+
+    # Same path is not a collision when nothing is relocating.
+    move_note(vault, "a.md", "a.md", title="Renamed")

@@ -1,10 +1,12 @@
 import { type FormEvent, useState } from "react";
 import { moveNote } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
+import type { Note } from "../../types/note";
 
 interface NotePathHeaderProps {
   path: string;
-  onRenamed: (newPath: string) => void;
+  title: string;
+  onRenamed: (updated: Note) => void;
 }
 
 function normalizeNotePath(input: string): string {
@@ -12,11 +14,12 @@ function normalizeNotePath(input: string): string {
   return trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
 }
 
-export function NotePathHeader({ path, onRenamed }: NotePathHeaderProps) {
+export function NotePathHeader({ path, title, onRenamed }: NotePathHeaderProps) {
   const { notes, refreshNotes } = useNotes();
   const [copied, setCopied] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [newPath, setNewPath] = useState(path);
+  const [newTitle, setNewTitle] = useState(title);
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
 
@@ -28,6 +31,7 @@ export function NotePathHeader({ path, onRenamed }: NotePathHeaderProps) {
 
   function startRename() {
     setNewPath(path);
+    setNewTitle(title);
     setRenameError(null);
     setIsRenaming(true);
   }
@@ -42,37 +46,55 @@ export function NotePathHeader({ path, onRenamed }: NotePathHeaderProps) {
     setRenameError(null);
 
     const target = normalizeNotePath(newPath);
-    if (target === path) {
+    const trimmedTitle = newTitle.trim();
+    const pathChanged = target !== path;
+    const titleChanged = trimmedTitle !== title && trimmedTitle !== "";
+
+    if (!pathChanged && !titleChanged) {
       setIsRenaming(false);
       return;
     }
-    if (notes.some((note) => note.path === target)) {
+    if (pathChanged && notes.some((note) => note.path === target)) {
       setRenameError(`A note already exists at "${target}".`);
       return;
     }
 
     setRenaming(true);
     try {
-      await moveNote(path, target);
+      const updated = await moveNote(
+        path,
+        target,
+        titleChanged ? trimmedTitle : undefined,
+      );
+      setRenaming(false);
+      setIsRenaming(false);
+      refreshNotes();
+      onRenamed(updated);
     } catch (err) {
       setRenameError(String(err));
       setRenaming(false);
-      return;
     }
-    setRenaming(false);
-    setIsRenaming(false);
-    refreshNotes();
-    onRenamed(target);
   }
 
   if (isRenaming) {
     return (
       <form onSubmit={handleRename} className="rename-form">
-        <input
-          type="text"
-          value={newPath}
-          onChange={(event) => setNewPath(event.target.value)}
-        />
+        <label className="rename-field">
+          Path
+          <input
+            type="text"
+            value={newPath}
+            onChange={(event) => setNewPath(event.target.value)}
+          />
+        </label>
+        <label className="rename-field">
+          Title
+          <input
+            type="text"
+            value={newTitle}
+            onChange={(event) => setNewTitle(event.target.value)}
+          />
+        </label>
         <button type="submit" className="btn btn-primary" disabled={renaming}>
           {renaming ? "Renaming..." : "Rename"}
         </button>

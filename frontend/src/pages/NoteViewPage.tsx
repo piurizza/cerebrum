@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { getNote, putNote } from "../api/client";
+import { useNavigate, useParams } from "react-router-dom";
+import { encodeNotePath, getNote, putNote } from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
 import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
@@ -12,6 +12,7 @@ type ViewMode = "edit" | "preview";
 export function NoteViewPage() {
   const params = useParams();
   const path = params["*"] ?? "";
+  const navigate = useNavigate();
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
   const [loading, setLoading] = useState(true);
@@ -56,7 +57,10 @@ export function NoteViewPage() {
   return (
     <div className="note-view">
       <div className="note-editor">
-        <NotePathHeader path={path} />
+        <NotePathHeader
+          path={path}
+          onRenamed={(newPath) => navigate(`/notes/${encodeNotePath(newPath)}`)}
+        />
         <div className="mode-toggle" role="tablist" aria-label="Editor mode">
           <button
             type="button"

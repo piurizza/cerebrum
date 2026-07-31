@@ -165,10 +165,17 @@ API calls.
 - **CodeMirror 6** (`@uiw/react-codemirror` + `@codemirror/lang-markdown`)
   for the markdown editor — purpose-built for markdown, the same editing
   engine Obsidian itself uses, lighter than Monaco and far more capable
-  than a bare `<textarea>`. A rendered markdown preview with clickable
-  inter-note links, and a link-autocomplete picker while typing, are
-  planned on top of this (see [Feature roadmap](#9-feature-roadmap-user-stories));
-  the specific rendering/autocomplete libraries aren't chosen yet.
+  than a bare `<textarea>`. Theme (`light`/`dark`) tracks the OS color
+  scheme live via a shared `usePrefersDark()` hook, so editor text stays
+  readable regardless of system theme.
+- **react-markdown + remark-gfm** for the rendered preview mode (Edit /
+  Preview toggle on the note editor). Frontmatter is stripped client-side
+  before rendering (`lib/noteContent.ts`); inter-note links are resolved
+  relative to the current note's directory with a JS port of the
+  backend's `resolve_link_target` (same file) and rendered as in-app
+  `react-router-dom` links, not full page loads — external links open
+  normally in a new tab. A link-autocomplete picker while typing is still
+  planned (see [Feature roadmap](#9-feature-roadmap-user-stories)).
 - **react-force-graph** (2D canvas variant) for graph visualization —
   wraps d3-force physics with canvas rendering, zoom/pan, and node-click
   handling out of the box. Canvas rendering scales to hundreds of nodes
@@ -238,7 +245,7 @@ history.
 
 ### Cross-referencing
 
-- [ ] see a rendered markdown preview with clickable links to other
+- [x] see a rendered markdown preview with clickable links to other
       notes, not just raw text in the editor
 - [ ] insert a link to another note while writing, via an
       autocomplete/picker triggered while typing. The trigger UX may be

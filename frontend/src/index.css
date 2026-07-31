@@ -211,6 +211,92 @@ a {
   overflow: hidden;
 }
 
+.mode-toggle {
+  display: inline-flex;
+  width: fit-content;
+}
+
+.btn-toggle {
+  border-radius: 0;
+  margin-left: -1px;
+}
+
+.btn-toggle:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+  margin-left: 0;
+}
+
+.btn-toggle:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.btn-toggle.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  position: relative;
+  z-index: 1;
+}
+
+.markdown-preview {
+  min-height: 200px;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.markdown-preview > :first-child {
+  margin-top: 0;
+}
+
+.markdown-preview > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3 {
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+}
+
+.markdown-preview code {
+  background: var(--bg-subtle);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+
+.markdown-preview pre {
+  background: var(--bg-subtle);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+
+.markdown-preview pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-preview blockquote {
+  margin: 0;
+  padding-left: 1rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+}
+
+.markdown-preview table {
+  border-collapse: collapse;
+}
+
+.markdown-preview th,
+.markdown-preview td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.6rem;
+}
+
 .note-editor-actions {
   display: flex;
   align-items: center;

@@ -228,6 +228,14 @@ history.
 - [ ] delete a note
 - [ ] rename or move a note to a different path/folder
 - [ ] see when a note was created/last updated, surfaced in the UI
+- [x] see the note's own vault-relative path, not just its title -- two
+      notes can share a title (e.g. two different `CAD.md` notes in
+      different folders), and the path is what you actually need to
+      write a link to it. Shown read-only above the editor, with a copy
+      button. Not written into the note's own frontmatter -- the path
+      is derived from the file's location on disk, not stored data, so
+      persisting it there would drift if the file were ever moved (see
+      [Note format](#3-note-format)).
 
 ### Organization & discovery
 

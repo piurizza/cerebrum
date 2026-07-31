@@ -144,14 +144,26 @@ a {
 }
 
 .note-link {
-  display: block;
+  display: flex;
+  flex-direction: column;
   padding: 0.4rem 0.6rem;
   border-radius: var(--radius);
   text-decoration: none;
   color: var(--text);
+}
+
+.note-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.note-path-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
 .note-link:hover {
@@ -161,6 +173,11 @@ a {
 .note-link.is-active {
   background: var(--accent);
   color: var(--accent-fg);
+}
+
+.note-link.is-active .note-path-hint {
+  color: inherit;
+  opacity: 0.85;
 }
 
 .new-note-form {
@@ -209,6 +226,26 @@ a {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+}
+
+.note-path-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.note-path {
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-subtle);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.btn-copy {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
 }
 
 .mode-toggle {

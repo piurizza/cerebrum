@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { encodeNotePath, listNotes, putNote } from "../../api/client";
 import type { NoteMeta } from "../../types/note";
@@ -15,6 +15,19 @@ export function NoteBrowser() {
   const [newPath, setNewPath] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  // Titles aren't unique -- two notes in different folders can share a
+  // title. Only show the disambiguating path for titles that actually
+  // collide, so the common case (unique titles) stays uncluttered.
+  const duplicateTitles = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const note of notes) {
+      counts.set(note.title, (counts.get(note.title) ?? 0) + 1);
+    }
+    return new Set(
+      [...counts.entries()].filter(([, count]) => count > 1).map(([title]) => title),
+    );
+  }, [notes]);
 
   const refreshNotes = useCallback(() => {
     listNotes()
@@ -107,11 +120,15 @@ export function NoteBrowser() {
             <li key={note.path}>
               <NavLink
                 to={`/notes/${encodeNotePath(note.path)}`}
+                title={note.path}
                 className={({ isActive }) =>
                   isActive ? "note-link is-active" : "note-link"
                 }
               >
-                {note.title}
+                <span className="note-title">{note.title}</span>
+                {duplicateTitles.has(note.title) && (
+                  <span className="note-path-hint">{note.path}</span>
+                )}
               </NavLink>
             </li>
           ))}

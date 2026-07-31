@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { moveNote } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import type { Note } from "../../types/note";
+import { FolderPickerModal } from "../FolderPicker/FolderPickerModal";
 
 interface NotePathHeaderProps {
   path: string;
@@ -9,15 +10,11 @@ interface NotePathHeaderProps {
   onRenamed: (updated: Note) => void;
 }
 
-function normalizeNotePath(input: string): string {
-  const trimmed = input.trim();
-  return trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
-}
-
 export function NotePathHeader({ path, title, onRenamed }: NotePathHeaderProps) {
   const { notes, refreshNotes } = useNotes();
   const [copied, setCopied] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [newPath, setNewPath] = useState(path);
   const [newTitle, setNewTitle] = useState(title);
   const [renaming, setRenaming] = useState(false);
@@ -45,7 +42,7 @@ export function NotePathHeader({ path, title, onRenamed }: NotePathHeaderProps) 
     event.preventDefault();
     setRenameError(null);
 
-    const target = normalizeNotePath(newPath);
+    const target = newPath;
     const trimmedTitle = newTitle.trim();
     const pathChanged = target !== path;
     const titleChanged = trimmedTitle !== title && trimmedTitle !== "";
@@ -78,35 +75,54 @@ export function NotePathHeader({ path, title, onRenamed }: NotePathHeaderProps) 
 
   if (isRenaming) {
     return (
-      <form onSubmit={handleRename} className="rename-form">
-        <label className="rename-field">
-          Path
-          <input
-            type="text"
-            value={newPath}
-            onChange={(event) => setNewPath(event.target.value)}
+      <>
+        <form onSubmit={handleRename} className="rename-form">
+          <div className="rename-field">
+            Path
+            <div className="path-picker-trigger">
+              <code className="note-path">{newPath}</code>
+              <button
+                type="button"
+                className="btn btn-copy"
+                onClick={() => setIsPickerOpen(true)}
+              >
+                Choose location
+              </button>
+            </div>
+          </div>
+          <label className="rename-field">
+            Title
+            <input
+              type="text"
+              value={newTitle}
+              onChange={(event) => setNewTitle(event.target.value)}
+            />
+          </label>
+          <button type="submit" className="btn btn-primary" disabled={renaming}>
+            {renaming ? "Renaming..." : "Rename"}
+          </button>
+          <button type="button" className="btn" onClick={cancelRename}>
+            Cancel
+          </button>
+          {renameError && (
+            <p className="error-text rename-error" role="alert">
+              {renameError}
+            </p>
+          )}
+        </form>
+        {isPickerOpen && (
+          <FolderPickerModal
+            title="Move note"
+            initialPath={newPath}
+            confirmLabel="Select"
+            onConfirm={(selected) => {
+              setNewPath(selected);
+              setIsPickerOpen(false);
+            }}
+            onCancel={() => setIsPickerOpen(false)}
           />
-        </label>
-        <label className="rename-field">
-          Title
-          <input
-            type="text"
-            value={newTitle}
-            onChange={(event) => setNewTitle(event.target.value)}
-          />
-        </label>
-        <button type="submit" className="btn btn-primary" disabled={renaming}>
-          {renaming ? "Renaming..." : "Rename"}
-        </button>
-        <button type="button" className="btn" onClick={cancelRename}>
-          Cancel
-        </button>
-        {renameError && (
-          <p className="error-text rename-error" role="alert">
-            {renameError}
-          </p>
         )}
-      </form>
+      </>
     );
   }
 

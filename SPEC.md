@@ -225,7 +225,13 @@ history.
 
 - [x] view/read a note
 - [x] edit a note's content and save changes
-- [x] create a new note (pick a title/path, start writing)
+- [x] create a new note (pick a title/path, start writing) -- both note
+      creation and rename/move use a shared folder-picker modal
+      (`FolderPickerModal`) instead of a raw text path field: it lists
+      the vault's existing folders, lets you descend into one, add a new
+      one inline (just a path segment, no separate persisted "folder"
+      entity -- see [Storage model](#2-storage-model)), and enter the
+      file name, composing the final vault-relative path.
 - [ ] delete a note
 - [x] rename or move a note to a different path/folder, **link-aware**:
       `POST /api/notes/{path}/move` physically relocates the file,

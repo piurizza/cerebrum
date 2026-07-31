@@ -22,8 +22,12 @@ export function BacklinksPanel({ path }: BacklinksPanelProps) {
     <ul className="note-list">
       {backlinks.map((note) => (
         <li key={note.path}>
-          <Link className="note-link" to={`/notes/${encodeNotePath(note.path)}`}>
-            {note.title}
+          <Link
+            className="note-link"
+            to={`/notes/${encodeNotePath(note.path)}`}
+            title={note.path}
+          >
+            <span className="note-title">{note.title}</span>
           </Link>
         </li>
       ))}

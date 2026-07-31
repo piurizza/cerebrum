@@ -3,6 +3,10 @@ import { useParams } from "react-router-dom";
 import { getNote, putNote } from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
+import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
+import { stripFrontmatter } from "../lib/noteContent";
+
+type ViewMode = "edit" | "preview";
 
 export function NoteViewPage() {
   const params = useParams();
@@ -11,10 +15,12 @@ export function NoteViewPage() {
   const [savedContent, setSavedContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState<ViewMode>("edit");
 
   useEffect(() => {
     if (!path) return;
     setLoading(true);
+    setMode("edit");
     getNote(path)
       .then((note) => {
         setContent(note.content);
@@ -49,7 +55,35 @@ export function NoteViewPage() {
   return (
     <div className="note-view">
       <div className="note-editor">
-        <MarkdownEditor value={content} onChange={setContent} />
+        <div className="mode-toggle" role="tablist" aria-label="Editor mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "edit"}
+            className={mode === "edit" ? "btn btn-toggle is-active" : "btn btn-toggle"}
+            onClick={() => setMode("edit")}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "preview"}
+            className={
+              mode === "preview" ? "btn btn-toggle is-active" : "btn btn-toggle"
+            }
+            onClick={() => setMode("preview")}
+          >
+            Preview
+          </button>
+        </div>
+
+        {mode === "edit" ? (
+          <MarkdownEditor value={content} onChange={setContent} />
+        ) : (
+          <MarkdownPreview body={stripFrontmatter(content)} currentPath={path} />
+        )}
+
         <div className="note-editor-actions">
           <button
             type="button"

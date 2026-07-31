@@ -42,3 +42,14 @@ def test_put_invalid_suffix_returns_400(client: TestClient) -> None:
     response = client.put("/api/notes/note.txt", content="content")
 
     assert response.status_code == 400
+
+
+def test_put_malformed_frontmatter_returns_400_not_500(client: TestClient) -> None:
+    # Regression: typing directly into the frontmatter block used to crash
+    # this endpoint with an unhandled 500 instead of a clean 400.
+    response = client.put(
+        "/api/notes/a.md",
+        content="---\ntags: []Hello from the create-note test.\ntitle: a\n---\nBody.\n",
+    )
+
+    assert response.status_code == 400

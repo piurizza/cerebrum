@@ -23,7 +23,7 @@ Cerebrum is a **self-hosted web app**: one backend + one web frontend,
 deployed once and accessed from any device's browser. "Cross-device sync"
 is achieved simply by every device pointing at the same server — there is
 no CRDT, offline-first sync engine, or per-device local copy. This is a
-deliberate simplification; see [Known Gaps](#9-known-gaps--future-work).
+deliberate simplification; see [Known Gaps](#10-known-gaps--future-work).
 
 ## 2. Storage model
 
@@ -139,9 +139,9 @@ API calls.
   that note's path — the same table drives both `/api/graph` and
   `/api/notes/{path}/backlinks`.
 - A link to a nonexistent note is a valid edge to a "ghost" node
-  (Obsidian-style unresolved reference). Rendering ghost nodes distinctly
-  in the graph view is a future frontend concern, not addressed by the
-  scaffold.
+  (Obsidian-style unresolved reference), carrying `exists: false` on
+  `GraphNode` so the frontend can render and behave differently for it
+  (see [Feature roadmap](#9-feature-roadmap-user-stories)).
 
 ## 7. Tech stack
 
@@ -165,7 +165,10 @@ API calls.
 - **CodeMirror 6** (`@uiw/react-codemirror` + `@codemirror/lang-markdown`)
   for the markdown editor — purpose-built for markdown, the same editing
   engine Obsidian itself uses, lighter than Monaco and far more capable
-  than a bare `<textarea>`.
+  than a bare `<textarea>`. A rendered markdown preview with clickable
+  inter-note links, and a link-autocomplete picker while typing, are
+  planned on top of this (see [Feature roadmap](#9-feature-roadmap-user-stories));
+  the specific rendering/autocomplete libraries aren't chosen yet.
 - **react-force-graph** (2D canvas variant) for graph visualization —
   wraps d3-force physics with canvas rendering, zoom/pan, and node-click
   handling out of the box. Canvas rendering scales to hundreds of nodes
@@ -203,7 +206,71 @@ API calls.
 | `CEREBRUM_PORT` | compose | `8080` | host port for the frontend |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 
-## 9. Known gaps / future work
+## 9. Feature roadmap (user stories)
+
+Format: "the user should be able to...". Status reflects the scaffold as
+of this writing — update statuses as features land, and add new stories
+here as they're agreed, rather than letting them live only in chat/PR
+history.
+
+### Note management
+
+- [x] view/read a note
+- [x] edit a note's content and save changes
+- [ ] create a new note (pick a title/path, start writing)
+- [ ] delete a note
+- [ ] rename or move a note to a different path/folder
+- [ ] see when a note was created/last updated, surfaced in the UI
+
+### Organization & discovery
+
+- [x] browse all notes in a list
+- [ ] search notes by content (full-text, backed by the already-scaffolded
+      `notes_fts` table — see [Index/cache architecture](#4-indexcache-architecture))
+- [ ] filter notes by tag. **Scope decision: filtering only** — no
+      dedicated tags-browser page. Revisit only if filtering proves
+      insufficient in practice.
+- [x] see backlinks for the current note
+- [x] traverse the link graph visually
+- [x] click a graph node to jump to that note
+- [x] see broken/unresolved links distinctly in the graph (ghost nodes,
+      via `GraphNode.exists`)
+
+### Cross-referencing
+
+- [ ] see a rendered markdown preview with clickable links to other
+      notes, not just raw text in the editor
+- [ ] insert a link to another note while writing, via an
+      autocomplete/picker triggered while typing. The trigger UX may be
+      Obsidian-flavored (e.g. `[[`), but it must always insert a standard
+      markdown link (`[title](path.md)`) — never wikilink syntax (see
+      [Product vision](#1-product-vision)). Can be backed by the existing
+      `GET /api/notes` listing, filtered client-side; upgrade to the
+      full-text search endpoint once that exists.
+
+### Access
+
+- [x] access their vault from any device via a browser (self-hosted,
+      single server)
+
+### Editing experience
+
+- [ ] see whether they have unsaved changes
+- [ ] save via a keyboard shortcut (e.g. Cmd/Ctrl+S)
+
+### Attachments (later, unscheduled)
+
+- [ ] embed an image in a note
+- [ ] paste/upload an image into a note
+
+### Reliability
+
+- [x] notes stay valid plain markdown even if the app breaks (by design)
+- [ ] see edits made outside the app (e.g. vim, a sync tool) reflected
+      without restarting the server (tracked in
+      [Known gaps](#10-known-gaps--future-work) as the filesystem-watcher gap)
+
+## 10. Known gaps / future work
 
 - **No filesystem watcher.** Edits made to `.md` files outside the API
   (e.g. directly with `vim`, or synced in by another tool) aren't picked

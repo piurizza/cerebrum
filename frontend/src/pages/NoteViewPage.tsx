@@ -4,6 +4,7 @@ import { getNote, putNote } from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
 import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
+import { NotePathHeader } from "../components/Editor/NotePathHeader";
 import { stripFrontmatter } from "../lib/noteContent";
 
 type ViewMode = "edit" | "preview";
@@ -55,6 +56,7 @@ export function NoteViewPage() {
   return (
     <div className="note-view">
       <div className="note-editor">
+        <NotePathHeader path={path} />
         <div className="mode-toggle" role="tablist" aria-label="Editor mode">
           <button
             type="button"

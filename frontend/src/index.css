@@ -211,6 +211,26 @@ a {
   overflow: hidden;
 }
 
+.note-path-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.note-path {
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-subtle);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.btn-copy {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+}
+
 .mode-toggle {
   display: inline-flex;
   width: fit-content;

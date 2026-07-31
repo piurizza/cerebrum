@@ -94,44 +94,15 @@ def delete_note(vault_root: Path, path: str) -> None:
     file_path.unlink()
 
 
-def move_note(vault_root: Path, path: str, new_path: str) -> tuple[Note, list[str]]:
-    """Relocate a note on disk and keep markdown links pointing at it correct.
-
-    Rewrites the moved note's own outgoing relative links so they still
-    resolve to the same absolute targets (they're relative to its own
-    folder, which just changed), and repoints every OTHER note's links
-    that targeted the old path so they resolve to the new one instead.
-    A note with unreadable/malformed content is skipped (logged, not
-    fatal) rather than aborting the whole move -- see rebuild_index for
-    the same defensive pattern.
-
-    Returns the moved note and the vault-relative paths of any OTHER
-    notes whose link text was rewritten, so the caller can keep the
-    index in sync for those too.
-    """
-    source = resolve_note_path(vault_root, path)
-    destination = resolve_note_path(vault_root, new_path)
-
-    if not source.is_file():
-        raise NoteNotFoundError(path)
-    if destination.exists():
-        raise NoteAlreadyExistsError(new_path)
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    source.rename(destination)
-
-    raw_content = destination.read_text(encoding="utf-8")
-    parsed = parse_note(new_path, raw_content)
-    rebased_body = rebase_links(parsed.body, path, new_path)
-    if rebased_body != parsed.body:
-        parsed.body = rebased_body
-        parsed.updated = datetime.now(UTC)
-        raw_content = render_note(parsed)
-        destination.write_text(raw_content, encoding="utf-8")
-
+def _retarget_other_notes(
+    vault_root: Path, old_target: str, new_target: str
+) -> list[str]:
+    """Repoint every OTHER note's links that targeted `old_target` so they
+    resolve to `new_target` instead. Returns the vault-relative paths of
+    the notes that were actually rewritten."""
     retargeted: list[str] = []
     for other_path in iter_note_paths(vault_root):
-        if other_path == new_path:
+        if other_path == new_target:
             continue
         other_file = vault_root / other_path
         try:
@@ -143,13 +114,73 @@ def move_note(vault_root: Path, path: str, new_path: str) -> tuple[Note, list[st
             )
             continue
 
-        new_body = retarget_links(other_parsed.body, other_path, path, new_path)
+        new_body = retarget_links(other_parsed.body, other_path, old_target, new_target)
         if new_body == other_parsed.body:
             continue
         other_parsed.body = new_body
         other_parsed.updated = datetime.now(UTC)
         other_file.write_text(render_note(other_parsed), encoding="utf-8")
         retargeted.append(other_path)
+    return retargeted
+
+
+def move_note(
+    vault_root: Path, path: str, new_path: str, title: str | None = None
+) -> tuple[Note, list[str]]:
+    """Relocate a note on disk and keep markdown links pointing at it correct.
+
+    Rewrites the moved note's own outgoing relative links so they still
+    resolve to the same absolute targets (they're relative to its own
+    folder, which just changed), and repoints every OTHER note's links
+    that targeted the old path so they resolve to the new one instead.
+    A note with unreadable/malformed content is skipped (logged, not
+    fatal) rather than aborting the whole move -- see rebuild_index for
+    the same defensive pattern.
+
+    If `title` is given, the note's frontmatter `title` is also updated
+    as part of the same write -- this is the only way to rename a note's
+    displayed title (sidebar, graph) in step with its path. `new_path`
+    may equal `path`, in which case this is a title-only update with no
+    file relocation or link rewriting.
+
+    Returns the moved note and the vault-relative paths of any OTHER
+    notes whose link text was rewritten, so the caller can keep the
+    index in sync for those too.
+    """
+    source = resolve_note_path(vault_root, path)
+    destination = resolve_note_path(vault_root, new_path)
+    is_relocation = source != destination
+
+    if not source.is_file():
+        raise NoteNotFoundError(path)
+    if is_relocation and destination.exists():
+        raise NoteAlreadyExistsError(new_path)
+
+    if is_relocation:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(destination)
+
+    raw_content = destination.read_text(encoding="utf-8")
+    parsed = parse_note(new_path, raw_content)
+
+    changed = False
+    if is_relocation:
+        rebased_body = rebase_links(parsed.body, path, new_path)
+        if rebased_body != parsed.body:
+            parsed.body = rebased_body
+            changed = True
+    if title is not None and title != parsed.title:
+        parsed.title = title
+        changed = True
+
+    if changed:
+        parsed.updated = datetime.now(UTC)
+        raw_content = render_note(parsed)
+        destination.write_text(raw_content, encoding="utf-8")
+
+    retargeted = (
+        _retarget_other_notes(vault_root, path, new_path) if is_relocation else []
+    )
 
     return (
         Note(

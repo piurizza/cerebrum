@@ -30,6 +30,7 @@ router = APIRouter()
 
 class MoveNoteRequest(BaseModel):
     new_path: str
+    title: str | None = None
 
 
 @router.get("/notes", response_model=list[NoteMeta])
@@ -102,7 +103,7 @@ def move_note_endpoint(
     settings = get_settings()
     try:
         note, retargeted_paths = move_note(
-            settings.cerebrum_vault_path, path, body.new_path
+            settings.cerebrum_vault_path, path, body.new_path, title=body.title
         )
     except NoteNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Note not found") from exc

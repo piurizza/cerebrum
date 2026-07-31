@@ -15,14 +15,16 @@ export function BacklinksPanel({ path }: BacklinksPanelProps) {
   }, [path]);
 
   if (backlinks.length === 0) {
-    return <p>No backlinks yet.</p>;
+    return <p className="empty-hint">No backlinks yet.</p>;
   }
 
   return (
-    <ul>
+    <ul className="note-list">
       {backlinks.map((note) => (
         <li key={note.path}>
-          <Link to={`/notes/${encodeNotePath(note.path)}`}>{note.title}</Link>
+          <Link className="note-link" to={`/notes/${encodeNotePath(note.path)}`}>
+            {note.title}
+          </Link>
         </li>
       ))}
     </ul>

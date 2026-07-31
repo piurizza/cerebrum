@@ -1,10 +1,52 @@
 :root {
   color-scheme: light dark;
+
+  --bg: light-dark(#ffffff, #17181c);
+  --bg-sidebar: light-dark(#f7f7f9, #1c1d22);
+  --bg-subtle: light-dark(#eeeef1, #24252b);
+  --border: light-dark(#e2e2e6, #33343c);
+  --text: light-dark(#1a1a1e, #e7e7ea);
+  --text-muted: light-dark(#6b6b73, #9a9aa3);
+  --accent: light-dark(#3a5bd9, #7b93ff);
+  --accent-fg: #ffffff;
+  --danger: light-dark(#c0392b, #ff6b5b);
+  --danger-bg: light-dark(#fdecea, #3a2323);
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+h1,
+h2 {
+  color: var(--text);
+}
+
+h1 {
+  font-size: 1.25rem;
+  margin: 0 0 1rem;
+}
+
+h2 {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+}
+
+a {
+  color: var(--accent);
 }
 
 #root {
@@ -20,37 +62,105 @@ body {
   width: 260px;
   flex-shrink: 0;
   padding: 1rem;
-  border-right: 1px solid light-dark(#e5e4e7, #2e303a);
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
+}
+
+.app-nav {
+  display: flex;
+  margin-bottom: 1rem;
+}
+
+.app-nav a {
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.app-nav a:hover,
+.app-nav a.is-active {
+  background: var(--bg-subtle);
 }
 
 .app-main {
   flex: 1;
   min-width: 0;
-  padding: 1rem;
+  padding: 1.5rem;
 }
 
-.note-view {
+/* Buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--bg-subtle);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn-block {
   display: flex;
-  gap: 1rem;
-  height: 100%;
+  width: 100%;
+  margin-bottom: 1rem;
 }
 
-.note-editor {
-  flex: 1;
-  min-width: 0;
+/* Note browser */
+
+.note-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.15rem;
 }
 
-.note-backlinks {
-  width: 240px;
-  flex-shrink: 0;
+.note-link {
+  display: block;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.graph-view {
-  height: calc(100vh - 2rem);
+.note-link:hover {
+  background: var(--bg-subtle);
+}
+
+.note-link.is-active {
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 .new-note-form {
@@ -58,9 +168,87 @@ body {
   flex-direction: column;
   gap: 0.5rem;
   margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: var(--bg-subtle);
+  border-radius: var(--radius);
+}
+
+.new-note-form input {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
 }
 
 .new-note-actions {
   display: flex;
   gap: 0.5rem;
+}
+
+/* Note editor */
+
+.note-view {
+  display: flex;
+  gap: 1.5rem;
+  height: 100%;
+  align-items: flex-start;
+}
+
+.note-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.note-editor .cm-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.note-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.save-status {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.note-backlinks {
+  width: 240px;
+  flex-shrink: 0;
+  padding: 1rem;
+  background: var(--bg-subtle);
+  border-radius: var(--radius);
+}
+
+/* Graph view */
+
+.graph-view {
+  height: calc(100vh - 3rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Shared states */
+
+.empty-hint {
+  color: var(--text-muted);
+}
+
+.error-text {
+  color: var(--danger);
+  background: var(--danger-bg);
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
 }

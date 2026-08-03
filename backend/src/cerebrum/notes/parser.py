@@ -179,4 +179,10 @@ def render_note(parsed: ParsedNote) -> str:
 
     post = frontmatter.Post(parsed.body)
     post.metadata = metadata
-    return str(frontmatter.dumps(post))
+    # frontmatter.dumps() never leaves a trailing newline (it strips the
+    # body's trailing whitespace outright) -- for an empty/whitespace-only
+    # body this means NO newline at all after the closing "---", so any
+    # later edit appending text right at the end of the file merges into
+    # the delimiter line and breaks frontmatter detection on the next
+    # parse. Always end with exactly one newline instead.
+    return f"{frontmatter.dumps(post)}\n"

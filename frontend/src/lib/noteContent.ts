@@ -40,3 +40,30 @@ export function resolveLinkTarget(sourcePath: string, target: string): string | 
 export function stripFrontmatter(rawContent: string): string {
   return rawContent.replace(FRONTMATTER_PATTERN, "");
 }
+
+/**
+ * Compute the relative link text to write in `sourcePath` so it resolves
+ * to `targetPath` under the link-resolution rule (relative to the linking
+ * file's own directory) -- the insertion-side inverse of
+ * `resolveLinkTarget`. Mirrors backend/src/cerebrum/notes/parser.py's
+ * `_relative_link_text` (via `posixpath.relpath`).
+ */
+export function relativeLinkPath(sourcePath: string, targetPath: string): string {
+  const sourceDir = sourcePath.split("/").slice(0, -1);
+  const targetParts = targetPath.split("/");
+  const targetDir = targetParts.slice(0, -1);
+  const targetFilename = targetParts.at(-1) as string;
+
+  let commonLen = 0;
+  while (
+    commonLen < sourceDir.length &&
+    commonLen < targetDir.length &&
+    sourceDir[commonLen] === targetDir[commonLen]
+  ) {
+    commonLen++;
+  }
+
+  const upSegments = Array(sourceDir.length - commonLen).fill("..");
+  const downSegments = [...targetDir.slice(commonLen), targetFilename];
+  return [...upSegments, ...downSegments].join("/");
+}

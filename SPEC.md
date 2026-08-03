@@ -288,9 +288,15 @@ history.
       search box in the sidebar. Debounced (250ms) as-you-type, replacing
       the folder tree with a flat, relevance-ranked result list while a
       query is active; clearing the box restores the tree.
-- [ ] filter notes by tag. **Scope decision: filtering only** — no
-      dedicated tags-browser page. Revisit only if filtering proves
-      insufficient in practice.
+- [x] filter notes by tag. **Scope decision: filtering only** — no
+      dedicated tags-browser page. Purely client-side: tags are already
+      in every `NoteMeta` returned by `GET /api/notes`, so the sidebar
+      derives the distinct tag set and renders it as clickable pills;
+      clicking one filters the folder tree to notes carrying that tag
+      (click again to clear), no new API surface needed. Independent of
+      full-text search rather than combined with it -- the tag pills are
+      hidden while a search query is active, to keep the two filters from
+      producing confusing combined semantics for a first pass.
 - [x] see backlinks for the current note
 - [x] traverse the link graph visually
 - [x] click a graph node to jump to that note

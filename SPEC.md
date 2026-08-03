@@ -331,7 +331,11 @@ history.
 ### Editing experience
 
 - [x] see whether they have unsaved changes
-- [ ] save via a keyboard shortcut (e.g. Cmd/Ctrl+S)
+- [x] save via a keyboard shortcut (e.g. Cmd/Ctrl+S) -- a window-level
+      keydown listener on `NoteViewPage` (not a CodeMirror keymap, so it
+      fires regardless of where focus is on the page), calling
+      `preventDefault()` to suppress the browser's native save-page
+      dialog.
 
 ### Attachments (later, unscheduled)
 

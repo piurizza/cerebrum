@@ -16,6 +16,8 @@ export function NoteViewPage() {
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
   const [title, setTitle] = useState("");
+  const [created, setCreated] = useState<string | null>(null);
+  const [updated, setUpdated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<ViewMode>("edit");
@@ -29,6 +31,8 @@ export function NoteViewPage() {
         setContent(note.content);
         setSavedContent(note.content);
         setTitle(note.title);
+        setCreated(note.created);
+        setUpdated(note.updated);
       })
       .finally(() => setLoading(false));
   }, [path]);
@@ -39,6 +43,7 @@ export function NoteViewPage() {
       const note = await putNote(path, content);
       setSavedContent(note.content);
       setContent(note.content);
+      setUpdated(note.updated);
     } finally {
       setSaving(false);
     }
@@ -62,12 +67,15 @@ export function NoteViewPage() {
         <NotePathHeader
           path={path}
           title={title}
-          onRenamed={(updated) => {
-            setContent(updated.content);
-            setSavedContent(updated.content);
-            setTitle(updated.title);
-            if (updated.path !== path) {
-              navigate(`/notes/${encodeNotePath(updated.path)}`);
+          created={created}
+          updated={updated}
+          onRenamed={(updatedNote) => {
+            setContent(updatedNote.content);
+            setSavedContent(updatedNote.content);
+            setTitle(updatedNote.title);
+            setUpdated(updatedNote.updated);
+            if (updatedNote.path !== path) {
+              navigate(`/notes/${encodeNotePath(updatedNote.path)}`);
             }
           }}
           onDeleted={() => navigate("/")}

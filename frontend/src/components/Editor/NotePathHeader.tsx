@@ -1,12 +1,15 @@
 import { type FormEvent, useState } from "react";
 import { deleteNote, moveNote } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
+import { formatTimestamp } from "../../lib/formatDate";
 import type { Note } from "../../types/note";
 import { FolderPickerModal } from "../FolderPicker/FolderPickerModal";
 
 interface NotePathHeaderProps {
   path: string;
   title: string;
+  created: string | null;
+  updated: string | null;
   onRenamed: (updated: Note) => void;
   onDeleted: () => void;
 }
@@ -14,6 +17,8 @@ interface NotePathHeaderProps {
 export function NotePathHeader({
   path,
   title,
+  created,
+  updated,
   onRenamed,
   onDeleted,
 }: NotePathHeaderProps) {
@@ -178,22 +183,34 @@ export function NotePathHeader({
     );
   }
 
+  const createdLabel = formatTimestamp(created);
+  const updatedLabel = formatTimestamp(updated);
+
   return (
-    <div className="note-path-header">
-      <code className="note-path">{path}</code>
-      <button type="button" className="btn btn-copy" onClick={handleCopy}>
-        {copied ? "Copied!" : "Copy path"}
-      </button>
-      <button type="button" className="btn btn-copy" onClick={startRename}>
-        Rename
-      </button>
-      <button
-        type="button"
-        className="btn btn-copy btn-danger-outline"
-        onClick={() => setIsConfirmingDelete(true)}
-      >
-        Delete
-      </button>
-    </div>
+    <>
+      <div className="note-path-header">
+        <code className="note-path">{path}</code>
+        <button type="button" className="btn btn-copy" onClick={handleCopy}>
+          {copied ? "Copied!" : "Copy path"}
+        </button>
+        <button type="button" className="btn btn-copy" onClick={startRename}>
+          Rename
+        </button>
+        <button
+          type="button"
+          className="btn btn-copy btn-danger-outline"
+          onClick={() => setIsConfirmingDelete(true)}
+        >
+          Delete
+        </button>
+      </div>
+      {(createdLabel || updatedLabel) && (
+        <p className="note-meta">
+          {createdLabel && <span>Created {createdLabel}</span>}
+          {createdLabel && updatedLabel && <span className="note-meta-sep">·</span>}
+          {updatedLabel && <span>Updated {updatedLabel}</span>}
+        </p>
+      )}
+    </>
   );
 }

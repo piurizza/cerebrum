@@ -17,6 +17,7 @@ export function NoteBrowser() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<NoteMeta[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -49,7 +50,21 @@ export function NoteBrowser() {
     );
   }, [notes]);
 
-  const tree = useMemo(() => buildNoteTree(notes), [notes]);
+  const allTags = useMemo(() => {
+    const tags = new Set<string>();
+    for (const note of notes) {
+      for (const tag of note.tags) tags.add(tag);
+    }
+    return [...tags].sort();
+  }, [notes]);
+
+  const tagFilteredNotes = useMemo(
+    () =>
+      selectedTag ? notes.filter((note) => note.tags.includes(selectedTag)) : notes,
+    [notes, selectedTag],
+  );
+
+  const tree = useMemo(() => buildNoteTree(tagFilteredNotes), [tagFilteredNotes]);
   const searchResultNodes = useMemo(
     () => (results ?? []).map((note) => ({ type: "note" as const, note })),
     [results],
@@ -124,6 +139,20 @@ export function NoteBrowser() {
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
+      {results === null && allTags.length > 0 && (
+        <div className="tag-filter">
+          {allTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className={selectedTag === tag ? "tag-pill is-active" : "tag-pill"}
+              onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      )}
       {results !== null ? (
         searching ? (
           <p className="empty-hint">Searching...</p>
@@ -139,6 +168,8 @@ export function NoteBrowser() {
         )
       ) : notes.length === 0 ? (
         <p className="empty-hint">No notes yet.</p>
+      ) : tagFilteredNotes.length === 0 ? (
+        <p className="empty-hint">No notes tagged "{selectedTag}".</p>
       ) : (
         <NoteTreeList
           nodes={tree}

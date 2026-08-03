@@ -104,7 +104,7 @@ export function NoteViewPage() {
         </div>
 
         {mode === "edit" ? (
-          <MarkdownEditor value={content} onChange={setContent} />
+          <MarkdownEditor value={content} onChange={setContent} currentPath={path} />
         ) : (
           <MarkdownPreview body={stripFrontmatter(content)} currentPath={path} />
         )}

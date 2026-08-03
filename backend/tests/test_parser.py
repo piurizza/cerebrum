@@ -68,6 +68,23 @@ def test_render_note_roundtrips_through_parse_note() -> None:
     assert reparsed.body.strip() == "Body text."
 
 
+def test_render_note_separates_frontmatter_from_empty_body() -> None:
+    # Regression: an empty/whitespace-only body used to render with NO
+    # newline at all after the closing "---" (frontmatter.dumps() strips
+    # trailing content whitespace outright), so appending text right at
+    # the end of the file merged into the delimiter line and made the
+    # frontmatter unparseable on the next save.
+    parsed = parse_note("note.md", "---\ntitle: Empty\n---\n\n")
+
+    rendered = render_note(parsed)
+
+    assert rendered.endswith("---\n")
+    appended = f"{rendered}New content."
+    reparsed = parse_note("note.md", appended)
+    assert reparsed.title == "Empty"
+    assert reparsed.body == "New content."
+
+
 def test_parse_note_raises_on_malformed_frontmatter() -> None:
     # Regression: typing directly into the frontmatter block (e.g. right
     # after "tags: []" with no newline) used to crash write_note with an

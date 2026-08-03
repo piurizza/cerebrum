@@ -307,13 +307,21 @@ history.
 
 - [x] see a rendered markdown preview with clickable links to other
       notes, not just raw text in the editor
-- [ ] insert a link to another note while writing, via an
-      autocomplete/picker triggered while typing. The trigger UX may be
-      Obsidian-flavored (e.g. `[[`), but it must always insert a standard
-      markdown link (`[title](path.md)`) — never wikilink syntax (see
-      [Product vision](#1-product-vision)). Can be backed by the existing
-      `GET /api/notes` listing, filtered client-side; upgrade to the
-      full-text search endpoint once that exists.
+- [x] insert a link to another note while writing, via an
+      autocomplete/picker triggered while typing. The trigger UX is
+      Obsidian-flavored (`[[`, refined by whatever's typed after), but it
+      always inserts a standard markdown link (`[title](path.md)`) —
+      never wikilink syntax (see [Product vision](#1-product-vision)).
+      Backed by the already-loaded `notes` list (title/path substring
+      match), not the full-text search endpoint -- title/filename
+      matching is the right mental model for "which note do I mean," not
+      body-content search. `lib/noteContent.ts::relativeLinkPath` is the
+      insertion-side inverse of `resolveLinkTarget`, computing the target
+      path relative to the current note's own directory (mirrors the
+      backend's `_relative_link_text`). Implemented as a CodeMirror
+      `@codemirror/autocomplete` completion source
+      (`Editor/noteLinkCompletion.ts`) so it only activates after `[[`,
+      and its `apply` consumes an auto-closed trailing `]]` if present.
 
 ### Access
 

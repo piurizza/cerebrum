@@ -1,17 +1,40 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { encodeNotePath, putNote } from "../../api/client";
+import { encodeNotePath, putNote, searchNotes } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import { buildNoteTree } from "../../lib/noteTree";
+import type { NoteMeta } from "../../types/note";
 import { FolderPickerModal } from "../FolderPicker/FolderPickerModal";
 import { NoteTreeList } from "./NoteTreeList";
+
+const SEARCH_DEBOUNCE_MS = 250;
 
 export function NoteBrowser() {
   const { notes, error, refreshNotes } = useNotes();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<NoteMeta[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = window.setTimeout(() => {
+      searchNotes(trimmed)
+        .then(setResults)
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [query]);
 
   // Titles aren't unique -- two notes in different folders can share a
   // title. Only show the disambiguating path for titles that actually
@@ -27,6 +50,10 @@ export function NoteBrowser() {
   }, [notes]);
 
   const tree = useMemo(() => buildNoteTree(notes), [notes]);
+  const searchResultNodes = useMemo(
+    () => (results ?? []).map((note) => ({ type: "note" as const, note })),
+    [results],
+  );
 
   function toggleFolder(folderPath: string) {
     setCollapsedFolders((current) => {
@@ -90,7 +117,27 @@ export function NoteBrowser() {
           onCancel={() => setIsPickerOpen(false)}
         />
       )}
-      {notes.length === 0 ? (
+      <input
+        type="search"
+        className="search-input"
+        placeholder="Search notes..."
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {results !== null ? (
+        searching ? (
+          <p className="empty-hint">Searching...</p>
+        ) : results.length === 0 ? (
+          <p className="empty-hint">No matches for "{query.trim()}".</p>
+        ) : (
+          <NoteTreeList
+            nodes={searchResultNodes}
+            duplicateTitles={duplicateTitles}
+            collapsedFolders={collapsedFolders}
+            onToggleFolder={toggleFolder}
+          />
+        )
+      ) : notes.length === 0 ? (
         <p className="empty-hint">No notes yet.</p>
       ) : (
         <NoteTreeList

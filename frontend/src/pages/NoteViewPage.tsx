@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { encodeNotePath, getNote, putNote } from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
@@ -37,7 +37,7 @@ export function NoteViewPage() {
       .finally(() => setLoading(false));
   }, [path]);
 
-  async function handleSave() {
+  const handleSave = useCallback(async () => {
     setSaving(true);
     try {
       const note = await putNote(path, content);
@@ -47,7 +47,20 @@ export function NoteViewPage() {
     } finally {
       setSaving(false);
     }
-  }
+  }, [path, content]);
+
+  useEffect(() => {
+    if (!path) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      const isSaveShortcut =
+        (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
+      if (!isSaveShortcut) return;
+      event.preventDefault();
+      if (!saving) handleSave();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [path, saving, handleSave]);
 
   if (!path) {
     return (

@@ -232,7 +232,14 @@ history.
       one inline (just a path segment, no separate persisted "folder"
       entity -- see [Storage model](#2-storage-model)), and enter the
       file name, composing the final vault-relative path.
-- [ ] delete a note
+- [x] delete a note -- `DELETE /api/notes/{path}` already existed but
+      had no UI. Adds a "Delete" action next to Copy path/Rename with an
+      inline confirm step (no modal needed, unlike rename/create --
+      there's nothing to navigate or type), then routes back to `/`.
+      Other notes' links that pointed at the deleted note become broken
+      links (ghost nodes) rather than being rewritten or removed --
+      consistent with [Link resolution rule](#3-note-format), same as a
+      manually-deleted file would behave.
 - [x] rename or move a note to a different path/folder, **link-aware**:
       `POST /api/notes/{path}/move` physically relocates the file,
       preserves `created`, re-bases the moved note's own outgoing

@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { moveNote } from "../../api/client";
+import { deleteNote, moveNote } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import type { Note } from "../../types/note";
 import { FolderPickerModal } from "../FolderPicker/FolderPickerModal";
@@ -8,9 +8,15 @@ interface NotePathHeaderProps {
   path: string;
   title: string;
   onRenamed: (updated: Note) => void;
+  onDeleted: () => void;
 }
 
-export function NotePathHeader({ path, title, onRenamed }: NotePathHeaderProps) {
+export function NotePathHeader({
+  path,
+  title,
+  onRenamed,
+  onDeleted,
+}: NotePathHeaderProps) {
   const { notes, refreshNotes } = useNotes();
   const [copied, setCopied] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -19,6 +25,9 @@ export function NotePathHeader({ path, title, onRenamed }: NotePathHeaderProps) 
   const [newTitle, setNewTitle] = useState(title);
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function handleCopy() {
     await navigator.clipboard.writeText(path);
@@ -71,6 +80,49 @@ export function NotePathHeader({ path, title, onRenamed }: NotePathHeaderProps) 
       setRenameError(String(err));
       setRenaming(false);
     }
+  }
+
+  async function handleDelete() {
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await deleteNote(path);
+    } catch (err) {
+      setDeleteError(String(err));
+      setDeleting(false);
+      return;
+    }
+    refreshNotes();
+    onDeleted();
+  }
+
+  if (isConfirmingDelete) {
+    return (
+      <div className="note-path-header delete-confirm">
+        <span>Delete this note? This can't be undone.</span>
+        <button
+          type="button"
+          className="btn btn-danger"
+          onClick={handleDelete}
+          disabled={deleting}
+        >
+          {deleting ? "Deleting..." : "Delete"}
+        </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setIsConfirmingDelete(false)}
+          disabled={deleting}
+        >
+          Cancel
+        </button>
+        {deleteError && (
+          <p className="error-text rename-error" role="alert">
+            {deleteError}
+          </p>
+        )}
+      </div>
+    );
   }
 
   if (isRenaming) {
@@ -134,6 +186,13 @@ export function NotePathHeader({ path, title, onRenamed }: NotePathHeaderProps) 
       </button>
       <button type="button" className="btn btn-copy" onClick={startRename}>
         Rename
+      </button>
+      <button
+        type="button"
+        className="btn btn-copy btn-danger-outline"
+        onClick={() => setIsConfirmingDelete(true)}
+      >
+        Delete
       </button>
     </div>
   );

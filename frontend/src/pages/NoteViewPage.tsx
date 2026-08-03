@@ -70,6 +70,7 @@ export function NoteViewPage() {
               navigate(`/notes/${encodeNotePath(updated.path)}`);
             }
           }}
+          onDeleted={() => navigate("/")}
         />
         <div className="mode-toggle" role="tablist" aria-label="Editor mode">
           <button

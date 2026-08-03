@@ -126,6 +126,25 @@ a {
   filter: brightness(1.08);
 }
 
+.btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--accent-fg);
+}
+
+.btn-danger:hover {
+  filter: brightness(1.08);
+}
+
+.btn-danger-outline {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.btn-danger-outline:hover {
+  background: var(--danger-bg);
+}
+
 .btn-block {
   display: flex;
   width: 100%;
@@ -437,6 +456,12 @@ a {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.delete-confirm span {
+  font-size: 0.9rem;
+  color: var(--text);
 }
 
 .note-path {

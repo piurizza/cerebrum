@@ -260,7 +260,12 @@ history.
       the new title is reflected immediately in the sidebar and the
       graph (both read `title` from the index, refreshed as part of the
       same move/rename request).
-- [ ] see when a note was created/last updated, surfaced in the UI
+- [x] see when a note was created/last updated, surfaced in the UI --
+      `Note.created`/`.updated` (already returned by the API, previously
+      unused by the frontend) rendered as a muted line below the path
+      header, formatted with the browser's locale/timezone via
+      `Intl.DateTimeFormat` (`lib/formatDate.ts`). Updates live after a
+      save or a rename, since both return the new `updated` timestamp.
 - [x] see the note's own vault-relative path, not just its title -- two
       notes can share a title (e.g. two different `CAD.md` notes in
       different folders), and the path is what you actually need to

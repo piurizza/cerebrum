@@ -459,6 +459,18 @@ a {
   flex-wrap: wrap;
 }
 
+.note-meta {
+  display: flex;
+  gap: 0.4rem;
+  margin: -0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.note-meta-sep {
+  opacity: 0.6;
+}
+
 .delete-confirm span {
   font-size: 0.9rem;
   color: var(--text);

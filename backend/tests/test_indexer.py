@@ -7,7 +7,7 @@ import pytest
 
 from cerebrum.graph.service import get_backlinks, get_graph
 from cerebrum.index import indexer
-from cerebrum.index.db import list_notes, search_notes
+from cerebrum.index.db import list_notes
 from cerebrum.index.indexer import rebuild_index, remove_note, upsert_note
 from cerebrum.notes.service import write_note
 
@@ -149,57 +149,3 @@ def test_rebuild_index_reprocesses_changed_note(
 
     notes = list_notes(db)
     assert notes[0].title == "New"
-
-
-def test_search_notes_matches_body_content(vault: Path, db: sqlite3.Connection) -> None:
-    write_note(vault, "a.md", "---\ntitle: Recipe\n---\nHow to bake bread.\n")
-    write_note(vault, "b.md", "---\ntitle: Travel\n---\nNotes about Japan.\n")
-    upsert_note(db, vault, "a.md")
-    upsert_note(db, vault, "b.md")
-
-    results = search_notes(db, "bread")
-
-    assert [note.path for note in results] == ["a.md"]
-
-
-def test_search_notes_matches_title(vault: Path, db: sqlite3.Connection) -> None:
-    write_note(vault, "a.md", "---\ntitle: Recipe\n---\nBody.\n")
-    upsert_note(db, vault, "a.md")
-
-    assert [note.path for note in search_notes(db, "Recipe")] == ["a.md"]
-
-
-def test_search_notes_is_prefix_match(vault: Path, db: sqlite3.Connection) -> None:
-    write_note(vault, "a.md", "---\ntitle: Recipe\n---\nBaking instructions.\n")
-    upsert_note(db, vault, "a.md")
-
-    assert [note.path for note in search_notes(db, "bak")] == ["a.md"]
-
-
-def test_search_notes_requires_all_terms(vault: Path, db: sqlite3.Connection) -> None:
-    write_note(vault, "a.md", "---\ntitle: A\n---\nbread and butter.\n")
-    write_note(vault, "b.md", "---\ntitle: B\n---\njust bread.\n")
-    upsert_note(db, vault, "a.md")
-    upsert_note(db, vault, "b.md")
-
-    assert [note.path for note in search_notes(db, "bread butter")] == ["a.md"]
-
-
-def test_search_notes_empty_query_returns_nothing(
-    vault: Path, db: sqlite3.Connection
-) -> None:
-    write_note(vault, "a.md", "content")
-    upsert_note(db, vault, "a.md")
-
-    assert search_notes(db, "") == []
-    assert search_notes(db, "   ") == []
-
-
-def test_search_notes_ignores_deleted_notes(
-    vault: Path, db: sqlite3.Connection
-) -> None:
-    write_note(vault, "a.md", "---\ntitle: Recipe\n---\nBread.\n")
-    upsert_note(db, vault, "a.md")
-    remove_note(db, "a.md")
-
-    assert search_notes(db, "bread") == []

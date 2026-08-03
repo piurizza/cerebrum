@@ -151,19 +151,6 @@ a {
   margin-bottom: 1rem;
 }
 
-.search-input {
-  display: block;
-  width: 100%;
-  padding: 0.45rem 0.6rem;
-  margin-bottom: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 0.9rem;
-}
-
 /* Note browser */
 
 .note-list {

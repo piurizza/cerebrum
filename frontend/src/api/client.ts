@@ -52,7 +52,3 @@ export function getGraph(): Promise<GraphResponse> {
 export function getBacklinks(path: string): Promise<NoteMeta[]> {
   return request<NoteMeta[]>(`/notes/${encodeNotePath(path)}/backlinks`);
 }
-
-export function searchNotes(query: string): Promise<NoteMeta[]> {
-  return request<NoteMeta[]>(`/search?q=${encodeURIComponent(query)}`);
-}

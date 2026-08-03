@@ -127,6 +127,7 @@ All endpoints under `/api`.
 | POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's markdown links that pointed at it; `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
+| GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |
 
 `{path:path}` uses FastAPI's path converter since relative vault paths
 contain `/`. Clients must URL-encode path segments appropriately — this is
@@ -280,8 +281,13 @@ history.
 - [x] browse all notes grouped in a collapsible folder tree mirroring
       their vault paths (folders sort before notes, alphabetical within
       each level; expand/collapse state is per-session, not persisted)
-- [ ] search notes by content (full-text, backed by the already-scaffolded
-      `notes_fts` table — see [Index/cache architecture](#4-indexcache-architecture))
+- [x] search notes by content (full-text, backed by the already-scaffolded
+      `notes_fts` table — see [Index/cache architecture](#4-indexcache-architecture)).
+      `notes_fts` was already kept in sync on every upsert/delete; this
+      only needed `GET /api/search` (`index/db.py::search_notes`) plus a
+      search box in the sidebar. Debounced (250ms) as-you-type, replacing
+      the folder tree with a flat, relevance-ranked result list while a
+      query is active; clearing the box restores the tree.
 - [ ] filter notes by tag. **Scope decision: filtering only** — no
       dedicated tags-browser page. Revisit only if filtering proves
       insufficient in practice.

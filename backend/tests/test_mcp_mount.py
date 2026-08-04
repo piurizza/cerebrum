@@ -5,68 +5,45 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from cerebrum.auth import STUB_VALID_CREDENTIAL
 from cerebrum.main import create_app
 from cerebrum.settings import get_settings
+from tests.mcp_test_support import INITIALIZE_PAYLOAD, MCP_HEADERS, mcp_test_client
 
-_INITIALIZE_PAYLOAD = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {
-        "protocolVersion": "2025-06-18",
-        "capabilities": {},
-        "clientInfo": {"name": "test-client", "version": "1.0"},
-    },
+_AUTHED_MCP_HEADERS = {
+    **MCP_HEADERS,
+    "Authorization": f"Bearer {STUB_VALID_CREDENTIAL}",
 }
-_MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 
 
 def test_mcp_mount_responds_to_handshake(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
-    get_settings.cache_clear()
-    app = create_app()
-    try:
-        with TestClient(app) as client:
-            response = client.post(
-                "/api/mcp", json=_INITIALIZE_PAYLOAD, headers=_MCP_HEADERS
-            )
-            assert response.status_code == 200
-    finally:
-        get_settings.cache_clear()
+    # Auth (U5) now gates this mount; stub-auth is opted in here since this
+    # test's own concern is the mount/handshake, not auth (see test_mcp_auth.py).
+    with mcp_test_client(vault, monkeypatch, allow_stub_auth=True) as client:
+        response = client.post(
+            "/api/mcp", json=INITIALIZE_PAYLOAD, headers=_AUTHED_MCP_HEADERS
+        )
+        assert response.status_code == 200
 
 
 def test_existing_rest_routes_unaffected_by_mcp_mount(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
-    get_settings.cache_clear()
-    app = create_app()
-    try:
-        with TestClient(app) as client:
-            assert client.get("/api/health").status_code == 200
-            assert client.get("/api/notes").status_code == 200
-    finally:
-        get_settings.cache_clear()
+    with mcp_test_client(vault, monkeypatch) as client:
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/notes").status_code == 200
 
 
 def test_mcp_mount_absent_when_disabled(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
     monkeypatch.setenv("MCP_ENABLED", "false")
-    get_settings.cache_clear()
-    app = create_app()
-    try:
-        with TestClient(app) as client:
-            response = client.post(
-                "/api/mcp", json=_INITIALIZE_PAYLOAD, headers=_MCP_HEADERS
-            )
-            assert response.status_code == 404
-            assert client.get("/api/health").status_code == 200
-    finally:
-        get_settings.cache_clear()
+    with mcp_test_client(vault, monkeypatch) as client:
+        response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=MCP_HEADERS)
+        assert response.status_code == 404
+        assert client.get("/api/health").status_code == 200
 
 
 def test_lifespan_teardown_on_startup_failure(
@@ -99,15 +76,9 @@ def test_repeated_create_app_construction_has_no_state_leakage(
     process, exercising the mount/lifecycle quirks KTD3 cites from upstream
     FastMCP issues under repeated-construction load a full suite run
     actually produces."""
-    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
-    get_settings.cache_clear()
-    try:
-        for _ in range(3):
-            app = create_app()
-            with TestClient(app) as client:
-                response = client.post(
-                    "/api/mcp", json=_INITIALIZE_PAYLOAD, headers=_MCP_HEADERS
-                )
-                assert response.status_code == 200
-    finally:
-        get_settings.cache_clear()
+    for _ in range(3):
+        with mcp_test_client(vault, monkeypatch, allow_stub_auth=True) as client:
+            response = client.post(
+                "/api/mcp", json=INITIALIZE_PAYLOAD, headers=_AUTHED_MCP_HEADERS
+            )
+            assert response.status_code == 200

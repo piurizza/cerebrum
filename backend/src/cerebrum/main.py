@@ -1,31 +1,55 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastmcp.server.http import StarletteWithLifespan
 
 from cerebrum.api.router import api_router
 from cerebrum.index.db import connect
 from cerebrum.index.indexer import rebuild_index
+from cerebrum.mcp.server import create_mcp_server
 from cerebrum.settings import get_settings
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    settings = get_settings()
-    settings.cerebrum_vault_path.mkdir(parents=True, exist_ok=True)
-    app.state.db = connect(settings.index_path)
-    rebuild_index(app.state.db, settings.cerebrum_vault_path)
-    yield
-    app.state.db.close()
+def _make_lifespan(
+    mcp_app: StarletteWithLifespan | None,
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        settings = get_settings()
+        async with AsyncExitStack() as stack:
+            settings.cerebrum_vault_path.mkdir(parents=True, exist_ok=True)
+            app.state.db = connect(settings.index_path)
+            stack.callback(app.state.db.close)
+            rebuild_index(app.state.db, settings.cerebrum_vault_path)
+
+            # FastMCP's ASGI sub-app has its own lifespan (managing its
+            # internal task group/session manager) that is never invoked
+            # just by being Mount()-ed -- it must be explicitly entered
+            # here, through the same AsyncExitStack as the db connection,
+            # so both tear down cleanly (in LIFO order) if startup fails
+            # partway through (KTD3).
+            if mcp_app is not None:
+                await stack.enter_async_context(mcp_app.lifespan(mcp_app))
+
+            yield
+
+    return lifespan
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+    mcp_app: StarletteWithLifespan | None = None
+    if settings.mcp_enabled:
+        mcp = create_mcp_server()
+        mcp_app = mcp.http_app(path="/")
+
+    app = FastAPI(title=settings.app_name, lifespan=_make_lifespan(mcp_app))
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -34,6 +58,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(api_router, prefix="/api")
+
+    if mcp_app is not None:
+        # Own prefix (KTD2): `router.py`'s notes-catch-all route-ordering
+        # hazard only applies within `api_router`'s own registration order --
+        # a separate `Mount()` at a disjoint prefix sidesteps that class of
+        # collision entirely rather than adding a new instance of it.
+        app.mount("/api/mcp", mcp_app)
+
     return app
 
 

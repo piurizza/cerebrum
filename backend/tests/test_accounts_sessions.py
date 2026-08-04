@@ -3,15 +3,22 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sqlite3
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import jwt
 import pytest
 
-from cerebrum.accounts.service import User, register_account
-from cerebrum.accounts.sessions import issue_session
+from cerebrum.accounts.service import (
+    InvalidTokenError,
+    TokenReuseDetectedError,
+    User,
+    register_account,
+)
+from cerebrum.accounts.sessions import issue_session, refresh_session
 from cerebrum.auth_db import connect
 from cerebrum.settings import get_settings
 
@@ -118,3 +125,155 @@ def test_issue_session_generates_distinct_refresh_tokens_and_families(
 
     rows = auth_db.execute("SELECT family_id FROM refresh_tokens").fetchall()
     assert len({row["family_id"] for row in rows}) == 2
+
+
+def _insert_expired_refresh_token(
+    auth_db: sqlite3.Connection, user_id: int, token: str
+) -> None:
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires_at = datetime.now(UTC) - timedelta(days=1)
+    with auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
+            VALUES (?, ?, 'family-1', ?)
+            """,
+            (user_id, token_hash, expires_at.isoformat()),
+        )
+
+
+def test_refresh_session_with_valid_token_returns_new_access_and_refresh_tokens(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user = _bootstrap_admin(auth_db)
+    _, refresh_token = issue_session(user, auth_db)
+
+    new_access_token, new_refresh_token = refresh_session(refresh_token, auth_db)
+
+    settings = get_settings()
+    payload = jwt.decode(
+        new_access_token,
+        settings.auth_jwt_secret.get_secret_value(),
+        algorithms=["HS256"],
+    )
+    assert payload["sub"] == str(user.id)
+    assert new_refresh_token != refresh_token
+
+
+def test_refresh_session_rotation_persists_new_token_under_same_family(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user = _bootstrap_admin(auth_db)
+    _, refresh_token = issue_session(user, auth_db)
+    original_row = auth_db.execute("SELECT family_id FROM refresh_tokens").fetchone()
+
+    _, new_refresh_token = refresh_session(refresh_token, auth_db)
+
+    new_token_hash = hashlib.sha256(new_refresh_token.encode("utf-8")).hexdigest()
+    new_row = auth_db.execute(
+        """
+        SELECT user_id, family_id, revoked_at FROM refresh_tokens
+        WHERE token_hash = ?
+        """,
+        (new_token_hash,),
+    ).fetchone()
+    assert new_row is not None
+    assert new_row["user_id"] == user.id
+    assert new_row["family_id"] == original_row["family_id"]
+    assert new_row["revoked_at"] is None
+
+
+def test_refresh_session_reusing_the_old_token_after_rotation_fails(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user = _bootstrap_admin(auth_db)
+    _, refresh_token = issue_session(user, auth_db)
+
+    refresh_session(refresh_token, auth_db)
+
+    with pytest.raises(TokenReuseDetectedError):
+        refresh_session(refresh_token, auth_db)
+
+
+def test_refresh_session_reuse_revokes_the_entire_family_including_the_rotated_token(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user = _bootstrap_admin(auth_db)
+    _, refresh_token = issue_session(user, auth_db)
+
+    _, rotated_refresh_token = refresh_session(refresh_token, auth_db)
+
+    # Reusing the now-dead original token detects theft and burns every
+    # still-valid token in the family -- including the one issued by the
+    # legitimate rotation above.
+    with pytest.raises(TokenReuseDetectedError):
+        refresh_session(refresh_token, auth_db)
+
+    with pytest.raises((InvalidTokenError, TokenReuseDetectedError)):
+        refresh_session(rotated_refresh_token, auth_db)
+
+
+def test_concurrent_refresh_with_the_same_token_only_one_succeeds(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user = _bootstrap_admin(auth_db)
+    _, refresh_token = issue_session(user, auth_db)
+
+    outcomes: list[tuple[str, object]] = [("", None), ("", None)]
+
+    def _run(index: int) -> None:
+        try:
+            result = refresh_session(refresh_token, auth_db)
+            outcomes[index] = ("ok", result)
+        except Exception as exc:  # noqa: BLE001 -- captured for inspection
+            outcomes[index] = ("error", exc)
+
+    threads = [
+        threading.Thread(target=_run, args=(0,)),
+        threading.Thread(target=_run, args=(1,)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    statuses = [outcome[0] for outcome in outcomes]
+    assert statuses.count("ok") == 1
+    assert statuses.count("error") == 1
+    (_, error) = next(outcome for outcome in outcomes if outcome[0] == "error")
+    assert isinstance(error, TokenReuseDetectedError)
+
+    # Not two independently-issued sibling tokens: the loser's failure
+    # revoked the whole family, including the winner's freshly-rotated
+    # token.
+    (_, winner_result) = next(outcome for outcome in outcomes if outcome[0] == "ok")
+    _, winner_refresh_token = cast("tuple[str, str]", winner_result)
+    with pytest.raises((InvalidTokenError, TokenReuseDetectedError)):
+        refresh_session(winner_refresh_token, auth_db)
+
+
+def _refresh_token_count(auth_db: sqlite3.Connection) -> int:
+    row = auth_db.execute("SELECT COUNT(*) AS n FROM refresh_tokens").fetchone()
+    return cast(int, row["n"])
+
+
+def test_refresh_session_with_expired_token_fails_and_issues_nothing(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user = _bootstrap_admin(auth_db)
+    _insert_expired_refresh_token(auth_db, user.id, "expired-token")
+    tokens_before = _refresh_token_count(auth_db)
+
+    with pytest.raises(InvalidTokenError):
+        refresh_session("expired-token", auth_db)
+
+    assert _refresh_token_count(auth_db) == tokens_before
+
+
+def test_refresh_session_with_unknown_token_fails(
+    auth_db: sqlite3.Connection,
+) -> None:
+    _bootstrap_admin(auth_db)
+
+    with pytest.raises(InvalidTokenError):
+        refresh_session("no-such-token-ever-issued", auth_db)

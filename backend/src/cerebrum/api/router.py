@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from cerebrum.api import graph, notes, search
+from cerebrum.api import graph, notes, search, tokens
 from cerebrum.api.deps import get_current_identity
 
 # `dependencies=[Depends(get_current_identity)]` makes every route included
@@ -19,3 +19,7 @@ api_router.include_router(search.router)
 # generic route swallows the request first (Starlette matches in order).
 api_router.include_router(graph.router)
 api_router.include_router(notes.router)
+# No route-ordering hazard with `/tokens` vs. any of the above (no shared
+# path prefix, unlike graph.router/notes.router's `/notes/{path:path}`
+# collision above) -- inclusion order here doesn't matter.
+api_router.include_router(tokens.router)

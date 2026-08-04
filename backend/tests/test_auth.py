@@ -11,6 +11,7 @@ import jwt
 import pytest
 from fastapi import FastAPI
 
+from cerebrum.accounts.tokens import create_api_token
 from cerebrum.auth import AuthenticationError, verify_credential
 from cerebrum.auth_db import connect
 from cerebrum.mcp.auth import SharedFunctionTokenVerifier
@@ -111,6 +112,61 @@ def test_verify_credential_rejects_expired_token(auth_db: sqlite3.Connection) ->
 
     with pytest.raises(AuthenticationError):
         asyncio.run(verify_credential(token, auth_db))
+
+
+def test_verify_credential_accepts_valid_api_token(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user_id = _insert_user(auth_db)
+    token, _meta = create_api_token(user_id, "laptop", auth_db)
+
+    subject = asyncio.run(verify_credential(token, auth_db))
+
+    assert subject == str(user_id)
+
+
+def test_verify_credential_rejects_revoked_api_token(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user_id = _insert_user(auth_db)
+    token, meta = create_api_token(user_id, "laptop", auth_db)
+    with auth_db:
+        auth_db.execute(
+            "UPDATE api_tokens SET revoked_at = datetime('now') WHERE id = ?",
+            (meta.id,),
+        )
+
+    with pytest.raises(AuthenticationError):
+        asyncio.run(verify_credential(token, auth_db))
+
+
+def test_verify_credential_rejects_api_token_for_deactivated_user(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user_id = _insert_user(auth_db, is_active=False)
+    token, _meta = create_api_token(user_id, "laptop", auth_db)
+
+    with pytest.raises(AuthenticationError):
+        asyncio.run(verify_credential(token, auth_db))
+
+
+def test_verify_credential_updates_last_used_at_on_api_token_success(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user_id = _insert_user(auth_db)
+    token, meta = create_api_token(user_id, "laptop", auth_db)
+
+    before = auth_db.execute(
+        "SELECT last_used_at FROM api_tokens WHERE id = ?", (meta.id,)
+    ).fetchone()
+    assert before["last_used_at"] is None
+
+    asyncio.run(verify_credential(token, auth_db))
+
+    after = auth_db.execute(
+        "SELECT last_used_at FROM api_tokens WHERE id = ?", (meta.id,)
+    ).fetchone()
+    assert after["last_used_at"] is not None
 
 
 def test_token_verifier_accepts_valid_credential(

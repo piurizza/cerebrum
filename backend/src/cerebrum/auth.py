@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
+from datetime import UTC, datetime
 
 import jwt
 
@@ -32,14 +34,16 @@ async def verify_credential(credential: str | None, auth_db: sqlite3.Connection)
     The extra `users.is_active` lookup below closes that gap on every call
     rather than merely bounding it to the TTL window.
 
-    Personal API tokens (a second credential shape meant to share this
-    same interface, hashed and looked up against the `api_tokens` table)
-    are not wired up yet -- that's a later unit. For now, any credential
-    that doesn't verify as a live, active-user JWT falls straight through
-    to `AuthenticationError` below rather than attempting an api_tokens
-    lookup; the early `return` on JWT success leaves room for a later unit
-    to add an `else` branch here cleanly instead of restructuring this
-    function.
+    U6: personal API tokens are the second credential shape this function
+    verifies. A credential that fails JWT decoding (`except
+    jwt.PyJWTError` below) is not immediately rejected -- it falls through
+    to `_verify_api_token()`, an opaque-token hash lookup against
+    `api_tokens` (see `accounts/tokens.py`'s `create_api_token()` for how
+    those are minted). JWT decode failure is the right signal to try this
+    second path on: a personal API token (`cbm_pat_...`, from
+    `secrets.token_urlsafe`) is never valid base64url-JWT-with-dots shape
+    by construction, so there's no ambiguity about which branch a given
+    credential belongs to.
 
     Design note on the `auth_db` parameter (added in U3): this function
     previously took only `credential`, when it was a fixed-sentinel stub
@@ -67,14 +71,13 @@ async def verify_credential(credential: str | None, auth_db: sqlite3.Connection)
             settings.auth_jwt_secret.get_secret_value(),
             algorithms=["HS256"],
         )
-    except jwt.PyJWTError as exc:
-        # Not a valid/current/correctly-signed access-token JWT. A later
-        # unit adds a second branch here (an `else`, not a rewrite of this
-        # one) that falls through to a personal-API-token hash lookup
-        # against `api_tokens` instead of rejecting outright -- that
-        # table has no wiring for authentication yet, so this unit does
-        # not attempt it.
-        raise AuthenticationError("invalid credential") from exc
+    except jwt.PyJWTError:
+        # Not a valid/current/correctly-signed access-token JWT -- fall
+        # through to the personal-API-token path instead of rejecting
+        # outright (see this function's docstring). `_verify_api_token()`
+        # raises its own `AuthenticationError` on failure, so nothing more
+        # is needed in this branch.
+        return _verify_api_token(credential, auth_db)
 
     user_id = payload.get("sub")
     # Locked even though it's a single read: sqlite3's Connection object is
@@ -91,3 +94,43 @@ async def verify_credential(credential: str | None, auth_db: sqlite3.Connection)
         raise AuthenticationError("invalid credential")
 
     return str(user_id)
+
+
+def _verify_api_token(credential: str, auth_db: sqlite3.Connection) -> str:
+    """The personal-API-token half of `verify_credential()` (U6): hash
+    `credential` and look it up against `api_tokens`, joined to `users` so
+    a deactivated account's tokens stop working immediately (R4) rather
+    than staying valid until some separate expiry -- API tokens have no
+    expiry column at all (they're long-lived by design, R6), so this
+    `is_active` check is the *only* thing that can invalidate one short of
+    an explicit revoke.
+
+    Two separate locked sections, not one: checking validity and recording
+    `last_used_at` have no atomicity requirement between them (unlike
+    `accounts/sessions.py`'s refresh-token rotation, which genuinely needs
+    one atomic statement to prevent a fork) -- a `last_used_at` update
+    that's a few requests stale under concurrent use is harmless.
+    """
+    token_hash = hashlib.sha256(credential.encode("utf-8")).hexdigest()
+    with auth_write_lock:
+        row = auth_db.execute(
+            """
+            SELECT api_tokens.id AS token_id, api_tokens.user_id AS user_id,
+                   users.is_active AS is_active
+            FROM api_tokens
+            JOIN users ON users.id = api_tokens.user_id
+            WHERE api_tokens.token_hash = ? AND api_tokens.revoked_at IS NULL
+            """,
+            (token_hash,),
+        ).fetchone()
+
+    if row is None or not row["is_active"]:
+        raise AuthenticationError("invalid credential")
+
+    with auth_write_lock, auth_db:
+        auth_db.execute(
+            "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
+            (datetime.now(UTC).isoformat(), row["token_id"]),
+        )
+
+    return str(row["user_id"])

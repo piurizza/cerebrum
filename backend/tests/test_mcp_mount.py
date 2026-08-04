@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -49,10 +50,15 @@ def test_mcp_mount_absent_when_disabled(
 def test_lifespan_teardown_on_startup_failure(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """If startup fails partway through (e.g. `rebuild_index()` raises), both
-    the db connection and the FastMCP session manager must be torn down
-    cleanly -- exercises the shared `AsyncExitStack`'s unwind, not just the
-    happy path (KTD3)."""
+    """If startup fails partway through (`rebuild_index()` raises, which
+    `main.py` deliberately runs after the MCP session manager is entered --
+    see the ordering comment there), both the db connection and the FastMCP
+    session manager must be torn down cleanly -- exercises the shared
+    `AsyncExitStack`'s unwind through an already-entered MCP context, not
+    just the happy path (KTD3). Asserted concretely: a closed
+    `sqlite3.Connection` raises on any further use, so a successful raise
+    here proves `db.close()` actually ran, not just that the exception
+    propagated."""
     monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
     get_settings.cache_clear()
 
@@ -62,8 +68,19 @@ def test_lifespan_teardown_on_startup_failure(
     monkeypatch.setattr("cerebrum.main.rebuild_index", _boom)
     app = create_app()
     try:
-        with pytest.raises(RuntimeError, match="boom"), TestClient(app):
+        # Once the MCP session manager is entered, its own anyio task group
+        # wraps a startup failure in an ExceptionGroup rather than letting
+        # the plain RuntimeError propagate -- itself confirmation that this
+        # failure now occurs inside that context, not before it.
+        with pytest.raises((RuntimeError, ExceptionGroup)) as exc_info, TestClient(app):
             pass
+        raised = exc_info.value
+        if isinstance(raised, ExceptionGroup):
+            assert any("boom" in str(exc) for exc in raised.exceptions)
+        else:
+            assert "boom" in str(raised)
+        with pytest.raises(sqlite3.ProgrammingError):
+            app.state.db.execute("SELECT 1")
     finally:
         get_settings.cache_clear()
 

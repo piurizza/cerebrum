@@ -22,7 +22,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.cerebrum_vault_path.mkdir(parents=True, exist_ok=True)
         app.state.db = connect(settings.index_path)
         stack.callback(app.state.db.close)
-        rebuild_index(app.state.db, settings.cerebrum_vault_path)
 
         # FastMCP's ASGI sub-app has its own lifespan (managing its internal
         # task group/session manager) that is never invoked just by being
@@ -33,9 +32,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # needs `app` to already exist, which happens after `FastAPI(...)`
         # is constructed with this `lifespan` reference, so the mount can't
         # be captured by this function's closure at definition time.
+        #
+        # Entered before rebuild_index() (not after) so that a rebuild_index
+        # failure -- this lifespan's only other failure-prone step -- exercises
+        # the AsyncExitStack's unwind through an *already-entered* MCP session
+        # manager, not just the db connection; the two steps don't depend on
+        # each other, so this ordering is free.
         mcp_app: StarletteWithLifespan | None = getattr(app.state, "mcp_app", None)
         if mcp_app is not None:
             await stack.enter_async_context(mcp_app.lifespan(mcp_app))
+
+        rebuild_index(app.state.db, settings.cerebrum_vault_path)
 
         yield
 

@@ -9,7 +9,7 @@ from fastmcp.exceptions import ToolError
 from cerebrum.index.db import list_notes as list_notes_in_index
 from cerebrum.index.db import search_notes as search_notes_in_index
 from cerebrum.index.indexer import upsert_note as upsert_note_in_index
-from cerebrum.mcp.context import get_db
+from cerebrum.mcp.context import INDEX_LAG_WARNING, get_db
 from cerebrum.notes.models import Note, NoteMeta
 from cerebrum.notes.parser import InvalidNoteContentError
 from cerebrum.notes.service import (
@@ -40,6 +40,10 @@ _WHOLE_DOCUMENT_WARNING = (
 )
 
 
+def _invalid_path_error(path: str) -> ToolError:
+    return ToolError(f"'{path}' is not a valid note path")
+
+
 def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
     """Register `list-notes`, `get-note`, and `search-notes` (R1) against
     `mcp`, closing over `app` (KTD8) to reach the shared index connection
@@ -50,8 +54,7 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
         description=(
             "Call this to see every note currently in the vault. Returns each "
             "note's path, title, tags, and timestamps -- not its content (use "
-            "get-note for that). Reads from the search index, which can lag "
-            "slightly behind a just-completed write."
+            f"get-note for that). {INDEX_LAG_WARNING}"
         ),
         annotations=_READ_ONLY_ANNOTATIONS,
     )
@@ -74,7 +77,7 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
         except NoteNotFoundError as exc:
             raise ToolError(f"No note exists at '{path}'") from exc
         except InvalidNotePathError as exc:
-            raise ToolError(f"'{path}' is not a valid note path") from exc
+            raise _invalid_path_error(path) from exc
         except InvalidNoteContentError as exc:
             raise ToolError(str(exc)) from exc
 
@@ -84,11 +87,12 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
             "Call this to find notes whose title or content matches a query, "
             "before reading the full one with get-note. Returns matching "
             "notes' metadata, ranked by relevance -- not their content. An "
-            "empty query or no matches returns an empty list, not an error."
+            "empty query or no matches returns an empty list, not an error. "
+            f"{INDEX_LAG_WARNING}"
         ),
         annotations=_READ_ONLY_ANNOTATIONS,
     )
-    def search_notes(query: str) -> list[NoteMeta]:
+    def search_notes(query: str = "") -> list[NoteMeta]:
         return search_notes_in_index(get_db(app), query)
 
     @mcp.tool(
@@ -109,7 +113,7 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
         except NoteNotFoundError:
             pass  # nothing at this path yet -- proceed to write
         except InvalidNotePathError as exc:
-            raise ToolError(f"'{path}' is not a valid note path") from exc
+            raise _invalid_path_error(path) from exc
         except InvalidNoteContentError as exc:
             # A malformed-but-existing file still counts as "something is
             # there" -- fail the same way a well-formed existing note would,
@@ -137,7 +141,7 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
         except NoteNotFoundError as exc:
             raise ToolError(f"No note exists at '{path}'") from exc
         except InvalidNotePathError as exc:
-            raise ToolError(f"'{path}' is not a valid note path") from exc
+            raise _invalid_path_error(path) from exc
         except InvalidNoteContentError:
             pass  # malformed existing note -- replacing it is a valid repair
 
@@ -154,7 +158,7 @@ def _write_and_sync_index(app: FastAPI, path: str, content: str) -> Note:
     try:
         note = write_note(settings.cerebrum_vault_path, path, content)
     except InvalidNotePathError as exc:
-        raise ToolError(f"'{path}' is not a valid note path") from exc
+        raise _invalid_path_error(path) from exc
     except InvalidNoteContentError as exc:
         raise ToolError(str(exc)) from exc
 

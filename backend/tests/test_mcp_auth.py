@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
-from starlette.routing import Mount, Route
+from starlette.routing import BaseRoute, Mount, Route
 
 from cerebrum.auth import STUB_VALID_CREDENTIAL
 from tests.mcp_test_support import INITIALIZE_PAYLOAD, MCP_HEADERS, mcp_test_client
@@ -15,6 +16,24 @@ def _mcp_mount(app: FastAPI) -> Mount:
         if isinstance(route, Mount) and route.path == "/api/mcp":
             return route
     raise AssertionError("expected an /api/mcp mount on the app")
+
+
+def _iter_routes(routes: list[BaseRoute], prefix: str = "") -> list[tuple[str, Route]]:
+    """Recursively flatten a Starlette route table into (full_path, Route)
+    pairs, descending into any nested `Mount`. A future FastMCP release
+    could add a privileged endpoint inside a `Mount` (this library family
+    already does so for other transports, e.g. SSE) rather than a bare
+    `Route` -- the R9 route-enumeration guarantee must see it too, not just
+    today's single top-level route."""
+    found: list[tuple[str, Route]] = []
+    for route in routes:
+        if isinstance(route, Mount):
+            sub_routes: Any = getattr(route.app, "routes", None)
+            if sub_routes:
+                found.extend(_iter_routes(sub_routes, prefix + route.path))
+        elif isinstance(route, Route):
+            found.append((prefix + route.path, route))
+    return found
 
 
 def test_request_with_no_credential_is_rejected(
@@ -71,16 +90,16 @@ def test_route_enumeration_every_mcp_route_rejects_unauthenticated_request(
     Must be re-run whenever the FastMCP dependency version changes."""
     with mcp_test_client(vault, monkeypatch) as client:
         mount = _mcp_mount(client.app)
-        mcp_routes = [route for route in mount.app.routes if isinstance(route, Route)]
+        mcp_routes = _iter_routes(mount.app.routes)
         assert mcp_routes, "expected at least one route on the MCP mount"
 
-        for route in mcp_routes:
-            suffix = "" if route.path == "/" else route.path
+        for full_path, _route in mcp_routes:
+            suffix = "" if full_path == "/" else full_path
             response = client.post(
                 f"/api/mcp{suffix}",
                 json=INITIALIZE_PAYLOAD,
                 headers=MCP_HEADERS,
             )
             assert response.status_code == 401, (
-                f"route {route.path!r} did not reject an unauthenticated request"
+                f"route {full_path!r} did not reject an unauthenticated request"
             )

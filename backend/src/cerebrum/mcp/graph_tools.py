@@ -6,7 +6,7 @@ from fastmcp import FastMCP
 from cerebrum.graph.models import GraphResponse
 from cerebrum.graph.service import get_backlinks as get_backlinks_from_graph
 from cerebrum.graph.service import get_graph as get_graph_from_service
-from cerebrum.mcp.context import get_db
+from cerebrum.mcp.context import INDEX_LAG_WARNING, get_db
 from cerebrum.notes.models import NoteMeta
 
 _READ_ONLY_ANNOTATIONS = {"readOnlyHint": True, "idempotentHint": True}
@@ -25,7 +25,7 @@ def register_graph_tools(mcp: FastMCP, app: FastAPI) -> None:
             "node, every markdown link between notes as an edge. Includes "
             "'ghost' nodes for links that target a note that doesn't exist "
             "yet. Returns the whole vault unscoped, not centered on any one "
-            "note."
+            f"note. {INDEX_LAG_WARNING}"
         ),
         annotations=_READ_ONLY_ANNOTATIONS,
     )
@@ -36,7 +36,8 @@ def register_graph_tools(mcp: FastMCP, app: FastAPI) -> None:
         name="get-backlinks",
         description=(
             "Call this to find every note that links to a given note, by its "
-            "vault-relative path. Returns their metadata, not their content."
+            "vault-relative path. Returns their metadata, not their content. "
+            f"{INDEX_LAG_WARNING}"
         ),
         annotations=_READ_ONLY_ANNOTATIONS,
     )

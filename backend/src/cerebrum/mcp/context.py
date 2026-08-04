@@ -5,6 +5,10 @@ from typing import cast
 
 from fastapi import FastAPI
 
+INDEX_LAG_WARNING = (
+    "Reads from the search index, which can lag slightly behind a just-completed write."
+)
+
 
 def get_db(app: FastAPI) -> sqlite3.Connection:
     """The same `app.state.db` connection `api/deps.py`'s `get_db` exposes to

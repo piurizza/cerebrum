@@ -320,3 +320,102 @@ def test_update_note_full_document_replace_round_trips_frontmatter(
         asyncio.run(run())
     finally:
         get_settings.cache_clear()
+
+
+def test_get_note_on_invalid_path_returns_clear_tool_error(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    get_settings.cache_clear()
+    mcp = _mcp_server(db)
+
+    async def run() -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "get-note", {"path": "not-markdown.txt"}, raise_on_error=False
+            )
+            assert result.is_error
+            assert "not a valid note path" in result.content[0].text
+
+    try:
+        asyncio.run(run())
+    finally:
+        get_settings.cache_clear()
+
+
+def test_create_note_on_invalid_path_returns_clear_tool_error(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    get_settings.cache_clear()
+    mcp = _mcp_server(db)
+
+    async def run() -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "create-note",
+                {"path": "not-markdown.txt", "content": "x"},
+                raise_on_error=False,
+            )
+            assert result.is_error
+            assert "not a valid note path" in result.content[0].text
+
+    try:
+        asyncio.run(run())
+    finally:
+        get_settings.cache_clear()
+    assert not (vault / "not-markdown.txt").exists()
+
+
+def test_update_note_on_invalid_path_returns_clear_tool_error(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    get_settings.cache_clear()
+    mcp = _mcp_server(db)
+
+    async def run() -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "update-note",
+                {"path": "not-markdown.txt", "content": "x"},
+                raise_on_error=False,
+            )
+            assert result.is_error
+            assert "not a valid note path" in result.content[0].text
+
+    try:
+        asyncio.run(run())
+    finally:
+        get_settings.cache_clear()
+
+
+def test_create_note_succeeds_even_when_index_sync_fails(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file (source of truth) is already saved by the time the index
+    sync runs; a failure there must not turn a successful write into a
+    tool-level error -- the index is a disposable, rebuildable cache (see
+    SPEC.md and the swallow-and-log comment in _write_and_sync_index)."""
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    get_settings.cache_clear()
+    mcp = _mcp_server(db)
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("index boom")
+
+    monkeypatch.setattr("cerebrum.mcp.notes_tools.upsert_note_in_index", _boom)
+
+    async def run() -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "create-note", {"path": "new.md", "content": "hello"}
+            )
+            assert not result.is_error
+            assert "hello" in result.data.content
+
+    try:
+        asyncio.run(run())
+    finally:
+        get_settings.cache_clear()
+    assert (vault / "new.md").read_text(encoding="utf-8").endswith("hello\n")

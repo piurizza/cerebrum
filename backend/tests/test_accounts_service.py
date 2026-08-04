@@ -1,0 +1,252 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import sqlite3
+import threading
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from cerebrum.accounts.service import (
+    InvalidTokenError,
+    User,
+    UsernameTakenError,
+    WeakPasswordError,
+    register_account,
+)
+from cerebrum.auth_db import connect
+from cerebrum.settings import get_settings
+
+VALID_PASSWORD = "correct horse battery staple"
+
+
+@pytest.fixture
+def auth_db(vault: Path) -> Iterator[sqlite3.Connection]:
+    conn = connect(vault / ".cerebrum" / "auth.sqlite3")
+    yield conn
+    conn.close()
+
+
+def _setup_token() -> str:
+    return get_settings().auth_setup_token.get_secret_value()
+
+
+def _user_count(auth_db: sqlite3.Connection) -> int:
+    (count,) = auth_db.execute("SELECT COUNT(*) FROM users").fetchone()
+    return int(count)
+
+
+def _bootstrap_admin(auth_db: sqlite3.Connection, username: str = "admin") -> User:
+    return asyncio.run(
+        register_account(username, VALID_PASSWORD, _setup_token(), auth_db)
+    )
+
+
+def _insert_invite(
+    auth_db: sqlite3.Connection,
+    token: str,
+    created_by: int,
+    *,
+    expires_at: datetime | None = None,
+    consumed: bool = False,
+) -> None:
+    if expires_at is None:
+        expires_at = datetime.now(UTC) + timedelta(hours=1)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    with auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO invites
+                (token_hash, created_by, expires_at, consumed_at, consumed_by)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                token_hash,
+                created_by,
+                expires_at.isoformat(),
+                datetime.now(UTC).isoformat() if consumed else None,
+                created_by if consumed else None,
+            ),
+        )
+
+
+def _run_register_in_thread(
+    credentials: tuple[str, str, str],
+    auth_db: sqlite3.Connection,
+    outcomes: list[tuple[str, object]],
+    index: int,
+) -> None:
+    username, password, token = credentials
+    try:
+        user = asyncio.run(register_account(username, password, token, auth_db))
+        outcomes[index] = ("ok", user)
+    except Exception as exc:  # noqa: BLE001 -- captured for the test to inspect
+        outcomes[index] = ("error", exc)
+
+
+def test_first_registration_with_correct_setup_token_creates_admin(
+    auth_db: sqlite3.Connection,
+) -> None:
+    user = _bootstrap_admin(auth_db, "alice")
+
+    assert user.is_admin is True
+    row = auth_db.execute(
+        "SELECT is_admin FROM users WHERE username = 'alice'"
+    ).fetchone()
+    assert row["is_admin"] == 1
+
+
+def test_first_registration_with_incorrect_setup_token_fails(
+    auth_db: sqlite3.Connection,
+) -> None:
+    with pytest.raises(InvalidTokenError):
+        asyncio.run(register_account("alice", VALID_PASSWORD, "wrong-token", auth_db))
+
+    assert _user_count(auth_db) == 0
+
+
+def test_concurrent_first_registration_only_one_succeeds(
+    auth_db: sqlite3.Connection,
+) -> None:
+    outcomes: list[tuple[str, object]] = [("", None), ("", None)]
+    threads = [
+        threading.Thread(
+            target=_run_register_in_thread,
+            args=(("alice", VALID_PASSWORD, _setup_token()), auth_db, outcomes, 0),
+        ),
+        threading.Thread(
+            target=_run_register_in_thread,
+            args=(("bob", VALID_PASSWORD, _setup_token()), auth_db, outcomes, 1),
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    statuses = [outcome[0] for outcome in outcomes]
+    assert statuses.count("ok") == 1
+    assert statuses.count("error") == 1
+    (_, error) = next(outcome for outcome in outcomes if outcome[0] == "error")
+    assert isinstance(error, InvalidTokenError)
+    assert _user_count(auth_db) == 1
+
+    (winner,) = [outcome[1] for outcome in outcomes if outcome[0] == "ok"]
+    assert isinstance(winner, User)
+    assert winner.is_admin is True
+
+
+def test_setup_token_after_account_exists_fails(auth_db: sqlite3.Connection) -> None:
+    _bootstrap_admin(auth_db)
+
+    with pytest.raises(InvalidTokenError):
+        asyncio.run(register_account("bob", VALID_PASSWORD, _setup_token(), auth_db))
+
+    assert _user_count(auth_db) == 1
+
+
+def test_registration_with_no_invite_token_fails(auth_db: sqlite3.Connection) -> None:
+    _bootstrap_admin(auth_db)
+
+    with pytest.raises(InvalidTokenError):
+        asyncio.run(register_account("bob", VALID_PASSWORD, "", auth_db))
+
+    assert _user_count(auth_db) == 1
+
+
+def test_registration_with_unknown_invite_token_fails(
+    auth_db: sqlite3.Connection,
+) -> None:
+    _bootstrap_admin(auth_db)
+
+    with pytest.raises(InvalidTokenError):
+        asyncio.run(register_account("bob", VALID_PASSWORD, "no-such-token", auth_db))
+
+    assert _user_count(auth_db) == 1
+
+
+def test_registration_with_expired_invite_fails(auth_db: sqlite3.Connection) -> None:
+    admin = _bootstrap_admin(auth_db)
+    _insert_invite(
+        auth_db,
+        "expired-token",
+        admin.id,
+        expires_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+
+    with pytest.raises(InvalidTokenError):
+        asyncio.run(register_account("bob", VALID_PASSWORD, "expired-token", auth_db))
+
+    assert _user_count(auth_db) == 1
+
+
+def test_registration_with_already_consumed_invite_fails(
+    auth_db: sqlite3.Connection,
+) -> None:
+    admin = _bootstrap_admin(auth_db)
+    _insert_invite(auth_db, "used-token", admin.id, consumed=True)
+
+    with pytest.raises(InvalidTokenError):
+        asyncio.run(register_account("bob", VALID_PASSWORD, "used-token", auth_db))
+
+    assert _user_count(auth_db) == 1
+
+
+def test_concurrent_registration_with_same_invite_only_one_succeeds(
+    auth_db: sqlite3.Connection,
+) -> None:
+    admin = _bootstrap_admin(auth_db)
+    _insert_invite(auth_db, "shared-token", admin.id)
+
+    outcomes: list[tuple[str, object]] = [("", None), ("", None)]
+    threads = [
+        threading.Thread(
+            target=_run_register_in_thread,
+            args=(("carol", VALID_PASSWORD, "shared-token"), auth_db, outcomes, 0),
+        ),
+        threading.Thread(
+            target=_run_register_in_thread,
+            args=(("dave", VALID_PASSWORD, "shared-token"), auth_db, outcomes, 1),
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    statuses = [outcome[0] for outcome in outcomes]
+    assert statuses.count("ok") == 1
+    assert statuses.count("error") == 1
+    (_, error) = next(outcome for outcome in outcomes if outcome[0] == "error")
+    assert isinstance(error, InvalidTokenError)
+    # admin + exactly one of carol/dave
+    assert _user_count(auth_db) == 2
+
+
+def test_invalid_token_with_taken_username_reports_invalid_token(
+    auth_db: sqlite3.Connection,
+) -> None:
+    _bootstrap_admin(auth_db, "alice")
+
+    with pytest.raises(InvalidTokenError):
+        asyncio.run(register_account("alice", VALID_PASSWORD, "no-such-token", auth_db))
+
+
+def test_valid_token_with_taken_username_fails_with_username_taken(
+    auth_db: sqlite3.Connection,
+) -> None:
+    admin = _bootstrap_admin(auth_db, "alice")
+    _insert_invite(auth_db, "invite-token", admin.id)
+
+    with pytest.raises(UsernameTakenError):
+        asyncio.run(register_account("alice", VALID_PASSWORD, "invite-token", auth_db))
+
+
+def test_registration_with_short_password_fails(auth_db: sqlite3.Connection) -> None:
+    with pytest.raises(WeakPasswordError):
+        asyncio.run(register_account("alice", "short1pw", _setup_token(), auth_db))
+
+    assert _user_count(auth_db) == 0

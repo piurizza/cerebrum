@@ -8,3 +8,7 @@ from fastapi import Request
 
 def get_db(request: Request) -> sqlite3.Connection:
     return cast(sqlite3.Connection, request.app.state.db)
+
+
+def get_auth_db(request: Request) -> sqlite3.Connection:
+    return cast(sqlite3.Connection, request.app.state.auth_db)

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastmcp.server.http import StarletteWithLifespan
 
+from cerebrum.api.auth import unauthenticated_router
 from cerebrum.api.router import api_router
 from cerebrum.auth_db import connect as connect_auth_db
 from cerebrum.index.db import connect
@@ -67,6 +68,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(api_router, prefix="/api")
+    # Mounted directly on `app`, not through `api_router` (see api/auth.py):
+    # this router carries routes -- register now, login/refresh added by
+    # later units -- that must work with no `Authorization` header, so it
+    # must never end up behind whatever auth dependency `api_router` gains.
+    app.include_router(unauthenticated_router, prefix="/api/auth")
 
     if settings.mcp_enabled:
         mcp = create_mcp_server(app)

@@ -1,18 +1,43 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from cerebrum.index.db import list_notes as list_notes_in_index
 from cerebrum.index.db import search_notes as search_notes_in_index
+from cerebrum.index.indexer import upsert_note as upsert_note_in_index
 from cerebrum.mcp.context import get_db
 from cerebrum.notes.models import Note, NoteMeta
 from cerebrum.notes.parser import InvalidNoteContentError
-from cerebrum.notes.service import InvalidNotePathError, NoteNotFoundError, read_note
+from cerebrum.notes.service import (
+    InvalidNotePathError,
+    NoteNotFoundError,
+    read_note,
+    write_note,
+)
 from cerebrum.settings import get_settings
 
+logger = logging.getLogger(__name__)
+
 _READ_ONLY_ANNOTATIONS = {"readOnlyHint": True, "idempotentHint": True}
+_CREATE_ANNOTATIONS = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+}
+_UPDATE_ANNOTATIONS = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": True,
+}
+_WHOLE_DOCUMENT_WARNING = (
+    "Replaces the whole document body -- this is not a patch or append. If "
+    "you don't already hold the note's full current content (including its "
+    "frontmatter, e.g. tags), call get-note first or you will lose it."
+)
 
 
 def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
@@ -65,3 +90,80 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
     )
     def search_notes(query: str) -> list[NoteMeta]:
         return search_notes_in_index(get_db(app), query)
+
+    @mcp.tool(
+        name="create-note",
+        description=(
+            "Call this to create a brand-new note at a vault-relative path "
+            "(e.g. 'projects/cerebrum.md'). Fails with a clear error if a "
+            "note already exists there (including one that's currently "
+            "malformed) -- use update-note to change an existing one "
+            f"instead. {_WHOLE_DOCUMENT_WARNING}"
+        ),
+        annotations=_CREATE_ANNOTATIONS,
+    )
+    def create_note(path: str, content: str) -> Note:
+        settings = get_settings()
+        try:
+            read_note(settings.cerebrum_vault_path, path)
+        except NoteNotFoundError:
+            pass  # nothing at this path yet -- proceed to write
+        except InvalidNotePathError as exc:
+            raise ToolError(f"'{path}' is not a valid note path") from exc
+        except InvalidNoteContentError as exc:
+            # A malformed-but-existing file still counts as "something is
+            # there" -- fail the same way a well-formed existing note would,
+            # rather than silently overwriting it.
+            raise ToolError(f"A note already exists at '{path}'") from exc
+        else:
+            raise ToolError(f"A note already exists at '{path}'")
+
+        return _write_and_sync_index(app, path, content)
+
+    @mcp.tool(
+        name="update-note",
+        description=(
+            "Call this to replace an existing note's content by its "
+            "vault-relative path. Fails with a clear error if no note "
+            "exists there -- use create-note for a new one instead. "
+            f"{_WHOLE_DOCUMENT_WARNING}"
+        ),
+        annotations=_UPDATE_ANNOTATIONS,
+    )
+    def update_note(path: str, content: str) -> Note:
+        settings = get_settings()
+        try:
+            read_note(settings.cerebrum_vault_path, path)
+        except NoteNotFoundError as exc:
+            raise ToolError(f"No note exists at '{path}'") from exc
+        except InvalidNotePathError as exc:
+            raise ToolError(f"'{path}' is not a valid note path") from exc
+        except InvalidNoteContentError:
+            pass  # malformed existing note -- replacing it is a valid repair
+
+        return _write_and_sync_index(app, path, content)
+
+
+def _write_and_sync_index(app: FastAPI, path: str, content: str) -> Note:
+    # create-note/update-note widen write_note()'s caller population from
+    # the trusted local frontend to remote third-party LLM clients. Verified
+    # safe: python-frontmatter's default YAML handler parses frontmatter
+    # with yaml.SafeLoader (see frontmatter/default_handlers.py), not an
+    # executing/unsafe loader -- a one-time check, not a per-call assertion.
+    settings = get_settings()
+    try:
+        note = write_note(settings.cerebrum_vault_path, path, content)
+    except InvalidNotePathError as exc:
+        raise ToolError(f"'{path}' is not a valid note path") from exc
+    except InvalidNoteContentError as exc:
+        raise ToolError(str(exc)) from exc
+
+    # The file (source of truth) is already saved. An index-write failure
+    # here must not turn a successful save into a misleading tool error --
+    # the index is a disposable cache and self-heals on the next startup
+    # rescan (see SPEC.md), mirroring `api/notes.py`'s `put_note` idiom.
+    try:
+        upsert_note_in_index(get_db(app), settings.cerebrum_vault_path, path)
+    except Exception:  # noqa: BLE001 -- index is a rebuildable cache (see SPEC.md)
+        logger.exception("Failed to update index for %s after a successful write", path)
+    return note

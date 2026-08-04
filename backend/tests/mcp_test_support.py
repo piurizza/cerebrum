@@ -22,6 +22,10 @@ INITIALIZE_PAYLOAD = {
 }
 MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
 
+# Matches `mcp_test_client()`'s own `AUTH_SETUP_TOKEN` env var below.
+_SETUP_TOKEN = "y" * 32
+_PASSWORD = "correct horse battery staple"
+
 
 @contextmanager
 def mcp_test_client(
@@ -48,3 +52,41 @@ def mcp_test_client(
             yield client
     finally:
         get_settings.cache_clear()
+
+
+def issue_test_access_token(
+    client: TestClient, username: str = "mcp-test-user", password: str = _PASSWORD
+) -> str:
+    """Register and log in for real, returning a live access-token JWT to
+    send as `Authorization: Bearer <token>` -- replaces the retired
+    `STUB_VALID_CREDENTIAL` sentinel now that `verify_credential()`
+    performs real JWT verification (U3).
+
+    `mcp_test_client()` reuses the same `vault` (and therefore the same
+    persisted `auth.sqlite3`) across repeated `create_app()` calls within
+    one test -- see `test_mcp_mount.py`'s state-leakage test -- so a
+    second call would otherwise fail: `_SETUP_TOKEN` only bootstraps the
+    very first account in a given `auth.sqlite3`, and `register_account()`
+    validates the token *before* checking username availability (U2), so
+    a second registration attempt fails as an invalid token (400), never
+    as a username collision (409). Handle that by falling back to a plain
+    login on that 400, rather than requiring every caller to track
+    whether it's the first call against this particular vault.
+    """
+    register_response = client.post(
+        "/api/auth/register",
+        json={"username": username, "password": password, "token": _SETUP_TOKEN},
+    )
+    if register_response.status_code not in (201, 400):
+        raise AssertionError(
+            f"unexpected /api/auth/register response: {register_response.text}"
+        )
+
+    login_response = client.post(
+        "/api/auth/login", json={"username": username, "password": password}
+    )
+    if login_response.status_code != 200:
+        raise AssertionError(
+            f"unexpected /api/auth/login response: {login_response.text}"
+        )
+    return str(login_response.json()["access_token"])

@@ -3,11 +3,12 @@ from __future__ import annotations
 import hashlib
 import secrets
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import anyio
 from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 from pydantic import BaseModel
 
 from cerebrum.auth_db import auth_write_lock
@@ -22,6 +23,20 @@ _MIN_PASSWORD_LENGTH = 12
 # to share across threads/requests, and constructing it fresh per call
 # would just repeat the same default-parameter work every time.
 _password_hasher = PasswordHasher()
+
+# U3 (login throttling): a coarse per-account lockout appropriate for R8's
+# small trusted-household threat model, not a distributed rate limiter.
+_FAILED_LOGIN_LOCKOUT_THRESHOLD = 5
+_LOCKOUT_DURATION = timedelta(minutes=15)
+
+# A real Argon2 hash of a fixed, never-used password, computed once at
+# import time. `authenticate()` verifies against this for a username that
+# doesn't exist at all, so a nonexistent-username response pays the same
+# Argon2 cost a wrong-password response does -- otherwise the two cases
+# would be distinguishable by response latency alone, letting an attacker
+# enumerate valid usernames against `/api/auth/login` despite the
+# identical error message and status code.
+_DUMMY_PASSWORD_HASH = _password_hasher.hash("dummy-password-for-timing-parity")
 
 
 class InvalidCredentialError(Exception):
@@ -68,7 +83,17 @@ class User(BaseModel):
 
 
 def _is_first_account(auth_db: sqlite3.Connection) -> bool:
-    return auth_db.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None
+    # Locked even though it's a single read: sqlite3's Connection object is
+    # not safe for concurrent statement execution from multiple threads --
+    # an unlocked read here can race a concurrent thread's locked write
+    # block on this same shared connection and surface as a raw
+    # `sqlite3.InterfaceError`, not a clean application-level exception
+    # (reproduced directly: two threads racing register_account() with one
+    # side reading here while the other held the lock mid-write). Every
+    # statement against `auth_db`, not just multi-statement writes, must
+    # take this lock -- see `auth_db.py`'s `auth_write_lock` docstring.
+    with auth_write_lock:
+        return auth_db.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None
 
 
 def _find_valid_invite_token_hash(
@@ -76,13 +101,15 @@ def _find_valid_invite_token_hash(
 ) -> str | None:
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     now = datetime.now(UTC).isoformat()
-    row = auth_db.execute(
-        """
-        SELECT token_hash FROM invites
-        WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
-        """,
-        (token_hash, now),
-    ).fetchone()
+    # Locked for the same reason as `_is_first_account` above.
+    with auth_write_lock:
+        row = auth_db.execute(
+            """
+            SELECT token_hash FROM invites
+            WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
+            """,
+            (token_hash, now),
+        ).fetchone()
     return token_hash if row is not None else None
 
 
@@ -207,4 +234,101 @@ async def register_account(
         is_admin=is_first_account,
         is_active=True,
         created_at=created_at,
+    )
+
+
+def _verify_password_or_dummy(password_hash: str, password: str) -> bool:
+    """Run one Argon2 verify, off the event loop via the caller's
+    `anyio.to_thread.run_sync`. Used for both the real hash (an existing
+    user) and `_DUMMY_PASSWORD_HASH` (no such user) so both paths pay the
+    identical CPU cost -- see `_DUMMY_PASSWORD_HASH`'s docstring."""
+    try:
+        _password_hasher.verify(password_hash, password)
+        return True
+    except VerifyMismatchError:
+        return False
+
+
+def _record_failed_login(
+    auth_db: sqlite3.Connection, user_id: int, failed_attempts: int
+) -> None:
+    new_count = failed_attempts + 1
+    locked_until = None
+    if new_count >= _FAILED_LOGIN_LOCKOUT_THRESHOLD:
+        locked_until = (datetime.now(UTC) + _LOCKOUT_DURATION).isoformat()
+    with auth_write_lock, auth_db:
+        auth_db.execute(
+            "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
+            (new_count, locked_until, user_id),
+        )
+
+
+def _record_successful_login(auth_db: sqlite3.Connection, user_id: int) -> None:
+    with auth_write_lock, auth_db:
+        auth_db.execute(
+            """
+            UPDATE users SET failed_login_attempts = 0, locked_until = NULL
+            WHERE id = ?
+            """,
+            (user_id,),
+        )
+
+
+async def authenticate(
+    username: str, password: str, auth_db: sqlite3.Connection
+) -> User:
+    """Verify a username/password login, returning the `User` on success.
+
+    Raises `InvalidCredentialError` for every failure case -- wrong
+    username, wrong password, a deactivated account, or a currently
+    locked-out account -- deliberately one exception type for all four, so
+    the API layer has no distinguishable cause to leak by mapping them
+    differently (see `InvalidCredentialError`'s own docstring).
+    """
+    # Locked for the same reason as `_is_first_account`/
+    # `_find_valid_invite_token_hash` above -- a read against the shared
+    # `auth_db` connection is not safe to run unlocked while another thread
+    # may be mid-write against it.
+    with auth_write_lock:
+        row = auth_db.execute(
+            """
+            SELECT id, username, password_hash, is_admin, is_active, created_at,
+                   failed_login_attempts, locked_until
+            FROM users WHERE username = ?
+            """,
+            (username,),
+        ).fetchone()
+
+    if row is None:
+        # Timing parity: pay the same Argon2 cost a real lookup would, so
+        # this branch isn't distinguishable from a wrong-password response
+        # by latency alone.
+        await anyio.to_thread.run_sync(
+            _verify_password_or_dummy, _DUMMY_PASSWORD_HASH, password
+        )
+        raise InvalidCredentialError("invalid username or password")
+
+    now = datetime.now(UTC)
+    locked_until = row["locked_until"]
+    if locked_until is not None and datetime.fromisoformat(locked_until) > now:
+        # Locked out -- reject without paying the Argon2 cost at all; a
+        # locked account shouldn't get a hash-verify attempt on every try.
+        raise InvalidCredentialError("account temporarily locked")
+
+    password_ok = await anyio.to_thread.run_sync(
+        _verify_password_or_dummy, row["password_hash"], password
+    )
+
+    if not password_ok or not row["is_active"]:
+        _record_failed_login(auth_db, row["id"], row["failed_login_attempts"])
+        raise InvalidCredentialError("invalid username or password")
+
+    _record_successful_login(auth_db, row["id"])
+
+    return User(
+        id=row["id"],
+        username=row["username"],
+        is_admin=bool(row["is_admin"]),
+        is_active=bool(row["is_active"]),
+        created_at=row["created_at"],
     )

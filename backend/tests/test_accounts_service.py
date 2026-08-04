@@ -11,10 +11,12 @@ from pathlib import Path
 import pytest
 
 from cerebrum.accounts.service import (
+    InvalidCredentialError,
     InvalidTokenError,
     User,
     UsernameTakenError,
     WeakPasswordError,
+    authenticate,
     register_account,
 )
 from cerebrum.auth_db import connect
@@ -250,3 +252,99 @@ def test_registration_with_short_password_fails(auth_db: sqlite3.Connection) -> 
         asyncio.run(register_account("alice", "short1pw", _setup_token(), auth_db))
 
     assert _user_count(auth_db) == 0
+
+
+def test_authenticate_with_correct_credentials_returns_user(
+    auth_db: sqlite3.Connection,
+) -> None:
+    admin = _bootstrap_admin(auth_db, "alice")
+
+    user = asyncio.run(authenticate("alice", VALID_PASSWORD, auth_db))
+
+    assert user.id == admin.id
+    assert user.username == "alice"
+
+
+def test_authenticate_with_wrong_password_fails(auth_db: sqlite3.Connection) -> None:
+    _bootstrap_admin(auth_db, "alice")
+
+    with pytest.raises(InvalidCredentialError):
+        asyncio.run(authenticate("alice", "totally wrong password", auth_db))
+
+
+def test_authenticate_with_nonexistent_username_fails(
+    auth_db: sqlite3.Connection,
+) -> None:
+    with pytest.raises(InvalidCredentialError):
+        asyncio.run(authenticate("no-such-user", VALID_PASSWORD, auth_db))
+
+
+def test_authenticate_with_deactivated_account_fails(
+    auth_db: sqlite3.Connection,
+) -> None:
+    _bootstrap_admin(auth_db, "alice")
+    with auth_db:
+        auth_db.execute("UPDATE users SET is_active = 0 WHERE username = 'alice'")
+
+    with pytest.raises(InvalidCredentialError):
+        asyncio.run(authenticate("alice", VALID_PASSWORD, auth_db))
+
+
+def test_authenticate_locks_account_after_five_failed_attempts(
+    auth_db: sqlite3.Connection,
+) -> None:
+    _bootstrap_admin(auth_db, "alice")
+
+    for _ in range(5):
+        with pytest.raises(InvalidCredentialError):
+            asyncio.run(authenticate("alice", "wrong password", auth_db))
+
+    # A sixth attempt, even with the correct password, still fails while
+    # `locked_until` is in the future.
+    with pytest.raises(InvalidCredentialError):
+        asyncio.run(authenticate("alice", VALID_PASSWORD, auth_db))
+
+    row = auth_db.execute(
+        "SELECT locked_until FROM users WHERE username = 'alice'"
+    ).fetchone()
+    assert row["locked_until"] is not None
+
+
+def test_authenticate_succeeds_after_lockout_cleared_and_resets_attempts(
+    auth_db: sqlite3.Connection,
+) -> None:
+    _bootstrap_admin(auth_db, "alice")
+
+    for _ in range(5):
+        with pytest.raises(InvalidCredentialError):
+            asyncio.run(authenticate("alice", "wrong password", auth_db))
+
+    with auth_db:
+        auth_db.execute("UPDATE users SET locked_until = NULL WHERE username = 'alice'")
+
+    user = asyncio.run(authenticate("alice", VALID_PASSWORD, auth_db))
+
+    assert user.username == "alice"
+    row = auth_db.execute(
+        "SELECT failed_login_attempts, locked_until FROM users WHERE username = 'alice'"
+    ).fetchone()
+    assert row["failed_login_attempts"] == 0
+    assert row["locked_until"] is None
+
+
+def test_authenticate_lockout_for_one_account_does_not_affect_another(
+    auth_db: sqlite3.Connection,
+) -> None:
+    admin = _bootstrap_admin(auth_db, "alice")
+    _insert_invite(auth_db, "invite-token", admin.id)
+    asyncio.run(register_account("bob", VALID_PASSWORD, "invite-token", auth_db))
+
+    for _ in range(5):
+        with pytest.raises(InvalidCredentialError):
+            asyncio.run(authenticate("alice", "wrong password", auth_db))
+
+    with pytest.raises(InvalidCredentialError):
+        asyncio.run(authenticate("alice", VALID_PASSWORD, auth_db))
+
+    user = asyncio.run(authenticate("bob", VALID_PASSWORD, auth_db))
+    assert user.username == "bob"

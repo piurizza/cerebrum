@@ -16,6 +16,19 @@ _SCHEMA_PATH = Path(__file__).parent / "auth_schema.sql"
 # threads -- every multi-statement auth write sequence must take this lock
 # for the duration of its `with auth_write_lock, conn:` block (see
 # index/indexer.py for the idiom later units mirror here).
+#
+# This guards single-statement READS too, not just multi-statement
+# writes -- confirmed by direct reproduction (30x concurrent-registration
+# runs, ~15% failure rate) that an unlocked read against this connection
+# can race a concurrent thread's locked write and surface as a raw
+# `sqlite3.InterfaceError('bad parameter or other API misuse')`, not a
+# clean application-level exception. Python's sqlite3 driver does not
+# support true concurrent statement execution from multiple threads
+# against one Connection object, even when the SQL itself is read-only and
+# logically safe to interleave -- every `auth_db.execute()` call from
+# application code, read or write, must be wrapped `with auth_write_lock:`
+# (or `with auth_write_lock, conn:` when it also needs the transaction
+# commit/rollback that context manager provides).
 auth_write_lock = threading.Lock()
 
 

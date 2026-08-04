@@ -7,8 +7,12 @@ import pytest
 from fastapi import FastAPI
 from starlette.routing import BaseRoute, Mount, Route
 
-from cerebrum.auth import STUB_VALID_CREDENTIAL
-from tests.mcp_test_support import INITIALIZE_PAYLOAD, MCP_HEADERS, mcp_test_client
+from tests.mcp_test_support import (
+    INITIALIZE_PAYLOAD,
+    MCP_HEADERS,
+    issue_test_access_token,
+    mcp_test_client,
+)
 
 
 def _mcp_mount(app: FastAPI) -> Mount:
@@ -44,14 +48,12 @@ def test_request_with_no_credential_is_rejected(
         assert response.status_code == 401
 
 
-def test_valid_stubbed_credential_accepted_when_stub_auth_allowed(
+def test_valid_credential_accepted_when_gate_allowed(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with mcp_test_client(vault, monkeypatch, allow_stub_auth=True) as client:
-        good_headers = {
-            **MCP_HEADERS,
-            "Authorization": f"Bearer {STUB_VALID_CREDENTIAL}",
-        }
+        token = issue_test_access_token(client)
+        good_headers = {**MCP_HEADERS, "Authorization": f"Bearer {token}"}
         good_response = client.post(
             "/api/mcp", json=INITIALIZE_PAYLOAD, headers=good_headers
         )
@@ -64,18 +66,15 @@ def test_valid_stubbed_credential_accepted_when_stub_auth_allowed(
         assert bad_response.status_code == 401
 
 
-def test_stub_sentinel_rejected_when_stub_auth_not_allowed(
+def test_credential_rejected_when_gate_not_allowed(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`mcp_allow_stub_auth` defaults `False` -- even the stub's own "valid"
-    sentinel must be rejected at the app-level request path, not just
-    inside `verify_credential()` itself (fails closed end-to-end, not only
-    at the stub function's own default-deny)."""
+    """`mcp_allow_stub_auth` defaults `False` -- even a credential that
+    would otherwise verify must be rejected at the app-level request path
+    when this gate is off (fails closed end-to-end, not only inside
+    `verify_credential()` itself)."""
     with mcp_test_client(vault, monkeypatch) as client:
-        headers = {
-            **MCP_HEADERS,
-            "Authorization": f"Bearer {STUB_VALID_CREDENTIAL}",
-        }
+        headers = {**MCP_HEADERS, "Authorization": "Bearer irrelevant-credential"}
         response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers)
         assert response.status_code == 401
 

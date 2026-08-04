@@ -60,6 +60,10 @@ def test_lifespan_teardown_on_startup_failure(
     here proves `db.close()` actually ran, not just that the exception
     propagated."""
     monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    # See conftest.py's `client` fixture -- these two are required
+    # settings with no default, so app construction fails without them.
+    monkeypatch.setenv("AUTH_JWT_SECRET", "x" * 32)
+    monkeypatch.setenv("AUTH_SETUP_TOKEN", "y" * 32)
     get_settings.cache_clear()
 
     def _boom(*_args: object, **_kwargs: object) -> None:

@@ -35,6 +35,10 @@ def mcp_test_client(
     shared by `test_mcp_mount.py` and `test_mcp_auth.py`, which otherwise
     repeat this same setup for each of the app-level MCP request tests."""
     monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    # See conftest.py's `client` fixture -- these two are required
+    # settings with no default, so app construction fails without them.
+    monkeypatch.setenv("AUTH_JWT_SECRET", "x" * 32)
+    monkeypatch.setenv("AUTH_SETUP_TOKEN", "y" * 32)
     if allow_stub_auth:
         monkeypatch.setenv("MCP_ALLOW_STUB_AUTH", "true")
     get_settings.cache_clear()

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastmcp.server.http import StarletteWithLifespan
 
 from cerebrum.api.router import api_router
+from cerebrum.auth_db import connect as connect_auth_db
 from cerebrum.index.db import connect
 from cerebrum.index.indexer import rebuild_index
 from cerebrum.mcp.server import create_mcp_server
@@ -22,6 +23,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.cerebrum_vault_path.mkdir(parents=True, exist_ok=True)
         app.state.db = connect(settings.index_path)
         stack.callback(app.state.db.close)
+
+        # Separate database, separate connection, same open/close shape as
+        # app.state.db above -- see auth_db.py for why this can't just be
+        # another table in the index db (that one is a disposable cache;
+        # this one is the sole record of accounts/sessions/tokens).
+        app.state.auth_db = connect_auth_db(settings.auth_db_path)
+        stack.callback(app.state.auth_db.close)
 
         # FastMCP's ASGI sub-app has its own lifespan (managing its internal
         # task group/session manager) that is never invoked just by being

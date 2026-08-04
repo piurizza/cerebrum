@@ -5,6 +5,7 @@ description = "Self-hosted second brain: markdown notes with a traversable link 
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.111.0",
+    "fastmcp==3.4.5",
     "pydantic-settings>=2.3.0",
     "python-frontmatter>=1.1.0",
     "uvicorn[standard]>=0.30.0",

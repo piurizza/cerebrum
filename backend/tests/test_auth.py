@@ -113,24 +113,12 @@ def test_verify_credential_rejects_expired_token(auth_db: sqlite3.Connection) ->
         asyncio.run(verify_credential(token, auth_db))
 
 
-def test_token_verifier_rejects_credential_when_gate_disallowed(
+def test_token_verifier_accepts_valid_credential(
     app: FastAPI, auth_db: sqlite3.Connection
 ) -> None:
     user_id = _insert_user(auth_db)
     token = _mint_jwt(user_id)
-    verifier = SharedFunctionTokenVerifier(app=app, allow_stub_auth=False)
-
-    result = asyncio.run(verifier.verify_token(token))
-
-    assert result is None
-
-
-def test_token_verifier_accepts_valid_credential_when_gate_allowed(
-    app: FastAPI, auth_db: sqlite3.Connection
-) -> None:
-    user_id = _insert_user(auth_db)
-    token = _mint_jwt(user_id)
-    verifier = SharedFunctionTokenVerifier(app=app, allow_stub_auth=True)
+    verifier = SharedFunctionTokenVerifier(app=app)
 
     result = asyncio.run(verifier.verify_token(token))
 
@@ -138,10 +126,10 @@ def test_token_verifier_accepts_valid_credential_when_gate_allowed(
     assert result.client_id == str(user_id)
 
 
-def test_token_verifier_rejects_wrong_credential_even_when_gate_allowed(
+def test_token_verifier_rejects_wrong_credential(
     app: FastAPI,
 ) -> None:
-    verifier = SharedFunctionTokenVerifier(app=app, allow_stub_auth=True)
+    verifier = SharedFunctionTokenVerifier(app=app)
 
     result = asyncio.run(verifier.verify_token("wrong"))
 

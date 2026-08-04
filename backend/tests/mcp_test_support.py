@@ -31,8 +31,6 @@ _PASSWORD = "correct horse battery staple"
 def mcp_test_client(
     vault: Path,
     monkeypatch: pytest.MonkeyPatch,
-    *,
-    allow_stub_auth: bool = False,
 ) -> Iterator[TestClient]:
     """Build a `create_app()` instance pointed at `vault`, wrapped in a
     `TestClient`, with `get_settings()`'s cache cleared on both sides --
@@ -43,8 +41,6 @@ def mcp_test_client(
     # settings with no default, so app construction fails without them.
     monkeypatch.setenv("AUTH_JWT_SECRET", "x" * 32)
     monkeypatch.setenv("AUTH_SETUP_TOKEN", "y" * 32)
-    if allow_stub_auth:
-        monkeypatch.setenv("MCP_ALLOW_STUB_AUTH", "true")
     get_settings.cache_clear()
     try:
         app = create_app()
@@ -58,9 +54,9 @@ def issue_test_access_token(
     client: TestClient, username: str = "mcp-test-user", password: str = _PASSWORD
 ) -> str:
     """Register and log in for real, returning a live access-token JWT to
-    send as `Authorization: Bearer <token>` -- replaces the retired
-    `STUB_VALID_CREDENTIAL` sentinel now that `verify_credential()`
-    performs real JWT verification (U3).
+    send as `Authorization: Bearer <token>` -- real end-to-end credential
+    issuance now that `verify_credential()` performs real JWT
+    verification and MCP auth is unconditionally on.
 
     `mcp_test_client()` reuses the same `vault` (and therefore the same
     persisted `auth.sqlite3`) across repeated `create_app()` calls within

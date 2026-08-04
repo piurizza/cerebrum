@@ -37,16 +37,6 @@ def test_mcp_enabled_reads_from_environment(monkeypatch: pytest.MonkeyPatch) -> 
         get_settings.cache_clear()
 
 
-def test_mcp_allow_stub_auth_defaults_false(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MCP_ALLOW_STUB_AUTH", raising=False)
-    _set_valid_auth_env(monkeypatch)
-    get_settings.cache_clear()
-    try:
-        assert get_settings().mcp_allow_stub_auth is False
-    finally:
-        get_settings.cache_clear()
-
-
 def test_auth_secrets_are_secret_str(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_valid_auth_env(monkeypatch)
     get_settings.cache_clear()

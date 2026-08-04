@@ -19,9 +19,10 @@ from tests.mcp_test_support import (
 def test_mcp_mount_responds_to_handshake(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Auth (U5) now gates this mount; stub-auth is opted in here since this
-    # test's own concern is the mount/handshake, not auth (see test_mcp_auth.py).
-    with mcp_test_client(vault, monkeypatch, allow_stub_auth=True) as client:
+    # Auth gates this mount unconditionally; a real access token is used
+    # here since this test's own concern is the mount/handshake, not auth
+    # itself (see test_mcp_auth.py).
+    with mcp_test_client(vault, monkeypatch) as client:
         token = issue_test_access_token(client)
         headers = {**MCP_HEADERS, "Authorization": f"Bearer {token}"}
         response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers)
@@ -33,7 +34,9 @@ def test_existing_rest_routes_unaffected_by_mcp_mount(
 ) -> None:
     with mcp_test_client(vault, monkeypatch) as client:
         assert client.get("/api/health").status_code == 200
-        assert client.get("/api/notes").status_code == 200
+        token = issue_test_access_token(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        assert client.get("/api/notes", headers=headers).status_code == 200
 
 
 def test_mcp_mount_absent_when_disabled(
@@ -97,7 +100,7 @@ def test_repeated_create_app_construction_has_no_state_leakage(
     FastMCP issues under repeated-construction load a full suite run
     actually produces."""
     for _ in range(3):
-        with mcp_test_client(vault, monkeypatch, allow_stub_auth=True) as client:
+        with mcp_test_client(vault, monkeypatch) as client:
             token = issue_test_access_token(client)
             headers = {**MCP_HEADERS, "Authorization": f"Bearer {token}"}
             response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers)

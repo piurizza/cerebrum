@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastmcp.server.http import StarletteWithLifespan
 
+from cerebrum.api import health
 from cerebrum.api.auth import unauthenticated_router
 from cerebrum.api.router import api_router
 from cerebrum.auth_db import connect as connect_auth_db
@@ -69,10 +70,15 @@ def create_app() -> FastAPI:
     )
     app.include_router(api_router, prefix="/api")
     # Mounted directly on `app`, not through `api_router` (see api/auth.py):
-    # this router carries routes -- register now, login/refresh added by
-    # later units -- that must work with no `Authorization` header, so it
-    # must never end up behind whatever auth dependency `api_router` gains.
+    # this router carries routes -- register, login, refresh -- that must
+    # work with no `Authorization` header, so it must never end up behind
+    # `api_router`'s default auth dependency.
     app.include_router(unauthenticated_router, prefix="/api/auth")
+    # Also mounted directly on `app`, not through `api_router` (see
+    # router.py): the Docker healthcheck hits this with no `Authorization`
+    # header, so it must never end up behind `api_router`'s default auth
+    # dependency either.
+    app.include_router(health.router, prefix="/api")
 
     if settings.mcp_enabled:
         mcp = create_mcp_server(app)

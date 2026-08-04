@@ -24,6 +24,7 @@ os.environ.setdefault("AUTH_SETUP_TOKEN", "y" * 32)
 from cerebrum.index.db import connect  # noqa: E402
 from cerebrum.main import create_app  # noqa: E402
 from cerebrum.settings import get_settings  # noqa: E402
+from tests.mcp_test_support import issue_test_access_token  # noqa: E402
 
 # pylint: enable=wrong-import-position
 
@@ -57,3 +58,30 @@ def client(vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]
     with TestClient(app) as test_client:
         yield test_client
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def authenticated_client(client: TestClient) -> TestClient:
+    """Same `client` fixture, but with a real, live access token attached
+    as a default `Authorization: Bearer <token>` header -- for REST tests
+    that exercise routes now protected by `api_router`'s default auth
+    dependency (U5) rather than the auth mechanism itself (see
+    `test_rest_auth.py` for the latter).
+
+    Bootstraps the one account this fixture needs via a real
+    register-then-login round trip against this same `client`, reusing
+    `mcp_test_support.issue_test_access_token()` (already written for the
+    equivalent MCP-test need) rather than duplicating that dance here.
+    `client`'s `AUTH_SETUP_TOKEN` env var (set by the `client` fixture
+    above) is what lets that registration call succeed against an
+    otherwise-empty `auth.sqlite3`.
+
+    Setting the header on `client.headers` (an `httpx.Client` default,
+    applied to every request `client` makes from here on) rather than
+    threading `headers=...` through every call site is what lets the three
+    REST test files below switch fixtures with a mechanical rename instead
+    of rewriting every request.
+    """
+    token = issue_test_access_token(client)
+    client.headers.update({"Authorization": f"Bearer {token}"})
+    return client

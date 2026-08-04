@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -48,10 +49,13 @@ def test_request_with_no_credential_is_rejected(
         assert response.status_code == 401
 
 
-def test_valid_credential_accepted_when_gate_allowed(
+def test_valid_credential_accepted_and_wrong_credential_rejected(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with mcp_test_client(vault, monkeypatch, allow_stub_auth=True) as client:
+    """MCP auth is unconditionally on: a real, live access token is
+    accepted and an invalid one is rejected, both going through
+    `verify_credential()` for real."""
+    with mcp_test_client(vault, monkeypatch) as client:
         token = issue_test_access_token(client)
         good_headers = {**MCP_HEADERS, "Authorization": f"Bearer {token}"}
         good_response = client.post(
@@ -66,17 +70,31 @@ def test_valid_credential_accepted_when_gate_allowed(
         assert bad_response.status_code == 401
 
 
-def test_credential_rejected_when_gate_not_allowed(
+def test_deactivated_accounts_open_connection_rejected_on_next_call(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`mcp_allow_stub_auth` defaults `False` -- even a credential that
-    would otherwise verify must be rejected at the app-level request path
-    when this gate is off (fails closed end-to-end, not only inside
-    `verify_credential()` itself)."""
+    """Exercises the "no caching" behavior of `TokenVerifier.verify_token()`
+    (FastMCP calls it fresh on every request): a token issued while the
+    account was active is accepted, then rejected on the very next call
+    once that account is deactivated -- even though the JWT itself hasn't
+    expired and the client never reconnected."""
     with mcp_test_client(vault, monkeypatch) as client:
-        headers = {**MCP_HEADERS, "Authorization": "Bearer irrelevant-credential"}
-        response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers)
-        assert response.status_code == 401
+        token = issue_test_access_token(client)
+        headers = {**MCP_HEADERS, "Authorization": f"Bearer {token}"}
+
+        first_response = client.post(
+            "/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers
+        )
+        assert first_response.status_code == 200
+
+        auth_db: sqlite3.Connection = client.app.state.auth_db
+        with auth_db:
+            auth_db.execute("UPDATE users SET is_active = 0")
+
+        second_response = client.post(
+            "/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers
+        )
+        assert second_response.status_code == 401
 
 
 def test_route_enumeration_every_mcp_route_rejects_unauthenticated_request(

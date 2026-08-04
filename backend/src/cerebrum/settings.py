@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
 
     mcp_enabled: bool = True
-    mcp_allow_stub_auth: bool = False
 
     # No defaults, deliberately: unlike the rest of this class, these two
     # gate real authentication (JWT signing, the initial-admin setup flow)

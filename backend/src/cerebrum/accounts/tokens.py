@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import secrets
 import sqlite3
 from datetime import UTC, datetime
@@ -9,7 +8,7 @@ from typing import cast
 from pydantic import BaseModel
 
 from cerebrum.accounts.service import NotFoundError
-from cerebrum.auth_db import auth_write_lock
+from cerebrum.auth_db import auth_write_lock, hash_token
 
 # Cosmetic only, for log/identification purposes (e.g. spotting a leaked
 # token shape in a log line) -- NOT a security boundary. The token's
@@ -29,10 +28,6 @@ class ApiTokenMeta(BaseModel):
     created_at: str
     last_used_at: str | None
     revoked: bool
-
-
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def create_api_token(
@@ -56,7 +51,7 @@ def create_api_token(
     would be redundant.
     """
     token = f"{_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
-    token_hash = _hash_token(token)
+    token_hash = hash_token(token)
     created_at = datetime.now(UTC).isoformat()
 
     # Single-row insert, still taken under `auth_write_lock` per this

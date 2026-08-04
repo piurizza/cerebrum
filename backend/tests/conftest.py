@@ -21,6 +21,7 @@ os.environ.setdefault("AUTH_JWT_SECRET", "x" * 32)
 os.environ.setdefault("AUTH_SETUP_TOKEN", "y" * 32)
 
 # pylint: disable=wrong-import-position
+from cerebrum.auth_db import connect as connect_auth_db  # noqa: E402
 from cerebrum.index.db import connect  # noqa: E402
 from cerebrum.main import create_app  # noqa: E402
 from cerebrum.settings import get_settings  # noqa: E402
@@ -39,6 +40,13 @@ def vault(tmp_path: Path) -> Path:
 @pytest.fixture
 def db(vault: Path) -> Iterator[sqlite3.Connection]:
     conn = connect(vault / ".cerebrum" / "index.sqlite3")
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def auth_db(vault: Path) -> Iterator[sqlite3.Connection]:
+    conn = connect_auth_db(vault / ".cerebrum" / "auth.sqlite3")
     yield conn
     conn.close()
 

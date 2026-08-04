@@ -4,9 +4,7 @@ import asyncio
 import hashlib
 import sqlite3
 import threading
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import cast
 
 import jwt
@@ -19,17 +17,9 @@ from cerebrum.accounts.service import (
     register_account,
 )
 from cerebrum.accounts.sessions import issue_session, refresh_session
-from cerebrum.auth_db import connect
 from cerebrum.settings import get_settings
 
 VALID_PASSWORD = "correct horse battery staple"
-
-
-@pytest.fixture
-def auth_db(vault: Path) -> Iterator[sqlite3.Connection]:
-    conn = connect(vault / ".cerebrum" / "auth.sqlite3")
-    yield conn
-    conn.close()
 
 
 def _bootstrap_admin(auth_db: sqlite3.Connection, username: str = "admin") -> User:

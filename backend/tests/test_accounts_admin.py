@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sqlite3
-from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,24 +17,9 @@ from cerebrum.accounts.service import (
 from cerebrum.accounts.sessions import issue_session
 from cerebrum.accounts.tokens import create_api_token
 from cerebrum.auth import AuthenticationError, verify_credential
-from cerebrum.auth_db import connect
 from cerebrum.settings import get_settings
 
-# pylint: disable=duplicate-code
-# This fixture and `_bootstrap_admin()` deliberately mirror
-# `test_accounts_service.py`/`test_accounts_tokens.py`'s own `auth_db`
-# fixture and admin-bootstrap helper -- the same genuinely-separate,
-# structurally-parallel-by-design situation `auth_db.py`'s `connect()`
-# documents for its own `duplicate-code` disable, not something to
-# extract into a shared helper across otherwise-independent test files.
 VALID_PASSWORD = "correct horse battery staple"
-
-
-@pytest.fixture
-def auth_db(vault: Path) -> Iterator[sqlite3.Connection]:
-    conn = connect(vault / ".cerebrum" / "auth.sqlite3")
-    yield conn
-    conn.close()
 
 
 def _bootstrap_admin(auth_db: sqlite3.Connection, username: str = "admin") -> User:

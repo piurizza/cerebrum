@@ -1,13 +1,21 @@
 from __future__ import annotations
 
-import hashlib
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import jwt
 
-from cerebrum.auth_db import auth_write_lock
+from cerebrum.auth_db import auth_write_lock, hash_token
 from cerebrum.settings import get_settings
+
+# `_verify_api_token()` records `last_used_at` on every successful use, but
+# not on every single request -- a token used every few seconds (e.g. an
+# MCP client polling) doesn't need a fresh fsync'd write each time just to
+# advance a display-only timestamp by a few seconds. Skipping the write
+# when the existing value is already this recent keeps the metadata
+# "recently used" accurate to well within human-observable granularity
+# while cutting per-request write/lock volume for frequent callers.
+_LAST_USED_AT_UPDATE_INTERVAL = timedelta(minutes=1)
 
 
 class AuthenticationError(Exception):
@@ -109,13 +117,18 @@ def _verify_api_token(credential: str, auth_db: sqlite3.Connection) -> str:
     `last_used_at` have no atomicity requirement between them (unlike
     `accounts/sessions.py`'s refresh-token rotation, which genuinely needs
     one atomic statement to prevent a fork) -- a `last_used_at` update
-    that's a few requests stale under concurrent use is harmless.
+    that's a few requests stale under concurrent use is harmless. The
+    write itself is skipped entirely when the existing value is already
+    within `_LAST_USED_AT_UPDATE_INTERVAL`, so a token used every few
+    seconds (e.g. a polling MCP client) doesn't pay a fresh fsync'd write
+    on every single request just to advance a display-only timestamp.
     """
-    token_hash = hashlib.sha256(credential.encode("utf-8")).hexdigest()
+    token_hash = hash_token(credential)
     with auth_write_lock:
         row = auth_db.execute(
             """
             SELECT api_tokens.id AS token_id, api_tokens.user_id AS user_id,
+                   api_tokens.last_used_at AS last_used_at,
                    users.is_active AS is_active
             FROM api_tokens
             JOIN users ON users.id = api_tokens.user_id
@@ -127,10 +140,17 @@ def _verify_api_token(credential: str, auth_db: sqlite3.Connection) -> str:
     if row is None or not row["is_active"]:
         raise AuthenticationError("invalid credential")
 
-    with auth_write_lock, auth_db:
-        auth_db.execute(
-            "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
-            (datetime.now(UTC).isoformat(), row["token_id"]),
-        )
+    now = datetime.now(UTC)
+    last_used_at = row["last_used_at"]
+    stale = (
+        last_used_at is None
+        or now - datetime.fromisoformat(last_used_at) >= _LAST_USED_AT_UPDATE_INTERVAL
+    )
+    if stale:
+        with auth_write_lock, auth_db:
+            auth_db.execute(
+                "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
+                (now.isoformat(), row["token_id"]),
+            )
 
     return str(row["user_id"])

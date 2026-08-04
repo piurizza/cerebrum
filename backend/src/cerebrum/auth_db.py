@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import threading
 from pathlib import Path
 
 _SCHEMA_PATH = Path(__file__).parent / "auth_schema.sql"
+
+
+def hash_token(token: str) -> str:
+    """The at-rest hashing convention shared by every opaque token this
+    codebase stores hashed-not-plaintext -- refresh tokens, personal API
+    tokens, invite tokens, and the initial setup token's lookup-adjacent
+    uses. SHA-256, not Argon2: these are already high-entropy random
+    values (`secrets.token_urlsafe`), so slow/memory-hard hashing would
+    add latency with no security benefit (KTD4)."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
 
 # A new, separate lock from index/db.py's write_lock -- that one is scoped
 # to serializing writers on *that* module's own connection object, and

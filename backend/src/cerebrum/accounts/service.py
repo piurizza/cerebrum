@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -11,7 +10,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from pydantic import BaseModel
 
-from cerebrum.auth_db import auth_write_lock
+from cerebrum.auth_db import auth_write_lock, hash_token
 from cerebrum.settings import get_settings
 
 # Below this, a compromised/guessed password is cheap to brute-force even
@@ -99,7 +98,7 @@ def _is_first_account(auth_db: sqlite3.Connection) -> bool:
 def _find_valid_invite_token_hash(
     auth_db: sqlite3.Connection, token: str
 ) -> str | None:
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    token_hash = hash_token(token)
     now = datetime.now(UTC).isoformat()
     # Locked for the same reason as `_is_first_account` above.
     with auth_write_lock:

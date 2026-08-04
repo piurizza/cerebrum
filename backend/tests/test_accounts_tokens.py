@@ -2,24 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 
 from cerebrum.accounts.service import NotFoundError, User, register_account
 from cerebrum.accounts.tokens import create_api_token, list_api_tokens, revoke_api_token
-from cerebrum.auth_db import connect
 from cerebrum.settings import get_settings
 
 VALID_PASSWORD = "correct horse battery staple"
-
-
-@pytest.fixture
-def auth_db(vault: Path) -> Iterator[sqlite3.Connection]:
-    conn = connect(vault / ".cerebrum" / "auth.sqlite3")
-    yield conn
-    conn.close()
 
 
 def _register(auth_db: sqlite3.Connection, username: str) -> User:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -8,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import jwt
 
 from cerebrum.accounts.service import InvalidTokenError, TokenReuseDetectedError, User
-from cerebrum.auth_db import auth_write_lock
+from cerebrum.auth_db import auth_write_lock, hash_token
 from cerebrum.settings import get_settings
 
 
@@ -54,7 +53,7 @@ def issue_session(user: User, auth_db: sqlite3.Connection) -> tuple[str, str]:
     access_token = _mint_access_token(user.id, now)
 
     refresh_token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+    token_hash = hash_token(refresh_token)
     family_id = secrets.token_hex(16)
     expires_at = now + timedelta(days=settings.auth_refresh_token_ttl_days)
 
@@ -84,7 +83,7 @@ def _insert_rotated_refresh_token(
     `issue_session()`)."""
     settings = get_settings()
     new_refresh_token = secrets.token_urlsafe(32)
-    new_token_hash = hashlib.sha256(new_refresh_token.encode("utf-8")).hexdigest()
+    new_token_hash = hash_token(new_refresh_token)
     expires_at = now + timedelta(days=settings.auth_refresh_token_ttl_days)
     auth_db.execute(
         """
@@ -119,7 +118,7 @@ def refresh_session(refresh_token: str, auth_db: sqlite3.Connection) -> tuple[st
     """
     now = datetime.now(UTC)
     now_iso = now.isoformat()
-    token_hash = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+    token_hash = hash_token(refresh_token)
 
     # One locked block spans the atomic UPDATE attempt and, when it misses,
     # the diagnostic follow-up SELECT/UPDATE that distinguishes reuse from
@@ -136,19 +135,20 @@ def refresh_session(refresh_token: str, auth_db: sqlite3.Connection) -> tuple[st
     # committed) normally.
     reuse_detected = False
     with auth_write_lock, auth_db:
+        # RETURNING avoids a separate follow-up SELECT for the row this
+        # same statement just updated -- both the update and the read of
+        # its result happen in one round trip against the connection.
         rotate_cursor = auth_db.execute(
             """
             UPDATE refresh_tokens SET revoked_at = ?
             WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?
+            RETURNING user_id, family_id
             """,
             (now_iso, token_hash, now_iso),
         )
+        owner_row = rotate_cursor.fetchone()
 
-        if rotate_cursor.rowcount == 1:
-            owner_row = auth_db.execute(
-                "SELECT user_id, family_id FROM refresh_tokens WHERE token_hash = ?",
-                (token_hash,),
-            ).fetchone()
+        if owner_row is not None:
             new_refresh_token = _insert_rotated_refresh_token(
                 auth_db, owner_row["user_id"], owner_row["family_id"], now
             )

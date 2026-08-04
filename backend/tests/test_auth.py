@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import cast
 
 import jwt
@@ -13,16 +11,8 @@ from fastapi import FastAPI
 
 from cerebrum.accounts.tokens import create_api_token
 from cerebrum.auth import AuthenticationError, verify_credential
-from cerebrum.auth_db import connect
 from cerebrum.mcp.auth import SharedFunctionTokenVerifier
 from cerebrum.settings import get_settings
-
-
-@pytest.fixture
-def auth_db(vault: Path) -> Iterator[sqlite3.Connection]:
-    conn = connect(vault / ".cerebrum" / "auth.sqlite3")
-    yield conn
-    conn.close()
 
 
 @pytest.fixture

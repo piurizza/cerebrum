@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
 from cerebrum.accounts.service import ForbiddenError
-from cerebrum.auth_db import auth_write_lock
+from cerebrum.auth_db import auth_write_lock, hash_token
 
 # How long an admin-generated invite stays redeemable. A few days is
 # generous enough for the invited person to actually receive and act on
@@ -18,15 +17,6 @@ from cerebrum.auth_db import auth_write_lock
 INVITE_TTL = timedelta(days=7)
 
 
-def _hash_invite_token(token: str) -> str:
-    # Same SHA-256-of-plaintext convention `service.py`'s
-    # `_find_valid_invite_token_hash()` looks up against -- an invite
-    # minted here must hash identically to how redemption re-hashes the
-    # token the invitee presents, or every invite this function generates
-    # would be silently unredeemable.
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
 def create_invite(admin_user_id: int, auth_db: sqlite3.Connection) -> str:
     """Generate a new invite, persist only its SHA-256 hash, and return the
     plaintext token exactly once -- same shape as `tokens.py`'s
@@ -34,7 +24,7 @@ def create_invite(admin_user_id: int, auth_db: sqlite3.Connection) -> str:
     after this call returns.
     """
     token = secrets.token_urlsafe(32)
-    token_hash = _hash_invite_token(token)
+    token_hash = hash_token(token)
     now = datetime.now(UTC)
     expires_at = now + INVITE_TTL
 

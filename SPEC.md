@@ -109,9 +109,12 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(
 
 **Rebuild strategy:** full vault rescan (walk, hash, upsert changed rows,
 delete rows for removed files) on backend startup via a FastAPI lifespan
-hook. Incremental single-file upsert on every `PUT`/`DELETE` note request.
-The `.md` file is always written first; the index is best-effort and
-self-heals via the next rescan if it ever drifts.
+hook, plus a periodic backstop rescan on the same logic while the app is
+running. Incremental single-file upsert on every `PUT`/`DELETE` note
+request, and on every filesystem change a background watcher observes
+directly (vim, sync tools, etc. -- see § Environment variables for
+`WATCHER_*` config). The `.md` file is always written first; the index is
+best-effort and self-heals via the next rescan if it ever drifts.
 
 ## 5. API surface
 
@@ -369,15 +372,20 @@ history.
 ### Reliability
 
 - [x] notes stay valid plain markdown even if the app breaks (by design)
-- [ ] see edits made outside the app (e.g. vim, a sync tool) reflected
-      without restarting the server (tracked in
-      [Known gaps](#10-known-gaps--future-work) as the filesystem-watcher gap)
+- [x] see edits made outside the app (e.g. vim, a sync tool) reflected
+      without restarting the server -- a background watcher (`watchfiles`)
+      keeps the index in sync in near real-time, backed by a periodic
+      backstop rescan; see
+      [Known gaps](#10-known-gaps--future-work) for the one limitation
+      (external renames).
 
 ## 10. Known gaps / future work
 
-- **No filesystem watcher.** Edits made to `.md` files outside the API
-  (e.g. directly with `vim`, or synced in by another tool) aren't picked
-  up until the next backend startup rescan. Mitigated, not solved.
+- **External renames aren't link-preserving.** A note renamed/moved
+  outside the app (e.g. `mv old.md new.md`) is indexed as a plain
+  delete-then-create by the filesystem watcher; other notes' links to the
+  old path become broken (ghost) links rather than being repointed to the
+  new path, unlike an in-app rename (`POST /api/notes/{path}/move`).
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
 - **No attachment/image handling** defined yet (only `.md` files).

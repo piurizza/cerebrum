@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -203,3 +204,122 @@ def test_search_notes_ignores_deleted_notes(
     remove_note(db, "a.md")
 
     assert search_notes(db, "bread") == []
+
+
+_CHURN_ITERATIONS = 30
+
+
+def _run_rebuild(
+    vault: Path,
+    db: sqlite3.Connection,
+    outcomes: list[Exception | None],
+    index: int,
+) -> None:
+    try:
+        for _ in range(_CHURN_ITERATIONS):
+            rebuild_index(db, vault)
+        outcomes[index] = None
+    except Exception as exc:  # noqa: BLE001 -- captured for the test to inspect
+        outcomes[index] = exc
+
+
+def _run_write_churn(
+    target: tuple[Path, sqlite3.Connection, str],
+    outcomes: list[Exception | None],
+    index: int,
+) -> None:
+    vault, db, path = target
+    try:
+        for _ in range(_CHURN_ITERATIONS):
+            upsert_note(db, vault, path)
+            remove_note(db, path)
+        outcomes[index] = None
+    except Exception as exc:  # noqa: BLE001 -- captured for the test to inspect
+        outcomes[index] = exc
+
+
+def _run_read_churn(
+    db: sqlite3.Connection,
+    outcomes: list[Exception | None],
+    index: int,
+) -> None:
+    try:
+        for _ in range(_CHURN_ITERATIONS):
+            list_notes(db)
+            search_notes(db, "content")
+        outcomes[index] = None
+    except Exception as exc:  # noqa: BLE001 -- captured for the test to inspect
+        outcomes[index] = exc
+
+
+def test_concurrent_rebuild_index_and_writes_do_not_raise(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Regression test for KTD5: rebuild_index's unlocked
+    `SELECT path, mtime FROM notes` used to be able to race a concurrent
+    upsert_note/remove_note write against the same shared connection and
+    surface as a raw sqlite3.InterfaceError instead of a clean exception
+    (or no exception at all). Several threads hammer rebuild_index and
+    per-note writes concurrently; none of them should raise anything, and
+    the index should still correctly reflect the vault once the dust
+    settles.
+    """
+    write_note(vault, "a.md", "content a")
+    write_note(vault, "b.md", "content b")
+    write_note(vault, "c.md", "content c")
+    rebuild_index(db, vault)
+
+    outcomes: list[Exception | None] = [None] * 4
+    threads = [
+        threading.Thread(target=_run_rebuild, args=(vault, db, outcomes, 0)),
+        threading.Thread(target=_run_rebuild, args=(vault, db, outcomes, 1)),
+        threading.Thread(
+            target=_run_write_churn, args=((vault, db, "a.md"), outcomes, 2)
+        ),
+        threading.Thread(
+            target=_run_write_churn, args=((vault, db, "b.md"), outcomes, 3)
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert outcomes == [None, None, None, None]
+
+    # Settle: a final rebuild must correctly reflect the vault's actual
+    # contents, regardless of which writer "won" the race above -- every
+    # note file still exists on disk, none were unlinked.
+    rebuild_index(db, vault)
+    assert {note.path for note in list_notes(db)} == {"a.md", "b.md", "c.md"}
+
+
+def test_concurrent_list_and_search_notes_with_writes_do_not_raise(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Regression test for KTD5: list_notes and search_notes's unlocked
+    reads used to be able to race a concurrent upsert_note/remove_note
+    write against the same shared connection and surface as a raw
+    sqlite3.InterfaceError instead of running to completion cleanly.
+    """
+    write_note(vault, "a.md", "content a")
+    write_note(vault, "b.md", "content b")
+    rebuild_index(db, vault)
+
+    outcomes: list[Exception | None] = [None] * 4
+    threads = [
+        threading.Thread(target=_run_read_churn, args=(db, outcomes, 0)),
+        threading.Thread(target=_run_read_churn, args=(db, outcomes, 1)),
+        threading.Thread(
+            target=_run_write_churn, args=((vault, db, "a.md"), outcomes, 2)
+        ),
+        threading.Thread(
+            target=_run_write_churn, args=((vault, db, "b.md"), outcomes, 3)
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert outcomes == [None, None, None, None]

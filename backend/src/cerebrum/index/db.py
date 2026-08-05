@@ -19,8 +19,19 @@ _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 # without serializing writers, one thread's commit could flush another
 # thread's in-progress statements. write_lock makes each multi-statement
 # write sequence (see index/indexer.py) fully atomic with respect to every
-# other writer. Readers are not serialized -- WAL lets them proceed without
-# blocking on an in-progress write.
+# other writer.
+#
+# This guards single-statement READS too, not just multi-statement writes
+# (same rationale as auth_db.py's auth_write_lock, which documents this
+# exact failure mode from direct reproduction): Python's sqlite3 driver
+# does not support true concurrent statement execution from multiple
+# threads against one Connection object, even when the SQL itself is
+# read-only and logically safe to interleave. An unlocked read racing a
+# concurrent thread's locked write can surface as a raw
+# `sqlite3.InterfaceError('bad parameter or other API misuse')`, not a
+# clean application-level exception -- so list_notes, search_notes, and
+# rebuild_index's own read (index/indexer.py) all take this lock around
+# their `conn.execute(...)` calls too.
 write_lock = threading.Lock()
 
 
@@ -45,9 +56,10 @@ def row_to_note_meta(row: sqlite3.Row) -> NoteMeta:
 
 
 def list_notes(conn: sqlite3.Connection) -> list[NoteMeta]:
-    rows = conn.execute(
-        "SELECT path, title, tags, created, updated FROM notes ORDER BY path"
-    ).fetchall()
+    with write_lock:
+        rows = conn.execute(
+            "SELECT path, title, tags, created, updated FROM notes ORDER BY path"
+        ).fetchall()
     return [row_to_note_meta(row) for row in rows]
 
 
@@ -64,14 +76,15 @@ def search_notes(conn: sqlite3.Connection, query: str) -> list[NoteMeta]:
         return []
 
     match_query = " AND ".join(f"{term}*" for term in terms)
-    rows = conn.execute(
-        """
-        SELECT n.path, n.title, n.tags, n.created, n.updated
-        FROM notes_fts
-        JOIN notes n ON n.path = notes_fts.path
-        WHERE notes_fts MATCH ?
-        ORDER BY bm25(notes_fts)
-        """,
-        (match_query,),
-    ).fetchall()
+    with write_lock:
+        rows = conn.execute(
+            """
+            SELECT n.path, n.title, n.tags, n.created, n.updated
+            FROM notes_fts
+            JOIN notes n ON n.path = notes_fts.path
+            WHERE notes_fts MATCH ?
+            ORDER BY bm25(notes_fts)
+            """,
+            (match_query,),
+        ).fetchall()
     return [row_to_note_meta(row) for row in rows]

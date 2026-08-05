@@ -86,3 +86,23 @@ def issue_test_access_token(
             f"unexpected /api/auth/login response: {login_response.text}"
         )
     return str(login_response.json()["access_token"])
+
+
+def issue_test_api_token(
+    client: TestClient, username: str = "mcp-test-user", password: str = _PASSWORD
+) -> str:
+    """Register/log in for real (via `issue_test_access_token()`), then
+    mint a real personal API token through `POST /api/tokens` and return
+    its plaintext -- for tests that need to prove the PAT credential
+    shape specifically works end-to-end (e.g. through the live `/api/mcp`
+    mount), not just the session-JWT shape `issue_test_access_token()`
+    already covers."""
+    access_token = issue_test_access_token(client, username, password)
+    response = client.post(
+        "/api/tokens",
+        json={"name": "mcp-client"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if response.status_code != 201:
+        raise AssertionError(f"unexpected POST /api/tokens response: {response.text}")
+    return str(response.json()["token"])

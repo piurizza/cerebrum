@@ -300,6 +300,48 @@ def test_authenticate_locks_account_after_five_failed_attempts(
     assert row["locked_until"] is not None
 
 
+def test_concurrent_failed_logins_still_lock_out_at_the_threshold(
+    auth_db: sqlite3.Connection,
+) -> None:
+    """A broken (non-atomic) `_record_failed_login` -- reading
+    `failed_login_attempts` once in `authenticate()` before the Argon2
+    await and writing `stale_count + 1` back afterward -- lets concurrent
+    failed attempts each observe the same pre-verify count and overwrite
+    each other, so N concurrent attempts can collapse into far fewer than
+    N recorded failures. This test fires 5 wrong-password attempts at once
+    (real threads, real concurrent `authenticate()` calls) and asserts the
+    account is fully locked afterward -- it would NOT be, reliably, against
+    the pre-fix read-then-write version.
+    """
+    _bootstrap_admin(auth_db, "alice")
+
+    outcomes: list[Exception | None] = [None] * 5
+
+    def attempt(index: int) -> None:
+        try:
+            asyncio.run(authenticate("alice", "wrong password", auth_db))
+        except Exception as exc:  # noqa: BLE001 -- captured for the test to inspect
+            outcomes[index] = exc
+
+    threads = [threading.Thread(target=attempt, args=(i,)) for i in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert all(isinstance(outcome, InvalidCredentialError) for outcome in outcomes)
+
+    row = auth_db.execute(
+        "SELECT failed_login_attempts, locked_until FROM users WHERE username = 'alice'"
+    ).fetchone()
+    assert row["failed_login_attempts"] == 5
+    assert row["locked_until"] is not None
+
+    # The account is now locked even for the correct password.
+    with pytest.raises(InvalidCredentialError):
+        asyncio.run(authenticate("alice", VALID_PASSWORD, auth_db))
+
+
 def test_authenticate_succeeds_after_lockout_cleared_and_resets_attempts(
     auth_db: sqlite3.Connection,
 ) -> None:

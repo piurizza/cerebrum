@@ -14,6 +14,7 @@ from cerebrum.api.router import api_router
 from cerebrum.auth_db import connect as connect_auth_db
 from cerebrum.index.db import connect
 from cerebrum.index.indexer import rebuild_index
+from cerebrum.mcp.auth import DiscoverabilityHintMiddleware
 from cerebrum.mcp.server import create_mcp_server
 from cerebrum.settings import get_settings
 
@@ -83,12 +84,20 @@ def create_app() -> FastAPI:
     if settings.mcp_enabled:
         mcp = create_mcp_server(app)
         mcp_app = mcp.http_app(path="/")
+        # `app.state.mcp_app` keeps pointing at the *unwrapped* app: the
+        # lifespan above needs its real `.lifespan` attribute
+        # (`StarletteWithLifespan`-specific), which a plain ASGI-callable
+        # wrapper wouldn't carry.
         app.state.mcp_app = mcp_app
         # Own prefix (KTD2): `router.py`'s notes-catch-all route-ordering
         # hazard only applies within `api_router`'s own registration order --
         # a separate `Mount()` at a disjoint prefix sidesteps that class of
         # collision entirely rather than adding a new instance of it.
-        app.mount("/api/mcp", mcp_app)
+        # Wrapped in `DiscoverabilityHintMiddleware` (R9): FastMCP's own
+        # `RequireAuthMiddleware` gives `verify_token()` no channel to
+        # attach a message to its 401 responses, so the rewrite happens
+        # one layer up, in front of the mount, instead.
+        app.mount("/api/mcp", DiscoverabilityHintMiddleware(mcp_app))
 
     return app
 

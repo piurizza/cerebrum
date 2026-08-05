@@ -20,6 +20,20 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+// Lets `AuthContext` learn when a *post-mount* refresh attempt (triggered
+// by `request()`'s 401-retry path below, not the initial mount-time one it
+// drives directly) definitively fails, so it can flip `isAuthenticated` to
+// `false` and let `RequireAuth` redirect to `/login` -- without this, a
+// session that dies mid-use left the authenticated shell mounted with
+// every subsequent call throwing, instead of a clean redirect. A plain
+// module-level callback, not an event system: this client has exactly one
+// consumer (`AuthContext`) and no need for multiple subscribers.
+let onRefreshFailure: (() => void) | null = null;
+
+export function setOnRefreshFailure(callback: (() => void) | null): void {
+  onRefreshFailure = callback;
+}
+
 // The two endpoints that must never trigger a refresh-and-retry on 401:
 // `/auth/login` (a failed login is a real 401 the caller needs to see, not
 // something a token refresh could ever fix) and `/auth/refresh` itself
@@ -79,23 +93,41 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return toResult<T>(response, path, init);
 }
 
+// How long a single `/api/auth/refresh` attempt gets before it's treated
+// as failed. Without this, a hung network call would never resolve --
+// and since this fetch runs inside the `navigator.locks` critical section
+// below, a hang here blocks every tab's refresh indefinitely, which in
+// turn leaves `AuthContext`'s mount-time `loading` flag stuck `true`
+// forever (its `.finally()` never fires).
+const REFRESH_TIMEOUT_MS = 10_000;
+
 // The actual `/api/auth/refresh` POST call, factored out from
 // `refreshAccessToken()`'s locking/dedup logic below so that logic isn't
 // duplicated fetch plumbing `request()` already provides. Deliberately NOT
 // built on `request()`/`fetchWithToken()`: this call must never send an
 // `Authorization` header, even if `accessToken` happens to be stale or set
 // -- refresh authenticates via the httpOnly cookie only, and a stray bearer
-// token here would be misleading to anyone reading this code later.
-export async function refreshSession(): Promise<string> {
-  const response = await fetch(`${API_BASE}/api/auth/refresh`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!response.ok) {
-    throw new Error(`POST /auth/refresh failed: ${response.status}`);
+// token here would be misleading to anyone reading this code later. Not
+// exported: every caller, in-tab or cross-tab, must go through the
+// `navigator.locks`-guarded `refreshAccessToken()` below, never this raw
+// fetch directly -- see that function's docstring for why.
+async function refreshSession(): Promise<string> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`POST /auth/refresh failed: ${response.status}`);
+    }
+    const data = (await response.json()) as { access_token: string };
+    return data.access_token;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  const data = (await response.json()) as { access_token: string };
-  return data.access_token;
 }
 
 async function performRefresh(): Promise<string | null> {
@@ -105,6 +137,7 @@ async function performRefresh(): Promise<string | null> {
     return token;
   } catch {
     setAccessToken(null);
+    onRefreshFailure?.();
     return null;
   }
 }
@@ -116,7 +149,15 @@ async function performRefresh(): Promise<string | null> {
 // and get rejected, force-logging out a legitimate session.
 // `navigator.locks.request()` serializes this not just within one tab's
 // in-page state but across every open tab of the same origin.
-async function refreshAccessToken(): Promise<string | null> {
+//
+// Exported and the ONLY entry point into refreshing a session -- this
+// includes `AuthContext`'s mount-time silent-refresh attempt (restoring a
+// session on page reload), which is exactly the moment several tabs are
+// most likely to hit this concurrently (reopening a window, waking from
+// sleep). Calling the raw `refreshSession()` from there instead would
+// skip this guard entirely and reintroduce the false-positive-theft race
+// this function exists to prevent.
+export async function refreshAccessToken(): Promise<string | null> {
   const tokenBeforeRefresh = accessToken;
 
   return navigator.locks.request("auth-refresh", async () => {

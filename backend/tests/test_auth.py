@@ -159,6 +159,39 @@ def test_verify_credential_updates_last_used_at_on_api_token_success(
     assert after["last_used_at"] is not None
 
 
+def test_verify_credential_skips_last_used_at_write_when_already_recent(
+    auth_db: sqlite3.Connection,
+) -> None:
+    """`_verify_api_token()` throttles the `last_used_at` write to avoid a
+    fresh fsync'd UPDATE on every single request for a frequently-used
+    token -- but the only other test covering `last_used_at` only exercises
+    the write (stale/NULL) branch. Without this test, an inverted
+    condition (writing every time, or never writing at all) would slip
+    through untested."""
+    user_id = _insert_user(auth_db)
+    token, meta = create_api_token(user_id, "laptop", auth_db)
+    asyncio.run(verify_credential(token, auth_db))
+
+    first = auth_db.execute(
+        "SELECT last_used_at FROM api_tokens WHERE id = ?", (meta.id,)
+    ).fetchone()["last_used_at"]
+    assert first is not None
+
+    # Immediately reusing the same token is well within the throttle
+    # window -- the write must be skipped entirely. This is discriminating
+    # without needing to mock the clock: `last_used_at` is stored with
+    # microsecond precision, so an inverted "always write" bug would
+    # produce a *different* timestamp on this second call (two
+    # `datetime.now(UTC)` calls microseconds apart essentially never
+    # collide) -- only a genuine skip leaves the exact same value.
+    asyncio.run(verify_credential(token, auth_db))
+
+    second = auth_db.execute(
+        "SELECT last_used_at FROM api_tokens WHERE id = ?", (meta.id,)
+    ).fetchone()["last_used_at"]
+    assert second == first
+
+
 def test_token_verifier_accepts_valid_credential(
     app: FastAPI, auth_db: sqlite3.Connection
 ) -> None:

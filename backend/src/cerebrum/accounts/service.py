@@ -248,18 +248,36 @@ def _verify_password_or_dummy(password_hash: str, password: str) -> bool:
         return False
 
 
-def _record_failed_login(
-    auth_db: sqlite3.Connection, user_id: int, failed_attempts: int
-) -> None:
-    new_count = failed_attempts + 1
-    locked_until = None
-    if new_count >= _FAILED_LOGIN_LOCKOUT_THRESHOLD:
-        locked_until = (datetime.now(UTC) + _LOCKOUT_DURATION).isoformat()
+def _record_failed_login(auth_db: sqlite3.Connection, user_id: int) -> None:
+    """Increment `failed_login_attempts` atomically -- `failed_login_attempts
+    = failed_login_attempts + 1` inside the UPDATE itself, not a value read
+    by the caller before this call and written back here. `authenticate()`
+    reads the row, then awaits an Argon2 verify (tens-hundreds of ms) before
+    ever calling this; a value captured before that await is stale by the
+    time it would be written, so concurrent failed attempts against the same
+    account would each overwrite the same pre-verify count instead of
+    accumulating -- silently defeating the lockout threshold under exactly
+    the concurrent-guessing pattern it exists to catch. Deriving
+    `locked_until` from this statement's own `RETURNING` value, in the same
+    locked block, is what keeps the whole read-increment-decide sequence
+    atomic against that race.
+    """
     with auth_write_lock, auth_db:
-        auth_db.execute(
-            "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
-            (new_count, locked_until, user_id),
-        )
+        row = auth_db.execute(
+            """
+            UPDATE users SET failed_login_attempts = failed_login_attempts + 1
+            WHERE id = ?
+            RETURNING failed_login_attempts
+            """,
+            (user_id,),
+        ).fetchone()
+        new_count = row["failed_login_attempts"]
+        if new_count >= _FAILED_LOGIN_LOCKOUT_THRESHOLD:
+            locked_until = (datetime.now(UTC) + _LOCKOUT_DURATION).isoformat()
+            auth_db.execute(
+                "UPDATE users SET locked_until = ? WHERE id = ?",
+                (locked_until, user_id),
+            )
 
 
 def _record_successful_login(auth_db: sqlite3.Connection, user_id: int) -> None:
@@ -310,8 +328,15 @@ async def authenticate(
     now = datetime.now(UTC)
     locked_until = row["locked_until"]
     if locked_until is not None and datetime.fromisoformat(locked_until) > now:
-        # Locked out -- reject without paying the Argon2 cost at all; a
-        # locked account shouldn't get a hash-verify attempt on every try.
+        # Locked out. Still pays the dummy-hash Argon2 cost -- skipping it
+        # here would make a locked-out account's response measurably
+        # faster than a wrong-password response for an unlocked account,
+        # reopening by timing exactly the account-existence signal the
+        # nonexistent-username dummy-hash path above was built to close
+        # (a locked account is, definitionally, one that exists).
+        await anyio.to_thread.run_sync(
+            _verify_password_or_dummy, _DUMMY_PASSWORD_HASH, password
+        )
         raise InvalidCredentialError("account temporarily locked")
 
     password_ok = await anyio.to_thread.run_sync(
@@ -319,7 +344,7 @@ async def authenticate(
     )
 
     if not password_ok or not row["is_active"]:
-        _record_failed_login(auth_db, row["id"], row["failed_login_attempts"])
+        _record_failed_login(auth_db, row["id"])
         raise InvalidCredentialError("invalid username or password")
 
     _record_successful_login(auth_db, row["id"])

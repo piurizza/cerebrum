@@ -12,6 +12,7 @@ from tests.mcp_test_support import (
     INITIALIZE_PAYLOAD,
     MCP_HEADERS,
     issue_test_access_token,
+    issue_test_api_token,
     mcp_test_client,
 )
 
@@ -68,6 +69,64 @@ def test_valid_credential_accepted_and_wrong_credential_rejected(
             "/api/mcp", json=INITIALIZE_PAYLOAD, headers=bad_headers
         )
         assert bad_response.status_code == 401
+
+
+def test_invalid_credential_rejection_includes_discoverability_hint(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R9: a *presented* credential that fails verification gets a
+    rejection body naming where to generate a personal API token --
+    `DiscoverabilityHintMiddleware` rewriting FastMCP's own hardcoded
+    `RequireAuthMiddleware` message, not a bare 401. Confirmed at the HTTP
+    layer, not just that `verify_token()` was called -- this is the
+    response an MCP client actually receives, and FastMCP's own auth
+    middleware fully owns and previously overwrote it."""
+    with mcp_test_client(vault, monkeypatch) as client:
+        bad_headers = {**MCP_HEADERS, "Authorization": "Bearer wrong"}
+        response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=bad_headers)
+
+        assert response.status_code == 401
+        body = response.json()
+        assert body["error"] == "invalid_token"
+        assert "personal API token" in body["error_description"]
+        assert "settings page" in body["error_description"]
+        # The rewrite must not silently disclose vault or account data --
+        # only the fixed hint text is appended to FastMCP's own message.
+        assert "vault" not in body["error_description"].lower()
+
+
+def test_missing_credential_rejection_stays_rfc_6750_compliant(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The no-`Authorization`-header case is deliberately NOT rewritten:
+    RFC 6750 §3.1 forbids an `error` attribute on this specific response
+    shape (it exists so an MCP client can tell "no credential presented
+    yet" apart from "credential rejected" during OAuth discovery), and
+    `DiscoverabilityHintMiddleware` only touches the `invalid_token` shape
+    -- this pins that the empty-body response is untouched, not silently
+    broken by the rewrite."""
+    with mcp_test_client(vault, monkeypatch) as client:
+        response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=MCP_HEADERS)
+
+        assert response.status_code == 401
+        assert response.content == b""
+
+
+def test_personal_api_token_authenticates_through_the_live_mcp_mount(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Personal API tokens are the credential this feature is meant to make
+    MCP clients use day-to-day (R6/R9), but every other MCP test in this
+    file authenticates with a session JWT via `issue_test_access_token()`.
+    `SharedFunctionTokenVerifier` has no credential-type branching of its
+    own -- both shapes flow through the identical `verify_credential()`
+    call -- but this proves the PAT shape specifically against the real
+    `/api/mcp` POST, not just unit-level in `test_auth.py`."""
+    with mcp_test_client(vault, monkeypatch) as client:
+        token = issue_test_api_token(client)
+        headers = {**MCP_HEADERS, "Authorization": f"Bearer {token}"}
+        response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers)
+        assert response.status_code == 200
 
 
 def test_deactivated_accounts_open_connection_rejected_on_next_call(

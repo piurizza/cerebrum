@@ -6,7 +6,12 @@ import {
   useEffect,
   useState,
 } from "react";
-import { login as loginRequest, refreshSession, setAccessToken } from "../api/client";
+import {
+  login as loginRequest,
+  refreshAccessToken,
+  setAccessToken,
+  setOnRefreshFailure,
+} from "../api/client";
 
 // This context deliberately does NOT track `isAdmin`, and only tracks
 // `username` when a login form directly supplied it for this session.
@@ -50,17 +55,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // is no in-memory access token yet (e.g. the tab was just reloaded).
     // This is what makes session renewal transparent across a reload, not
     // just across an expired access token within an already-loaded page.
+    //
+    // Goes through `refreshAccessToken()` (the `navigator.locks`-guarded
+    // entry point), not the raw unlocked fetch -- a page reload is exactly
+    // when multiple tabs are most likely to hit this concurrently
+    // (reopening a window, waking from sleep), and calling the unlocked
+    // path here would race the backend's refresh-token rotation directly:
+    // the loser looks identical to token theft and the reuse-detection
+    // response revokes the whole family, including the winner's
+    // freshly-rotated token -- force-logging out every tab.
     let cancelled = false;
-    refreshSession()
+    refreshAccessToken()
       .then((token) => {
         if (cancelled) return;
-        setAccessToken(token);
-        setIsAuthenticated(true);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAccessToken(null);
-        setIsAuthenticated(false);
+        setIsAuthenticated(token !== null);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -68,6 +76,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    // A refresh triggered later by `request()`'s 401-retry path (not this
+    // component's own mount-time call above) can also fail -- e.g. the
+    // refresh cookie itself expired or the account was deactivated mid-
+    // session. Without this, the authenticated shell stayed mounted with
+    // every subsequent API call throwing, instead of redirecting to
+    // `/login` the same way an unauthenticated visit does.
+    setOnRefreshFailure(() => setIsAuthenticated(false));
+    return () => setOnRefreshFailure(null);
   }, []);
 
   const login = useCallback(async (user: string, password: string) => {

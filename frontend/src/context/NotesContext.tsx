@@ -6,7 +6,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { listNotes } from "../api/client";
+import { errorMessage, listNotes } from "../api/client";
 import type { NoteMeta } from "../types/note";
 
 interface NotesContextValue {
@@ -27,7 +27,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setNotes(result);
         setError(null);
       })
-      .catch((err: unknown) => setError(String(err)));
+      .catch((err: unknown) => setError(errorMessage(err)));
   }, []);
 
   useEffect(() => {

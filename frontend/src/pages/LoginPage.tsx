@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { errorMessage } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
@@ -24,13 +25,12 @@ export function LoginPage() {
       await login(username, password);
       navigate("/");
     } catch (err) {
-      // The backend returns a generic 401 for both a wrong password and an
-      // unknown username -- match that here rather than distinguishing,
-      // so this page can't leak which one it was.
-      const message = String(err).includes("401")
-        ? "Invalid username or password"
-        : String(err);
-      setError(message);
+      // No special-casing needed here: the backend's own detail text for
+      // a login failure is already the right generic message ("Invalid
+      // username or password") for both a wrong password and an unknown
+      // username -- see api/auth.py's `login()`. `errorMessage()` surfaces
+      // that text as-is.
+      setError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }

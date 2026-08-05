@@ -3,6 +3,7 @@ import {
   createApiToken,
   createInvite,
   deactivateAccount,
+  errorMessage,
   listAccounts,
   listApiTokens,
   revokeApiToken,
@@ -56,7 +57,7 @@ function ApiTokensSection() {
         setTokens(result);
         setError(null);
       })
-      .catch((err: unknown) => setError(String(err)));
+      .catch((err: unknown) => setError(errorMessage(err)));
   }, []);
 
   useEffect(() => {
@@ -75,7 +76,7 @@ function ApiTokensSection() {
       setName("");
       refresh();
     } catch (err) {
-      setError(String(err));
+      setError(errorMessage(err));
     } finally {
       setCreating(false);
     }
@@ -90,7 +91,7 @@ function ApiTokensSection() {
       setRevokeTarget(null);
       refresh();
     } catch (err) {
-      setRevokeError(String(err));
+      setRevokeError(errorMessage(err));
     } finally {
       setRevoking(false);
     }
@@ -209,7 +210,7 @@ function AdminSection() {
       const result = await createInvite();
       setInviteToken(result.token);
     } catch (err) {
-      setInviteError(String(err));
+      setInviteError(errorMessage(err));
     } finally {
       setCreatingInvite(false);
     }
@@ -224,7 +225,7 @@ function AdminSection() {
       setDeactivateTarget(null);
       refresh();
     } catch (err) {
-      setDeactivateError(String(err));
+      setDeactivateError(errorMessage(err));
     } finally {
       setDeactivating(false);
     }

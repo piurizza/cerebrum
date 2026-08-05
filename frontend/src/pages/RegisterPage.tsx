@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { register } from "../api/client";
+import { errorMessage, register } from "../api/client";
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -20,7 +20,7 @@ export function RegisterPage() {
       await register(username, password, token);
       navigate("/login", { state: { registered: true, username } });
     } catch (err) {
-      setError(String(err));
+      setError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }

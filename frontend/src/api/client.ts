@@ -8,6 +8,16 @@ import type { GraphResponse, Note, NoteMeta } from "../types/note";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
+// Every `catch (err: unknown)` block in this app that displays a caught
+// error to the user should read `err.message` through this, not
+// `String(err)` -- `Error.prototype.toString()` (what `String()` calls)
+// prepends the error's `name` (e.g. "ApiError: Invalid registration
+// token"), which is exactly the kind of technical noise a user-facing
+// error message shouldn't carry.
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // The access token lives in memory only -- never localStorage/sessionStorage
 // (this codebase has zero prior localStorage usage). An in-memory store is
 // more XSS-resistant than persisting a JWT to disk; the trade-off is that it
@@ -61,13 +71,58 @@ async function fetchWithToken(
   });
 }
 
+// Thrown instead of a plain `Error` on any non-2xx response, so callers
+// that need the status code (e.g. distinguishing a validation failure
+// from an auth failure) don't have to string-match the message -- see
+// `LoginPage.tsx`, which used to check `String(err).includes("401")`
+// before this existed.
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+// Every backend error response is FastAPI's default `{"detail": "..."}`
+// shape (confirmed across every route in this codebase) -- and that
+// `detail` text is already the right, specific, user-facing message
+// (e.g. "password must be at least 12 characters", "Invalid registration
+// token"). Discarding it in favor of a generic "POST /path failed: 400"
+// forced every form on this page to show a useless error no matter what
+// actually went wrong. Falls back to the generic message only when the
+// body isn't the expected shape (a network-level failure, a non-JSON
+// response, or a future endpoint that doesn't follow the convention).
+async function readErrorDetail(response: Response): Promise<string | null> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (
+      body !== null &&
+      typeof body === "object" &&
+      "detail" in body &&
+      typeof body.detail === "string"
+    ) {
+      return body.detail;
+    }
+  } catch {
+    // Not JSON (or no body at all) -- fall through to the generic message.
+  }
+  return null;
+}
+
 async function toResult<T>(
   response: Response,
   path: string,
   init?: RequestInit,
 ): Promise<T> {
   if (!response.ok) {
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${response.status}`);
+    const detail = await readErrorDetail(response);
+    throw new ApiError(
+      detail ?? `${init?.method ?? "GET"} ${path} failed: ${response.status}`,
+      response.status,
+    );
   }
   if (response.status === 204) {
     return undefined as T;

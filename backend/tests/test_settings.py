@@ -89,3 +89,35 @@ def test_construction_succeeds_with_32_byte_auth_secrets(
         assert settings.auth_setup_token.get_secret_value() == "y" * 32
     finally:
         get_settings.cache_clear()
+
+
+def test_watcher_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("WATCHER_ENABLED", raising=False)
+    monkeypatch.delenv("WATCHER_DEBOUNCE_MS", raising=False)
+    monkeypatch.delenv("WATCHER_BACKSTOP_INTERVAL_SECONDS", raising=False)
+    _set_valid_auth_env(monkeypatch)
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        assert settings.watcher_enabled is True
+        assert settings.watcher_debounce_ms == 400
+        assert settings.watcher_backstop_interval_seconds == 300
+    finally:
+        get_settings.cache_clear()
+
+
+def test_watcher_settings_read_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WATCHER_ENABLED", "false")
+    monkeypatch.setenv("WATCHER_DEBOUNCE_MS", "200")
+    monkeypatch.setenv("WATCHER_BACKSTOP_INTERVAL_SECONDS", "60")
+    _set_valid_auth_env(monkeypatch)
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        assert settings.watcher_enabled is False
+        assert settings.watcher_debounce_ms == 200
+        assert settings.watcher_backstop_interval_seconds == 60
+    finally:
+        get_settings.cache_clear()

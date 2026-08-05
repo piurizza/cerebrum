@@ -10,6 +10,10 @@ services:
       # instead of silently starting with an empty/missing secret.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?}
       AUTH_SETUP_TOKEN: ${AUTH_SETUP_TOKEN:?}
+      # Opt-in for bind-mount/network filesystems where inotify events are
+      # unreliable (Docker Desktop on macOS/Windows, NFS) -- left empty by
+      # default so the operator decides, not an auto-detect guess.
+      WATCHFILES_FORCE_POLLING: ${WATCHFILES_FORCE_POLLING:-}
     volumes:
       - ${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault
     healthcheck:

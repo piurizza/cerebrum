@@ -216,6 +216,10 @@ API calls.
 | `AUTH_ACCESS_TOKEN_TTL_MINUTES` | backend | `10` | access-token lifetime |
 | `AUTH_REFRESH_TOKEN_TTL_DAYS` | backend | `30` | refresh-token (session) lifetime |
 | `AUTH_COOKIE_SECURE` | backend | `false` | mark the refresh-token cookie `Secure`; enable once served over TLS |
+| `WATCHER_ENABLED` | backend | `true` | watch the vault for out-of-band `.md` changes and keep the index in sync |
+| `WATCHER_DEBOUNCE_MS` | backend | `400` | debounce window for batching filesystem change events |
+| `WATCHER_BACKSTOP_INTERVAL_SECONDS` | backend | `300` | interval for the periodic backstop rescan alongside real-time watching |
+| `WATCHFILES_FORCE_POLLING` | backend | *(unset)* | force polling instead of native filesystem events; opt in on bind-mount/network filesystems (Docker Desktop on macOS/Windows, NFS) |
 | `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
 | `CEREBRUM_PORT` | compose | `8080` | host port for the frontend |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |

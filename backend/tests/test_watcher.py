@@ -229,6 +229,88 @@ def test_debounce_setting_is_forwarded_to_awatch(
     assert captured["debounce"] == 1234
 
 
+def test_per_file_processing_error_does_not_kill_watcher(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a single file's transient processing error (e.g. an
+    `upsert_note` race) must not end the whole `watch_vault` coroutine --
+    only the file that errored is skipped; a later, unrelated change is
+    still processed. Code review found the original implementation's
+    outer `try/except` swallowed per-file errors and returned, silently
+    downgrading live sync to the 300s backstop rescan for the rest of the
+    process's life.
+    """
+    real_upsert_note = watcher.upsert_note
+    calls: list[str] = []
+
+    def flaky_upsert_note(
+        conn: sqlite3.Connection, vault_root: Path, path: str
+    ) -> None:
+        calls.append(path)
+        if path == "a.md":
+            raise FileNotFoundError("simulated delete-race")
+        real_upsert_note(conn, vault_root, path)
+
+    monkeypatch.setattr(watcher, "upsert_note", flaky_upsert_note)
+    settings = _settings()
+
+    async def run() -> None:
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(watch_vault(db, vault, settings, stop_event))
+        try:
+            await asyncio.sleep(0.2)
+            write_note(vault, "a.md", "content a")  # triggers the simulated error
+            await _wait_until(lambda: "a.md" in calls)
+
+            # The watcher must still be running (not returned/crashed) and
+            # must still process a subsequent, unrelated change.
+            assert not task.done()
+            write_note(vault, "b.md", "content b")
+            await _wait_until(
+                lambda: {note.path for note in list_notes(db)} == {"b.md"}
+            )
+        finally:
+            stop_event.set()
+            await task
+
+    asyncio.run(run())
+
+
+def test_same_path_conflicting_events_resolved_by_file_existence(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: `awatch()` yields a `set`, not a chronologically ordered
+    sequence -- a rapid delete-then-recreate of the same path within one
+    debounce window can land both a `deleted` and an `added` entry for it
+    in the same batch, in arbitrary iteration order. `watch_vault` must
+    resolve the final action from the file's actual current existence,
+    not from whichever entry happens to be applied last.
+    """
+    write_note(vault, "a.md", "content")
+    abs_path = str((vault / "a.md").resolve())
+
+    async def fake_awatch(*_args: object, **_kwargs: object):
+        # The file exists on disk (written above) -- both a `deleted` and
+        # an `added` entry appear for it in one batch, deliberately in the
+        # "wrong" order (deleted last) to prove order isn't what decides
+        # the outcome.
+        yield {(Change.added, abs_path), (Change.deleted, abs_path)}
+
+    monkeypatch.setattr(watcher, "awatch", fake_awatch)
+    settings = _settings()
+
+    async def run() -> None:
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(watch_vault(db, vault, settings, stop_event))
+        try:
+            await _wait_until(lambda: [n.path for n in list_notes(db)] == ["a.md"])
+        finally:
+            stop_event.set()
+            await task
+
+    asyncio.run(run())
+
+
 def test_burst_of_rapid_writes_dispatches_once(
     vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:

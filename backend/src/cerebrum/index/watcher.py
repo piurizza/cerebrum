@@ -66,11 +66,36 @@ async def watch_vault(
             debounce=settings.watcher_debounce_ms,
             stop_event=stop_event,
         ):
-            for change, abs_path in changes:
-                rel_path = Path(abs_path).relative_to(vault_root).as_posix()
-                if change is Change.deleted:
-                    await asyncio.to_thread(remove_note, conn, rel_path)
-                else:
-                    await asyncio.to_thread(upsert_note, conn, vault_root, rel_path)
-    except (FileNotFoundError, PermissionError, WatchfilesRustInternalError) as exc:
+            # `changes` is a set, not chronologically ordered -- a rapid
+            # delete-then-recreate (or vice versa) of the same path within
+            # one debounce window can yield both a `deleted` and an
+            # `added`/`modified` entry for it. Trusting each entry's own
+            # `Change` value could apply them out of order and leave a
+            # wrong index row until the next backstop rescan. Instead,
+            # collapse to one decisive action per distinct path, based on
+            # whether the file actually exists right now.
+            rel_paths = {
+                Path(abs_path).relative_to(vault_root).as_posix()
+                for _, abs_path in changes
+            }
+            for rel_path in rel_paths:
+                try:
+                    if (vault_root / rel_path).exists():
+                        await asyncio.to_thread(upsert_note, conn, vault_root, rel_path)
+                    else:
+                        await asyncio.to_thread(remove_note, conn, rel_path)
+                except (FileNotFoundError, PermissionError) as exc:
+                    # A single file's transient race (e.g. deleted between
+                    # the exists() check above and upsert_note's read)
+                    # must not end the whole watcher -- mirrors
+                    # rebuild_index's per-note error containment
+                    # (index/indexer.py). The next event or backstop tick
+                    # self-heals.
+                    logger.warning(
+                        "skipping transient change for %s: %s", rel_path, exc
+                    )
+    except (OSError, WatchfilesRustInternalError) as exc:
+        # OSError also covers FileNotFoundError/PermissionError raised by
+        # awatch() itself (vault root removed/inaccessible), not just the
+        # two named subclasses -- e.g. an inotify watch-limit error.
         logger.warning("vault watcher stopped: %s", exc)

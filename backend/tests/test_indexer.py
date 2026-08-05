@@ -252,6 +252,20 @@ def _run_read_churn(
         outcomes[index] = exc
 
 
+def _run_graph_read_churn(
+    db: sqlite3.Connection,
+    outcomes: list[Exception | None],
+    index: int,
+) -> None:
+    try:
+        for _ in range(_CHURN_ITERATIONS):
+            get_graph(db)
+            get_backlinks(db, "a.md")
+        outcomes[index] = None
+    except Exception as exc:  # noqa: BLE001 -- captured for the test to inspect
+        outcomes[index] = exc
+
+
 def test_concurrent_rebuild_index_and_writes_do_not_raise(
     vault: Path, db: sqlite3.Connection
 ) -> None:
@@ -310,6 +324,37 @@ def test_concurrent_list_and_search_notes_with_writes_do_not_raise(
     threads = [
         threading.Thread(target=_run_read_churn, args=(db, outcomes, 0)),
         threading.Thread(target=_run_read_churn, args=(db, outcomes, 1)),
+        threading.Thread(
+            target=_run_write_churn, args=((vault, db, "a.md"), outcomes, 2)
+        ),
+        threading.Thread(
+            target=_run_write_churn, args=((vault, db, "b.md"), outcomes, 3)
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert outcomes == [None, None, None, None]
+
+
+def test_concurrent_graph_reads_with_writes_do_not_raise(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Regression test: get_graph/get_backlinks (graph/service.py) had the
+    same unlocked-read hazard as list_notes/search_notes/rebuild_index
+    before the review fix that added write_lock there too -- code review
+    found this second instance after the primary KTD5 fix landed.
+    """
+    write_note(vault, "a.md", "See [B](b.md).")
+    write_note(vault, "b.md", "content b")
+    rebuild_index(db, vault)
+
+    outcomes: list[Exception | None] = [None] * 4
+    threads = [
+        threading.Thread(target=_run_graph_read_churn, args=(db, outcomes, 0)),
+        threading.Thread(target=_run_graph_read_churn, args=(db, outcomes, 1)),
         threading.Thread(
             target=_run_write_churn, args=((vault, db, "a.md"), outcomes, 2)
         ),

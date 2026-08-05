@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { deleteNote, moveNote } from "../../api/client";
+import { deleteNote, errorMessage, moveNote } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import { formatTimestamp } from "../../lib/formatDate";
 import type { Note } from "../../types/note";
@@ -82,7 +82,7 @@ export function NotePathHeader({
       refreshNotes();
       onRenamed(updated);
     } catch (err) {
-      setRenameError(String(err));
+      setRenameError(errorMessage(err));
       setRenaming(false);
     }
   }
@@ -93,7 +93,7 @@ export function NotePathHeader({
     try {
       await deleteNote(path);
     } catch (err) {
-      setDeleteError(String(err));
+      setDeleteError(errorMessage(err));
       setDeleting(false);
       return;
     }

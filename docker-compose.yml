@@ -5,6 +5,11 @@ services:
     environment:
       APP_ENV: production
       CEREBRUM_VAULT_PATH: /data/vault
+      # Sourced from the host environment (a root .env, see .env.example),
+      # not hardcoded -- `:?` fails the compose run with a clear error
+      # instead of silently starting with an empty/missing secret.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?}
+      AUTH_SETUP_TOKEN: ${AUTH_SETUP_TOKEN:?}
     volumes:
       - ${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault
     healthcheck:

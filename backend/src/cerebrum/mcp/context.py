@@ -16,3 +16,12 @@ def get_db(app: FastAPI) -> sqlite3.Connection:
     instead (KTD8): FastMCP tool functions are plain callables, not FastAPI
     endpoints, so they have no access to `Depends()`-injected values."""
     return cast(sqlite3.Connection, app.state.db)
+
+
+def get_auth_db(app: FastAPI) -> sqlite3.Connection:
+    """The `app.state.auth_db` counterpart to `get_db()` above -- added in
+    U3 so `mcp/auth.py`'s `SharedFunctionTokenVerifier` can reach the auth
+    database the same way REST routes do via `api/deps.py`'s
+    `get_auth_db()`, now that `cerebrum.auth.verify_credential()` needs a
+    live connection to do real verification."""
+    return cast(sqlite3.Connection, app.state.auth_db)

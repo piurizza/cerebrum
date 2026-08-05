@@ -1,16 +1,230 @@
+import type {
+  AccountSummary,
+  ApiTokenMeta,
+  CreateApiTokenResult,
+  CreateInviteResult,
+} from "../types/auth";
 import type { GraphResponse, Note, NoteMeta } from "../types/note";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}/api${path}`, init);
+// Every `catch (err: unknown)` block in this app that displays a caught
+// error to the user should read `err.message` through this, not
+// `String(err)` -- `Error.prototype.toString()` (what `String()` calls)
+// prepends the error's `name` (e.g. "ApiError: Invalid registration
+// token"), which is exactly the kind of technical noise a user-facing
+// error message shouldn't carry.
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// The access token lives in memory only -- never localStorage/sessionStorage
+// (this codebase has zero prior localStorage usage). An in-memory store is
+// more XSS-resistant than persisting a JWT to disk; the trade-off is that it
+// doesn't survive a page reload on its own -- AuthContext's silent refresh
+// on mount (via the httpOnly refresh-token cookie) is what restores a
+// session across a reload.
+let accessToken: string | null = null;
+
+export function setAccessToken(token: string | null): void {
+  accessToken = token;
+}
+
+// Lets `AuthContext` learn when a *post-mount* refresh attempt (triggered
+// by `request()`'s 401-retry path below, not the initial mount-time one it
+// drives directly) definitively fails, so it can flip `isAuthenticated` to
+// `false` and let `RequireAuth` redirect to `/login` -- without this, a
+// session that dies mid-use left the authenticated shell mounted with
+// every subsequent call throwing, instead of a clean redirect. A plain
+// module-level callback, not an event system: this client has exactly one
+// consumer (`AuthContext`) and no need for multiple subscribers.
+let onRefreshFailure: (() => void) | null = null;
+
+export function setOnRefreshFailure(callback: (() => void) | null): void {
+  onRefreshFailure = callback;
+}
+
+// The two endpoints that must never trigger a refresh-and-retry on 401:
+// `/auth/login` (a failed login is a real 401 the caller needs to see, not
+// something a token refresh could ever fix) and `/auth/refresh` itself
+// (retrying a failed refresh with another refresh would loop forever).
+function isAuthBootstrapPath(path: string): boolean {
+  return path === "/auth/login" || path === "/auth/refresh";
+}
+
+async function fetchWithToken(
+  path: string,
+  init: RequestInit | undefined,
+  token: string | null,
+): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return fetch(`${API_BASE}/api${path}`, {
+    ...init,
+    headers,
+    // Needed so the httpOnly refresh-token cookie is sent to
+    // `/api/auth/refresh` -- harmless on every other request since they
+    // don't read cookies at all.
+    credentials: "include",
+  });
+}
+
+// Thrown instead of a plain `Error` on any non-2xx response, so callers
+// that need the status code (e.g. distinguishing a validation failure
+// from an auth failure) don't have to string-match the message -- see
+// `LoginPage.tsx`, which used to check `String(err).includes("401")`
+// before this existed.
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+// Every backend error response is FastAPI's default `{"detail": "..."}`
+// shape (confirmed across every route in this codebase) -- and that
+// `detail` text is already the right, specific, user-facing message
+// (e.g. "password must be at least 12 characters", "Invalid registration
+// token"). Discarding it in favor of a generic "POST /path failed: 400"
+// forced every form on this page to show a useless error no matter what
+// actually went wrong. Falls back to the generic message only when the
+// body isn't the expected shape (a network-level failure, a non-JSON
+// response, or a future endpoint that doesn't follow the convention).
+async function readErrorDetail(response: Response): Promise<string | null> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (
+      body !== null &&
+      typeof body === "object" &&
+      "detail" in body &&
+      typeof body.detail === "string"
+    ) {
+      return body.detail;
+    }
+  } catch {
+    // Not JSON (or no body at all) -- fall through to the generic message.
+  }
+  return null;
+}
+
+async function toResult<T>(
+  response: Response,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
   if (!response.ok) {
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${response.status}`);
+    const detail = await readErrorDetail(response);
+    throw new ApiError(
+      detail ?? `${init?.method ?? "GET"} ${path} failed: ${response.status}`,
+      response.status,
+    );
   }
   if (response.status === 204) {
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response = await fetchWithToken(path, init, accessToken);
+
+  if (response.status === 401 && !isAuthBootstrapPath(path)) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) {
+      response = await fetchWithToken(path, init, refreshedToken);
+    }
+    // On refresh failure `refreshAccessToken()` has already cleared the
+    // access token; `response` here is still the original 401, which
+    // `toResult()` below turns into a thrown error -- no second retry, no
+    // navigation (this module has no router access; `AuthContext` is
+    // responsible for redirecting to /login once it observes this).
+  }
+
+  return toResult<T>(response, path, init);
+}
+
+// How long a single `/api/auth/refresh` attempt gets before it's treated
+// as failed. Without this, a hung network call would never resolve --
+// and since this fetch runs inside the `navigator.locks` critical section
+// below, a hang here blocks every tab's refresh indefinitely, which in
+// turn leaves `AuthContext`'s mount-time `loading` flag stuck `true`
+// forever (its `.finally()` never fires).
+const REFRESH_TIMEOUT_MS = 10_000;
+
+// The actual `/api/auth/refresh` POST call, factored out from
+// `refreshAccessToken()`'s locking/dedup logic below so that logic isn't
+// duplicated fetch plumbing `request()` already provides. Deliberately NOT
+// built on `request()`/`fetchWithToken()`: this call must never send an
+// `Authorization` header, even if `accessToken` happens to be stale or set
+// -- refresh authenticates via the httpOnly cookie only, and a stray bearer
+// token here would be misleading to anyone reading this code later. Not
+// exported: every caller, in-tab or cross-tab, must go through the
+// `navigator.locks`-guarded `refreshAccessToken()` below, never this raw
+// fetch directly -- see that function's docstring for why.
+async function refreshSession(): Promise<string> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`POST /auth/refresh failed: ${response.status}`);
+    }
+    const data = (await response.json()) as { access_token: string };
+    return data.access_token;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function performRefresh(): Promise<string | null> {
+  try {
+    const token = await refreshSession();
+    setAccessToken(token);
+    return token;
+  } catch {
+    setAccessToken(null);
+    onRefreshFailure?.();
+    return null;
+  }
+}
+
+// Cross-tab single-flight guard: the refresh-token cookie is shared
+// browser-wide, so two tabs racing to refresh at the same moment would
+// otherwise both call `/api/auth/refresh` -- the second one would look
+// identical to token-theft (an already-rotated refresh token being reused)
+// and get rejected, force-logging out a legitimate session.
+// `navigator.locks.request()` serializes this not just within one tab's
+// in-page state but across every open tab of the same origin.
+//
+// Exported and the ONLY entry point into refreshing a session -- this
+// includes `AuthContext`'s mount-time silent-refresh attempt (restoring a
+// session on page reload), which is exactly the moment several tabs are
+// most likely to hit this concurrently (reopening a window, waking from
+// sleep). Calling the raw `refreshSession()` from there instead would
+// skip this guard entirely and reintroduce the false-positive-theft race
+// this function exists to prevent.
+export async function refreshAccessToken(): Promise<string | null> {
+  const tokenBeforeRefresh = accessToken;
+
+  return navigator.locks.request("auth-refresh", async () => {
+    // Another tab (or another caller in this tab) may have already won
+    // the lock race and refreshed by the time we get in here -- if the
+    // in-memory token moved on from what we saw before requesting the
+    // lock, use that instead of hitting `/auth/refresh` again.
+    if (accessToken !== tokenBeforeRefresh) {
+      return accessToken;
+    }
+    return performRefresh();
+  });
 }
 
 export function encodeNotePath(path: string): string {
@@ -55,4 +269,59 @@ export function getBacklinks(path: string): Promise<NoteMeta[]> {
 
 export function searchNotes(query: string): Promise<NoteMeta[]> {
   return request<NoteMeta[]>(`/search?q=${encodeURIComponent(query)}`);
+}
+
+// --- Auth ---
+
+export async function login(username: string, password: string): Promise<void> {
+  const data = await request<{ access_token: string }>("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  setAccessToken(data.access_token);
+}
+
+export function register(
+  username: string,
+  password: string,
+  token: string,
+): Promise<void> {
+  return request<void>("/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password, token }),
+  });
+}
+
+// --- Personal API tokens ---
+
+export function createApiToken(name: string): Promise<CreateApiTokenResult> {
+  return request<CreateApiTokenResult>("/tokens", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function listApiTokens(): Promise<ApiTokenMeta[]> {
+  return request<ApiTokenMeta[]>("/tokens");
+}
+
+export function revokeApiToken(id: number): Promise<void> {
+  return request<void>(`/tokens/${id}`, { method: "DELETE" });
+}
+
+// --- Admin ---
+
+export function createInvite(): Promise<CreateInviteResult> {
+  return request<CreateInviteResult>("/invites", { method: "POST" });
+}
+
+export function listAccounts(): Promise<AccountSummary[]> {
+  return request<AccountSummary[]>("/accounts");
+}
+
+export function deactivateAccount(id: number): Promise<void> {
+  return request<void>(`/accounts/${id}/deactivate`, { method: "POST" });
 }

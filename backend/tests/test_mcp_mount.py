@@ -6,26 +6,26 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from cerebrum.auth import STUB_VALID_CREDENTIAL
 from cerebrum.main import create_app
 from cerebrum.settings import get_settings
-from tests.mcp_test_support import INITIALIZE_PAYLOAD, MCP_HEADERS, mcp_test_client
-
-_AUTHED_MCP_HEADERS = {
-    **MCP_HEADERS,
-    "Authorization": f"Bearer {STUB_VALID_CREDENTIAL}",
-}
+from tests.mcp_test_support import (
+    INITIALIZE_PAYLOAD,
+    MCP_HEADERS,
+    issue_test_access_token,
+    mcp_test_client,
+)
 
 
 def test_mcp_mount_responds_to_handshake(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Auth (U5) now gates this mount; stub-auth is opted in here since this
-    # test's own concern is the mount/handshake, not auth (see test_mcp_auth.py).
-    with mcp_test_client(vault, monkeypatch, allow_stub_auth=True) as client:
-        response = client.post(
-            "/api/mcp", json=INITIALIZE_PAYLOAD, headers=_AUTHED_MCP_HEADERS
-        )
+    # Auth gates this mount unconditionally; a real access token is used
+    # here since this test's own concern is the mount/handshake, not auth
+    # itself (see test_mcp_auth.py).
+    with mcp_test_client(vault, monkeypatch) as client:
+        token = issue_test_access_token(client)
+        headers = {**MCP_HEADERS, "Authorization": f"Bearer {token}"}
+        response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers)
         assert response.status_code == 200
 
 
@@ -34,7 +34,9 @@ def test_existing_rest_routes_unaffected_by_mcp_mount(
 ) -> None:
     with mcp_test_client(vault, monkeypatch) as client:
         assert client.get("/api/health").status_code == 200
-        assert client.get("/api/notes").status_code == 200
+        token = issue_test_access_token(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        assert client.get("/api/notes", headers=headers).status_code == 200
 
 
 def test_mcp_mount_absent_when_disabled(
@@ -60,6 +62,10 @@ def test_lifespan_teardown_on_startup_failure(
     here proves `db.close()` actually ran, not just that the exception
     propagated."""
     monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    # See conftest.py's `client` fixture -- these two are required
+    # settings with no default, so app construction fails without them.
+    monkeypatch.setenv("AUTH_JWT_SECRET", "x" * 32)
+    monkeypatch.setenv("AUTH_SETUP_TOKEN", "y" * 32)
     get_settings.cache_clear()
 
     def _boom(*_args: object, **_kwargs: object) -> None:
@@ -94,8 +100,8 @@ def test_repeated_create_app_construction_has_no_state_leakage(
     FastMCP issues under repeated-construction load a full suite run
     actually produces."""
     for _ in range(3):
-        with mcp_test_client(vault, monkeypatch, allow_stub_auth=True) as client:
-            response = client.post(
-                "/api/mcp", json=INITIALIZE_PAYLOAD, headers=_AUTHED_MCP_HEADERS
-            )
+        with mcp_test_client(vault, monkeypatch) as client:
+            token = issue_test_access_token(client)
+            headers = {**MCP_HEADERS, "Authorization": f"Bearer {token}"}
+            response = client.post("/api/mcp", json=INITIALIZE_PAYLOAD, headers=headers)
             assert response.status_code == 200

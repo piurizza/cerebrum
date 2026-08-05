@@ -43,6 +43,13 @@ Notes are bind-mounted from `./vault` on the host (override via
 `CEREBRUM_VAULT_HOST_PATH` in a root `.env`, copied from `.env.example`) so
 they persist independently of the containers.
 
+Accounts, sessions, and personal API tokens live in their own SQLite
+database (`auth.sqlite3`), stored alongside the search index under
+`<vault>/.cerebrum/` -- i.e. inside the same bind-mounted vault directory
+above, not a separate volume. Anyone already backing up the vault is
+already backing up accounts/sessions/tokens; no separate backup step is
+needed as long as `auth.sqlite3` stays under that mount.
+
 ## MCP server
 
 An MCP server is mounted at `/api/mcp`, reachable through the same

@@ -19,7 +19,7 @@ def create_mcp_server(app: FastAPI) -> FastMCP:
     settings the same way REST routes do via `api/deps.py`'s `get_db`.
     """
     settings = get_settings()
-    verifier = SharedFunctionTokenVerifier(allow_stub_auth=settings.mcp_allow_stub_auth)
+    verifier = SharedFunctionTokenVerifier(app=app)
     mcp = FastMCP(name=settings.app_name, auth=verifier)
     register_notes_tools(mcp, app)
     register_graph_tools(mcp, app)

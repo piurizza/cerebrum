@@ -8,9 +8,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastmcp.server.http import StarletteWithLifespan
 
+from cerebrum.api import health
+from cerebrum.api.auth import unauthenticated_router
 from cerebrum.api.router import api_router
+from cerebrum.auth_db import connect as connect_auth_db
 from cerebrum.index.db import connect
 from cerebrum.index.indexer import rebuild_index
+from cerebrum.mcp.auth import DiscoverabilityHintMiddleware
 from cerebrum.mcp.server import create_mcp_server
 from cerebrum.settings import get_settings
 
@@ -22,6 +26,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.cerebrum_vault_path.mkdir(parents=True, exist_ok=True)
         app.state.db = connect(settings.index_path)
         stack.callback(app.state.db.close)
+
+        # Separate database, separate connection, same open/close shape as
+        # app.state.db above -- see auth_db.py for why this can't just be
+        # another table in the index db (that one is a disposable cache;
+        # this one is the sole record of accounts/sessions/tokens).
+        app.state.auth_db = connect_auth_db(settings.auth_db_path)
+        stack.callback(app.state.auth_db.close)
 
         # FastMCP's ASGI sub-app has its own lifespan (managing its internal
         # task group/session manager) that is never invoked just by being
@@ -59,16 +70,34 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(api_router, prefix="/api")
+    # Mounted directly on `app`, not through `api_router` (see api/auth.py):
+    # this router carries routes -- register, login, refresh -- that must
+    # work with no `Authorization` header, so it must never end up behind
+    # `api_router`'s default auth dependency.
+    app.include_router(unauthenticated_router, prefix="/api/auth")
+    # Also mounted directly on `app`, not through `api_router` (see
+    # router.py): the Docker healthcheck hits this with no `Authorization`
+    # header, so it must never end up behind `api_router`'s default auth
+    # dependency either.
+    app.include_router(health.router, prefix="/api")
 
     if settings.mcp_enabled:
         mcp = create_mcp_server(app)
         mcp_app = mcp.http_app(path="/")
+        # `app.state.mcp_app` keeps pointing at the *unwrapped* app: the
+        # lifespan above needs its real `.lifespan` attribute
+        # (`StarletteWithLifespan`-specific), which a plain ASGI-callable
+        # wrapper wouldn't carry.
         app.state.mcp_app = mcp_app
         # Own prefix (KTD2): `router.py`'s notes-catch-all route-ordering
         # hazard only applies within `api_router`'s own registration order --
         # a separate `Mount()` at a disjoint prefix sidesteps that class of
         # collision entirely rather than adding a new instance of it.
-        app.mount("/api/mcp", mcp_app)
+        # Wrapped in `DiscoverabilityHintMiddleware` (R9): FastMCP's own
+        # `RequireAuthMiddleware` gives `verify_token()` no channel to
+        # attach a message to its 401 responses, so the rewrite happens
+        # one layer up, in front of the mount, instead.
+        app.mount("/api/mcp", DiscoverabilityHintMiddleware(mcp_app))
 
     return app
 

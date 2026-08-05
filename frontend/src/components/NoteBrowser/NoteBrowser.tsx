@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { encodeNotePath, putNote, searchNotes } from "../../api/client";
+import { encodeNotePath, errorMessage, putNote, searchNotes } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import { buildNoteTree } from "../../lib/noteTree";
 import type { NoteMeta } from "../../types/note";
@@ -93,7 +93,7 @@ export function NoteBrowser() {
     try {
       await putNote(path, "");
     } catch (err) {
-      setCreateError(String(err));
+      setCreateError(errorMessage(err));
       return;
     }
 

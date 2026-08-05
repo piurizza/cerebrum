@@ -211,6 +211,11 @@ API calls.
 | `CEREBRUM_VAULT_PATH` | backend | `./vault` | root dir of `.md` notes |
 | `CEREBRUM_INDEX_PATH` | backend | `<vault>/.cerebrum/index.sqlite3` | SQLite index location |
 | `CORS_ORIGINS` | backend | `["http://localhost:5173"]` | allowed frontend origins |
+| `AUTH_JWT_SECRET` | backend | *(required)* | signing secret for access-token JWTs |
+| `AUTH_SETUP_TOKEN` | backend | *(required)* | one-time invite token for the first (bootstrap admin) account |
+| `AUTH_ACCESS_TOKEN_TTL_MINUTES` | backend | `10` | access-token lifetime |
+| `AUTH_REFRESH_TOKEN_TTL_DAYS` | backend | `30` | refresh-token (session) lifetime |
+| `AUTH_COOKIE_SECURE` | backend | `false` | mark the refresh-token cookie `Secure`; enable once served over TLS |
 | `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
 | `CEREBRUM_PORT` | compose | `8080` | host port for the frontend |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
@@ -327,6 +332,21 @@ history.
 
 - [x] access their vault from any device via a browser (self-hosted,
       single server)
+- [x] register/log in/log out; sessions persist across browser restarts
+      via a rotating, hashed, `httpOnly` refresh-token cookie, with a
+      short-lived JWT access token held in memory. Reuse of a rotated
+      refresh token revokes the whole token family (theft detection).
+      Registration requires an invite token (first account bootstraps
+      via `AUTH_SETUP_TOKEN`; every account after that needs an
+      admin-generated invite).
+- [x] generate and manage personal API tokens (for MCP/programmatic
+      access), each independently revocable, from Settings.
+- [x] (admin) generate invite tokens and deactivate other accounts from
+      Settings; deactivating a user immediately revokes their sessions
+      and API tokens. Self-deactivation is rejected.
+- [x] lockout after repeated failed logins (atomic, race-safe counter),
+      with timing-attack-resistant rejection (dummy Argon2 hash paid
+      even on the locked-out/unknown-user paths).
 
 ### Editing experience
 
@@ -354,10 +374,6 @@ history.
 - **No filesystem watcher.** Edits made to `.md` files outside the API
   (e.g. directly with `vim`, or synced in by another tool) aren't picked
   up until the next backend startup rescan. Mitigated, not solved.
-- **No auth / multi-user support.** A single trusted user per deployment
-  is assumed.
-- **No full-text search endpoint yet.** The `notes_fts` table is
-  scaffolded but nothing populates or queries it yet.
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
 - **No attachment/image handling** defined yet (only `.md` files).

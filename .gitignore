@@ -20,3 +20,6 @@ frontend/.env
 # Vault data (user notes + derived index) — never commit personal notes
 /vault/*
 !/vault/.gitkeep
+
+# Agent planning artifacts (brainstorm/plan docs) — local working notes, not committed
+/docs/plans/

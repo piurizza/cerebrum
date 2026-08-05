@@ -5,11 +5,24 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from cerebrum.accounts.admin import create_invite, deactivate_account
+from cerebrum.accounts.admin import (
+    AccountSummary,
+    create_invite,
+    deactivate_account,
+    list_accounts,
+)
 from cerebrum.accounts.service import ForbiddenError
 from cerebrum.api.deps import get_auth_db, require_admin
 
 router = APIRouter()
+
+
+@router.get("/accounts", response_model=list[AccountSummary])
+def list_accounts_route(
+    _identity: str = Depends(require_admin),
+    auth_db: sqlite3.Connection = Depends(get_auth_db),
+) -> list[AccountSummary]:
+    return list_accounts(auth_db)
 
 
 class CreateInviteResponse(BaseModel):

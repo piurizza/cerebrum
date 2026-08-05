@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from cerebrum.accounts.admin import create_invite, deactivate_account
+from cerebrum.accounts.admin import create_invite, deactivate_account, list_accounts
 from cerebrum.accounts.service import (
     ForbiddenError,
     InvalidTokenError,
@@ -228,3 +228,34 @@ def test_deactivate_nonexistent_account_is_a_noop(
         "SELECT is_active FROM users WHERE id = ?", (admin.id,)
     ).fetchone()
     assert row["is_active"] == 1
+
+
+def test_list_accounts_returns_metadata_for_every_account_never_a_password_hash(
+    auth_db: sqlite3.Connection,
+) -> None:
+    admin = _bootstrap_admin(auth_db)
+    target = _register_via_invite(auth_db, admin, "target")
+
+    accounts = list_accounts(auth_db)
+
+    assert {account.id for account in accounts} == {admin.id, target.id}
+    by_id = {account.id: account for account in accounts}
+    assert by_id[admin.id].username == "admin"
+    assert by_id[admin.id].is_admin is True
+    assert by_id[admin.id].is_active is True
+    assert by_id[target.id].username == "target"
+    assert by_id[target.id].is_admin is False
+    assert by_id[target.id].is_active is True
+    for account in accounts:
+        assert not hasattr(account, "password_hash")
+
+
+def test_list_accounts_reflects_deactivation(auth_db: sqlite3.Connection) -> None:
+    admin = _bootstrap_admin(auth_db)
+    target = _register_via_invite(auth_db, admin, "target")
+
+    deactivate_account(admin.id, target.id, auth_db)
+
+    accounts = {account.id: account for account in list_accounts(auth_db)}
+    assert accounts[target.id].is_active is False
+    assert accounts[admin.id].is_active is True

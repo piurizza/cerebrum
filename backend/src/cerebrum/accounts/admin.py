@@ -4,6 +4,8 @@ import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
+from pydantic import BaseModel
+
 from cerebrum.accounts.service import ForbiddenError
 from cerebrum.auth_db import auth_write_lock, hash_token
 
@@ -15,6 +17,42 @@ from cerebrum.auth_db import auth_write_lock, hash_token
 # `service.py`'s `_FAILED_LOGIN_LOCKOUT_THRESHOLD`/`_LOCKOUT_DURATION`,
 # rather than a magic literal inline below.
 INVITE_TTL = timedelta(days=7)
+
+
+class AccountSummary(BaseModel):
+    """Account metadata safe to hand back to an admin caller -- mirrors
+    `accounts/tokens.py`'s `ApiTokenMeta` pattern: deliberately excludes
+    the password hash and any other sensitive column, exposing only what
+    an admin needs to decide which account to deactivate."""
+
+    id: int
+    username: str
+    is_admin: bool
+    is_active: bool
+
+
+def list_accounts(auth_db: sqlite3.Connection) -> list[AccountSummary]:
+    """Every account in the system, for the admin-only account list that
+    backs the "which account do I deactivate" UI -- there was previously
+    no way for an admin to discover account ids at all short of reading
+    the DB directly."""
+    # Locked even though it's a single read -- see `auth_db.py`'s
+    # `auth_write_lock` docstring: an unlocked read can race a concurrent
+    # thread's locked write against this same shared connection.
+    with auth_write_lock:
+        rows = auth_db.execute(
+            "SELECT id, username, is_admin, is_active FROM users ORDER BY id"
+        ).fetchall()
+
+    return [
+        AccountSummary(
+            id=row["id"],
+            username=row["username"],
+            is_admin=bool(row["is_admin"]),
+            is_active=bool(row["is_active"]),
+        )
+        for row in rows
+    ]
 
 
 def create_invite(admin_user_id: int, auth_db: sqlite3.Connection) -> str:

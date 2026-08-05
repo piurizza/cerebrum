@@ -167,3 +167,42 @@ def test_post_invites_rejects_missing_credential(client: TestClient) -> None:
 def test_post_deactivate_rejects_missing_credential(client: TestClient) -> None:
     response = client.post("/api/accounts/1/deactivate")
     assert response.status_code == 401
+
+
+def test_non_admin_cannot_list_accounts(client: TestClient) -> None:
+    admin_token = issue_test_access_token(client)
+    _, non_admin_token = _register_and_log_in_second_account(client, admin_token)
+
+    response = client.get(
+        "/api/accounts", headers={"Authorization": f"Bearer {non_admin_token}"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_get_accounts_rejects_missing_credential(client: TestClient) -> None:
+    response = client.get("/api/accounts")
+    assert response.status_code == 401
+
+
+def test_admin_lists_accounts_with_metadata_only(client: TestClient) -> None:
+    admin_token = issue_test_access_token(client)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    target_account, _ = _register_and_log_in_second_account(
+        client, admin_token, username="listed-user"
+    )
+
+    response = client.get("/api/accounts", headers=admin_headers)
+
+    assert response.status_code == 200, response.text
+    accounts = response.json()
+    usernames = {account["username"] for account in accounts}
+    assert "mcp-test-user" in usernames
+    assert "listed-user" in usernames
+
+    target = next(
+        account for account in accounts if account["id"] == target_account["id"]
+    )
+    assert target["is_admin"] is False
+    assert target["is_active"] is True
+    assert set(target.keys()) == {"id", "username", "is_admin", "is_active"}

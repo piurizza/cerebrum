@@ -83,7 +83,7 @@ function AppShell() {
 function RootLayout() {
   const { loading } = useAuth();
   if (loading) {
-    return <p className="empty-hint">Loading...</p>;
+    return <p className="loading-indicator">Loading...</p>;
   }
   return <Outlet />;
 }

@@ -10,6 +10,13 @@ import { stripFrontmatter } from "../lib/noteContent";
 
 type ViewMode = "edit" | "preview";
 
+// Best-effort platform detection for the shortcut hint (R6) --
+// `navigator.platform` is deprecated but still universally supported;
+// worst case a non-Mac user briefly sees "⌘" instead of "Ctrl", which is
+// cosmetic only, since the keydown handler above already accepts both.
+const isMac =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
 export function NoteViewPage() {
   const params = useParams();
   const path = params["*"] ?? "";
@@ -116,7 +123,7 @@ export function NoteViewPage() {
   }
 
   if (loading) {
-    return <p className="empty-hint">Loading...</p>;
+    return <p className="loading-indicator">Loading...</p>;
   }
 
   return (
@@ -186,6 +193,9 @@ export function NoteViewPage() {
             {saving ? "Saving..." : "Save"}
           </button>
           <span className="save-status">{isDirty ? "Unsaved changes" : "Saved"}</span>
+          <span className="shortcut-hint">
+            <kbd>{isMac ? "⌘" : "Ctrl"}</kbd>+<kbd>S</kbd> to save
+          </span>
         </div>
       </div>
       <aside className="note-backlinks">

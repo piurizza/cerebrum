@@ -628,6 +628,20 @@ a {
   color: var(--text-muted);
 }
 
+.shortcut-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.shortcut-hint kbd {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
 .note-backlinks {
   width: 240px;
   flex-shrink: 0;
@@ -649,6 +663,24 @@ a {
 
 .empty-hint {
   color: var(--text-muted);
+}
+
+/* One consistent loading treatment (initial auth check, note load,
+   search) instead of ad hoc "Loading..." text -- a subtle pulse so it
+   still reads as "in progress", not just muted static text. */
+.loading-indicator {
+  color: var(--text-muted);
+  animation: loading-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes loading-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .error-text {

@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     watcher_debounce_ms: int = 400
     watcher_backstop_interval_seconds: int = 300
 
+    max_attachment_size_bytes: int = 10_000_000
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @model_validator(mode="after")

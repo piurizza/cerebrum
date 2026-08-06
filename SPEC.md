@@ -29,8 +29,13 @@ deliberate simplification; see [Known Gaps](#10-known-gaps--future-work).
 
 - Notes live under a **vault directory**, configured via
   `CEREBRUM_VAULT_PATH` (default `./vault` in dev, `/data/vault` in Docker).
-- The vault is a plain directory tree of `.md` files (and, in future,
-  attachments). Nothing about its structure is proprietary.
+- The vault is a plain directory tree of `.md` files and their attachments.
+  Nothing about its structure is proprietary.
+- A note's pasted images live in a sibling folder named
+  `<note-stem>.attachments/` (dot-suffixed to avoid colliding with a
+  same-named content folder some vaults use). It travels with the note:
+  moving or renaming the note relocates the folder, deleting the note
+  removes it. See [Attachments](#attachments) in the feature roadmap.
 - A derived, disposable **index** lives at `<vault>/.cerebrum/index.sqlite3`
   (configurable via `CEREBRUM_INDEX_PATH`). It exists purely for fast
   queries (listing, backlinks, graph, search) and can be deleted and
@@ -223,6 +228,7 @@ API calls.
 | `WATCHER_DEBOUNCE_MS` | backend | `400` | debounce window for batching filesystem change events |
 | `WATCHER_BACKSTOP_INTERVAL_SECONDS` | backend | `300` | interval for the periodic backstop rescan alongside real-time watching |
 | `WATCHFILES_FORCE_POLLING` | backend | *(unset)* | force polling instead of native filesystem events; opt in on bind-mount/network filesystems (Docker Desktop on macOS/Windows, NFS) |
+| `MAX_ATTACHMENT_SIZE_BYTES` | backend | `10000000` | max size (bytes) of a single pasted image upload |
 | `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
 | `CEREBRUM_PORT` | compose | `8080` | host port for the frontend |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
@@ -364,10 +370,19 @@ history.
       `preventDefault()` to suppress the browser's native save-page
       dialog.
 
-### Attachments (later, unscheduled)
+### Attachments
 
-- [ ] embed an image in a note
-- [ ] paste/upload an image into a note
+- [x] embed an image in a note -- pasted images render inline in the
+      preview via an authenticated fetch + blob URL (`<img src>` can't
+      carry an `Authorization` header, and a URL-embedded token would leak
+      into browser history/logs)
+- [x] paste/upload an image into a note -- pasting an image from the
+      clipboard while editing uploads it, saves it under the note's
+      sibling `.attachments/` folder (content-addressed by SHA-256 hash,
+      so identical pastes dedupe), and inserts `![](relative/path)` at the
+      cursor. Drag-and-drop and an explicit file-picker/upload button
+      remain unscheduled -- paste-from-clipboard covers the common
+      screenshot-into-a-note case.
 
 ### Reliability
 
@@ -388,7 +403,6 @@ history.
   new path, unlike an in-app rename (`POST /api/notes/{path}/move`).
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
-- **No attachment/image handling** defined yet (only `.md` files).
 - **No generated API types.** Frontend `types/note.ts` is hand-kept in
   sync with the backend's pydantic models; an OpenAPI-generated client is
   a reasonable future improvement.

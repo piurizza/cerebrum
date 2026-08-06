@@ -239,6 +239,33 @@ def test_move_note_renaming_stem_renames_attachment_dir_and_rewrites_body(
     )
 
 
+def test_move_note_renaming_stem_does_not_corrupt_unrelated_suffix_match(
+    vault: Path,
+) -> None:
+    """Regression: a blind (non-anchored) substring replace of
+    `<old-stem>.attachments/` would also mangle an unrelated reference
+    whose own folder name merely *ends with* the old stem -- e.g. renaming
+    idea.md must not touch a cross-note reference to
+    `other-idea.attachments/...`, since `"idea.attachments/"` is a
+    substring of `"other-idea.attachments/"`."""
+    write_note(
+        vault,
+        "idea.md",
+        "![](idea.attachments/abc123.png)\nSee also ![](other-idea.attachments/x.png).",
+    )
+    attachment_dir = attachment_dir_for_note(vault, "idea.md")
+    attachment_dir.mkdir(parents=True)
+    (attachment_dir / "abc123.png").write_bytes(b"fake-png-bytes")
+
+    moved, _ = move_note(vault, "idea.md", "better-idea.md")
+
+    # The note's own reference is rewritten...
+    assert "better-idea.attachments/abc123.png" in moved.content
+    # ...but the unrelated cross-note reference is untouched.
+    assert "other-idea.attachments/x.png" in moved.content
+    assert "other-better-idea.attachments" not in moved.content
+
+
 def test_move_note_without_attachment_dir_does_not_raise_or_create_one(
     vault: Path,
 ) -> None:

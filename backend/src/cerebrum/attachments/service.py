@@ -52,8 +52,18 @@ def attachment_dir_for_note(vault_root: Path, note_path: str) -> Path:
     `notes/service.py`'s `resolve_note_path` -- this function does not
     itself re-validate traversal safety, it inherits that guarantee from
     its caller.
+
+    Resolves `note_path` before deriving `.parent`/`.stem`: a `note_path`
+    containing an internal `..` segment that still resolves safely inside
+    the vault (e.g. `"foo/../bar.md"` when `bar.md` exists at the vault
+    root) passes `resolve_note_path`'s validation, but pathlib does not
+    normalize `..` on plain `/` joins -- deriving `.parent` from the
+    unresolved path would compute a literal `<vault>/foo/../bar.attachments`
+    path, whose `mkdir(parents=True)` creates a real, stray `foo/`
+    directory in the vault as a side effect even though the attachment
+    itself still lands in the physically-correct place.
     """
-    note_file = vault_root / note_path
+    note_file = (vault_root / note_path).resolve()
     return note_file.parent / f"{note_file.stem}.attachments"
 
 
@@ -140,7 +150,21 @@ def move_attachment_dir(
         return
     new_dir = attachment_dir_for_note(vault_root, new_note_path)
     new_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(old_dir), str(new_dir))
+    if new_dir.exists():
+        # `shutil.move` onto an existing directory nests `old_dir` *inside*
+        # it (e.g. `new_dir/old_dir_name/`) instead of merging or replacing
+        # it -- silently orphaning the just-rewritten `![](new-stem.
+        # attachments/<hash>.png)` reference, which expects the files
+        # directly under `new_dir`. A pre-existing `new_dir` here is always
+        # orphaned content with no note of its own (its own note would have
+        # collided in `move_note`'s `NoteAlreadyExistsError` check before
+        # this ever runs), so merge file-by-file and drop `old_dir` rather
+        # than nesting.
+        for entry in old_dir.iterdir():
+            shutil.move(str(entry), str(new_dir / entry.name))
+        old_dir.rmdir()
+    else:
+        shutil.move(str(old_dir), str(new_dir))
 
 
 def delete_attachment_dir(vault_root: Path, note_path: str) -> None:

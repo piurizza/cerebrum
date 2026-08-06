@@ -192,3 +192,46 @@ def test_delete_attachment_dir_is_noop_when_no_attachments(vault: Path) -> None:
     (vault / "idea.md").write_text("# Idea\n", encoding="utf-8")
 
     delete_attachment_dir(vault, "idea.md")  # must not raise
+
+
+def test_attachment_dir_for_note_resolves_internal_dotdot_without_stray_dir(
+    vault: Path,
+) -> None:
+    """Regression: a `note_path` containing an internal `..` segment that
+    still resolves safely inside the vault (e.g. because the caller
+    already validated it via `resolve_note_path`) must not leave a stray
+    directory behind -- `attachment_dir_for_note` has to resolve the path
+    before deriving `.parent`/`.stem`, since plain `/` joins don't
+    normalize `..`."""
+    (vault / "bar.md").write_text("# Bar\n", encoding="utf-8")
+
+    attachment_dir_for_note(vault, "foo/../bar.md")
+
+    assert not (vault / "foo").exists()
+
+
+def test_move_attachment_dir_merges_into_pre_existing_destination(vault: Path) -> None:
+    """Regression: if the destination attachment folder already exists
+    (orphaned content with no note of its own -- the target note path
+    itself is guaranteed free by move_note's NoteAlreadyExistsError check),
+    `shutil.move` alone would nest the source folder inside it instead of
+    merging, silently orphaning the just-rewritten embed reference."""
+    note_path = "idea.md"
+    (vault / note_path).write_text("# Idea\n", encoding="utf-8")
+    relative = asyncio.run(
+        save_attachment(vault, note_path, "image/png", _chunks(_PNG_BYTES), _settings())
+    )
+    filename = Path(relative).name
+
+    new_dir = attachment_dir_for_note(vault, "renamed.md")
+    new_dir.mkdir(parents=True)
+    (new_dir / "orphan.png").write_bytes(b"stale-orphaned-content")
+
+    move_attachment_dir(vault, note_path, "renamed.md")
+
+    assert not attachment_dir_for_note(vault, note_path).exists()
+    assert (new_dir / filename).is_file()
+    assert (new_dir / filename).read_bytes() == _PNG_BYTES
+    assert (new_dir / "orphan.png").is_file()
+    # Not nested one level too deep under new_dir.
+    assert not (new_dir / "idea.attachments").exists()

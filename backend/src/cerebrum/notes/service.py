@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -134,12 +135,25 @@ def _rebase_attachment_references(body: str, old_path: str, new_path: str) -> st
     """Rewrite `<old-stem>.attachments/` occurrences in `body` to
     `<new-stem>.attachments/` when the note's own filename stem changed
     (not just its directory). No-op (returns `body` unchanged) when the
-    stem didn't change."""
+    stem didn't change.
+
+    A plain (non-anchored) substring replace would also mangle an
+    unrelated reference whose own folder name merely *ends with* the old
+    stem -- e.g. renaming `idea.md` would corrupt a cross-note reference
+    like `![](other-idea.attachments/x.png)` into
+    `![](other-better-idea.attachments/x.png)`, since `"idea.attachments/"`
+    is a substring of `"other-idea.attachments/"`. Requiring a non-word
+    character (or start-of-string) immediately before the match keeps this
+    a plain string substitution (per KTD7 -- not a markdown-link reparse)
+    while still only matching the stem as its own token, not as a suffix
+    of a longer one.
+    """
     old_stem = PurePosixPath(old_path).stem
     new_stem = PurePosixPath(new_path).stem
     if old_stem == new_stem:
         return body
-    return body.replace(f"{old_stem}.attachments/", f"{new_stem}.attachments/")
+    pattern = re.compile(rf"(?<![\w-]){re.escape(old_stem)}\.attachments/")
+    return pattern.sub(f"{new_stem}.attachments/", body)
 
 
 def move_note(

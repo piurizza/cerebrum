@@ -514,6 +514,14 @@ a {
 .note-editor {
   flex: 1;
   min-width: 0;
+  /* Width-constrained, centered reading column (R8) -- caps at a
+     comfortable reading measure and centers within the space left after
+     the app sidebar and backlinks panel, matching the probe's confirmed
+     column width. Applies to the whole note-editor column (header,
+     mode toggle, editor/preview, action row) so switching between Edit
+     and Preview doesn't shift the layout width. */
+  max-width: 46rem;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -530,6 +538,28 @@ a {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+/* De-emphasizes Copy path/Rename/Delete relative to the reading content
+   (R11) -- but only via color, never opacity (opacity blends toward the
+   background and can silently undo the contrast floor, see U5's approach
+   step 4). --text-faint still meets 4.5:1 at rest (AE5); hover/focus
+   restores full contrast so the row is never illegible, just quieter
+   until you're about to use it. Scoped to `.note-actions` specifically
+   (not the shared `.note-path-header`, which the delete-confirmation
+   variant also uses and should stay at full visual weight). */
+.note-actions .btn {
+  color: var(--text-faint);
+}
+
+.note-actions .btn:hover,
+.note-actions .btn:focus-visible {
+  color: var(--text);
+}
+
+.note-actions .btn-danger-outline:hover,
+.note-actions .btn-danger-outline:focus-visible {
+  color: var(--danger);
 }
 
 .note-meta {
@@ -585,11 +615,17 @@ a {
   z-index: 1;
 }
 
+/* Reading content gets a serif typeface, larger size, and generous
+   line-height distinct from the app's sans-serif UI chrome (nav,
+   buttons, metadata) -- R9. */
 .markdown-preview {
   min-height: 200px;
-  padding: 0.75rem 1rem;
+  padding: 1.25rem 1.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  font-family: Charter, "Iowan Old Style", Georgia, serif;
+  font-size: 1.15rem;
+  line-height: 1.75;
 }
 
 .markdown-preview > :first-child {
@@ -612,7 +648,8 @@ a {
   background: var(--bg-subtle);
   border-radius: 4px;
   padding: 0.1em 0.35em;
-  font-size: 0.9em;
+  font-size: 0.85em;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 .markdown-preview pre {
@@ -620,6 +657,7 @@ a {
   border-radius: var(--radius);
   padding: 0.75rem;
   overflow-x: auto;
+  line-height: 1.5;
 }
 
 .markdown-preview pre code {

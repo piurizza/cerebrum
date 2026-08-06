@@ -188,7 +188,7 @@ export function NotePathHeader({
 
   return (
     <>
-      <div className="note-path-header">
+      <div className="note-path-header note-actions">
         <code className="note-path">{path}</code>
         <button type="button" className="btn btn-sm" onClick={handleCopy}>
           {copied ? "Copied!" : "Copy path"}

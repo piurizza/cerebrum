@@ -4,6 +4,7 @@ import pytest
 
 from cerebrum.notes.parser import (
     InvalidNoteContentError,
+    extract_links,
     parse_note,
     rebase_links,
     render_note,
@@ -144,3 +145,10 @@ def test_retarget_links_preserves_fragment() -> None:
     retargeted = retarget_links(body, "linker.md", "b.md", "folder/b.md")
 
     assert retargeted == "See [B](folder/b.md#section)."
+
+
+def test_extract_links_ignores_image_references() -> None:
+    # Regression: an embedded image (e.g. an attachment) must never become
+    # a graph link -- `resolve_link_target` only follows `.md`-suffixed
+    # targets, so image markdown is inert for link-extraction purposes.
+    assert not extract_links("note.md", "![alt](img.png)")

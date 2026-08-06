@@ -271,6 +271,26 @@ export function searchNotes(query: string): Promise<NoteMeta[]> {
   return request<NoteMeta[]>(`/search?q=${encodeURIComponent(query)}`);
 }
 
+// Uploads raw image bytes (not `FormData`/multipart) matching the backend's
+// `POST /api/attachments` contract, which reads the request body directly
+// and infers the image type from `Content-Type`. Built on `request()`
+// rather than a bespoke `fetch()` call so a paste that races an expired
+// access token still gets the same 401-refresh-and-retry handling every
+// other authenticated call gets, instead of silently failing.
+export function uploadAttachment(
+  notePath: string,
+  file: File,
+): Promise<{ path: string }> {
+  return request<{ path: string }>(
+    `/attachments?note_path=${encodeURIComponent(notePath)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": file.type },
+      body: file,
+    },
+  );
+}
+
 // --- Auth ---
 
 export async function login(username: string, password: string): Promise<void> {

@@ -178,28 +178,6 @@ export function NoteViewPage() {
             </>
           }
         />
-        <div className="mode-toggle" role="tablist" aria-label="Editor mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "edit"}
-            className={mode === "edit" ? "btn btn-toggle is-active" : "btn btn-toggle"}
-            onClick={() => setMode("edit")}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "preview"}
-            className={
-              mode === "preview" ? "btn btn-toggle is-active" : "btn btn-toggle"
-            }
-            onClick={() => setMode("preview")}
-          >
-            Preview
-          </button>
-        </div>
 
         {mode === "edit" ? (
           <MarkdownEditor value={content} onChange={setContent} currentPath={path} />
@@ -208,18 +186,34 @@ export function NoteViewPage() {
         )}
 
         <div className="note-editor-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
           <span className="save-status">{isDirty ? "Unsaved changes" : "Saved"}</span>
           <span className="shortcut-hint">
             <kbd>{isMac ? "⌘" : "Ctrl"}</kbd>+<kbd>S</kbd> to save
           </span>
+          <span className="chrome-spacer" />
+          {mode === "edit" ? (
+            <>
+              <button type="button" className="btn" onClick={() => setMode("preview")}>
+                Preview
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSave}
+                disabled={saving}
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-edit"
+              onClick={() => setMode("edit")}
+            >
+              Edit
+            </button>
+          )}
         </div>
       </div>
       <aside className="note-backlinks">

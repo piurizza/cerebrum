@@ -641,11 +641,6 @@ a {
   overflow-wrap: anywhere;
 }
 
-.mode-toggle {
-  display: inline-flex;
-  width: fit-content;
-}
-
 /* Pill-shaped, always full-contrast (never routed through R11's
    de-emphasis -- see `.note-actions` above): matches the confirmed visual
    probe's `.theme-toggle`/`.zen-toggle` treatment. `.btn-sm` still
@@ -659,26 +654,18 @@ a {
   color: var(--text-muted);
 }
 
-.btn-toggle {
-  border-radius: 0;
-  margin-left: -1px;
+/* The sole way into edit mode while reading (no persistent Edit/Preview
+   tab bar -- the confirmed probe treats reading as the default, singular
+   view, not one of two co-equal tabs). Styled as a quiet secondary
+   action, matching the probe's `.btn-edit`. */
+.btn-edit {
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
 }
 
-.btn-toggle:first-child {
-  border-radius: var(--radius) 0 0 var(--radius);
-  margin-left: 0;
-}
-
-.btn-toggle:last-child {
-  border-radius: 0 var(--radius) var(--radius) 0;
-}
-
-.btn-toggle.is-active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-  position: relative;
-  z-index: 1;
+.btn-edit:hover {
+  background: var(--border);
+  color: var(--text);
 }
 
 /* Reading content gets a serif typeface, larger size, and generous
@@ -779,6 +766,9 @@ a {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 
 .save-status {

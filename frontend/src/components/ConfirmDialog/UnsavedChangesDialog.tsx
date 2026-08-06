@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface UnsavedChangesDialogProps {
   error?: string | null;
@@ -22,6 +23,9 @@ export function UnsavedChangesDialog({
   onDiscard,
   onCancel,
 }: UnsavedChangesDialogProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, true);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onCancel();
@@ -39,6 +43,7 @@ export function UnsavedChangesDialog({
         onClick={onCancel}
       />
       <div
+        ref={modalRef}
         className="modal"
         role="dialog"
         aria-modal="true"

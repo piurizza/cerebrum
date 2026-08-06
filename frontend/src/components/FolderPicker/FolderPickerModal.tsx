@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useNotes } from "../../context/NotesContext";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import {
   childFolderNames,
   collectFolderPaths,
@@ -36,6 +37,8 @@ export function FolderPickerModal({
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const newFolderInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, true);
 
   const allFolders = collectFolderPaths(notes);
   const subfolders = childFolderNames(allFolders, currentFolder);
@@ -80,7 +83,13 @@ export function FolderPickerModal({
         aria-label="Close dialog"
         onClick={onCancel}
       />
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <h2 className="modal-title">{title}</h2>
 
         <div className="folder-breadcrumbs">

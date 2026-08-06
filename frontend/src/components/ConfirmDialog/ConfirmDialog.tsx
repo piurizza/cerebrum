@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface ConfirmDialogProps {
   title: string;
@@ -25,6 +26,9 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, true);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onCancel();
@@ -41,7 +45,13 @@ export function ConfirmDialog({
         aria-label="Close dialog"
         onClick={onCancel}
       />
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <h2 className="modal-title">{title}</h2>
         <p>{message}</p>
         <div className="modal-actions">

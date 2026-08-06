@@ -155,7 +155,7 @@ export function FolderPickerModal({
         ) : (
           <button
             type="button"
-            className="btn btn-copy"
+            className="btn btn-sm"
             onClick={() => setIsAddingFolder(true)}
           >
             + New folder

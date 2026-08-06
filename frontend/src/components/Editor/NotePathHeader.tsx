@@ -140,7 +140,7 @@ export function NotePathHeader({
               <code className="note-path">{newPath}</code>
               <button
                 type="button"
-                className="btn btn-copy"
+                className="btn btn-sm"
                 onClick={() => setIsPickerOpen(true)}
               >
                 Choose location
@@ -190,15 +190,15 @@ export function NotePathHeader({
     <>
       <div className="note-path-header">
         <code className="note-path">{path}</code>
-        <button type="button" className="btn btn-copy" onClick={handleCopy}>
+        <button type="button" className="btn btn-sm" onClick={handleCopy}>
           {copied ? "Copied!" : "Copy path"}
         </button>
-        <button type="button" className="btn btn-copy" onClick={startRename}>
+        <button type="button" className="btn btn-sm" onClick={startRename}>
           Rename
         </button>
         <button
           type="button"
-          className="btn btn-copy btn-danger-outline"
+          className="btn btn-sm btn-danger-outline"
           onClick={() => setIsConfirmingDelete(true)}
         >
           Delete

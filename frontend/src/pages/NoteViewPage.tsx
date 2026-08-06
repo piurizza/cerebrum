@@ -20,12 +20,12 @@ export function NoteViewPage() {
   const [updated, setUpdated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [mode, setMode] = useState<ViewMode>("edit");
+  const [mode, setMode] = useState<ViewMode>("preview");
 
   useEffect(() => {
     if (!path) return;
     setLoading(true);
-    setMode("edit");
+    setMode("preview");
     getNote(path)
       .then((note) => {
         setContent(note.content);

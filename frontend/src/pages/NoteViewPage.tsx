@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { encodeNotePath, getNote, putNote } from "../api/client";
+import { useBlocker, useNavigate, useParams } from "react-router-dom";
+import { encodeNotePath, errorMessage, getNote, putNote } from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
+import { UnsavedChangesDialog } from "../components/ConfirmDialog/UnsavedChangesDialog";
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
 import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
 import { NotePathHeader } from "../components/Editor/NotePathHeader";
@@ -21,6 +22,7 @@ export function NoteViewPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<ViewMode>("preview");
+  const [blockerError, setBlockerError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!path) return;
@@ -36,6 +38,8 @@ export function NoteViewPage() {
       })
       .finally(() => setLoading(false));
   }, [path]);
+
+  const isDirty = content !== savedContent;
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -62,6 +66,49 @@ export function NoteViewPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [path, saving, handleSave]);
 
+  // Warns on tab close/refresh (R2) -- browsers only allow a native,
+  // unstyled confirmation here, no custom Save/Discard/Cancel UI is
+  // possible (KTD3), unlike the router-navigation case below.
+  useEffect(() => {
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (!isDirty) return;
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  // Intercepts every router-mediated navigation away from a dirty note --
+  // sidebar clicks, note-to-note links, graph node clicks, browser
+  // back/forward -- regardless of which component triggered it, since
+  // useBlocker fires on any attempted route change while this component
+  // is mounted (KTD2). Requires the data router migration (KTD1).
+  const blocker = useBlocker(isDirty);
+
+  async function handleBlockedSave() {
+    setBlockerError(null);
+    try {
+      await handleSave();
+      if (blocker.state === "blocked") blocker.proceed();
+    } catch (err) {
+      // handleSave's own finally already reset `saving` -- only the
+      // dialog's error state is this function's responsibility. Do NOT
+      // proceed(): the edit must stay on this note until Save succeeds,
+      // Discard is chosen, or Cancel is chosen (R3).
+      setBlockerError(errorMessage(err));
+    }
+  }
+
+  function handleBlockedDiscard() {
+    setBlockerError(null);
+    if (blocker.state === "blocked") blocker.proceed();
+  }
+
+  function handleBlockedCancel() {
+    setBlockerError(null);
+    if (blocker.state === "blocked") blocker.reset();
+  }
+
   if (!path) {
     return (
       <p className="empty-hint">Select a note from the sidebar, or create a new one.</p>
@@ -72,10 +119,17 @@ export function NoteViewPage() {
     return <p className="empty-hint">Loading...</p>;
   }
 
-  const isDirty = content !== savedContent;
-
   return (
     <div className="note-view">
+      {blocker.state === "blocked" && (
+        <UnsavedChangesDialog
+          error={blockerError}
+          busy={saving}
+          onSave={handleBlockedSave}
+          onDiscard={handleBlockedDiscard}
+          onCancel={handleBlockedCancel}
+        />
+      )}
       <div className="note-editor">
         <NotePathHeader
           path={path}

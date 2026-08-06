@@ -10,6 +10,7 @@ import {
 import { NoteBrowser } from "./components/NoteBrowser/NoteBrowser";
 import { useAuth } from "./context/AuthContext";
 import { NotesProvider } from "./context/NotesContext";
+import { useZenMode, ZenModeProvider } from "./context/ZenModeContext";
 import { GraphViewPage } from "./pages/GraphViewPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NoteViewPage } from "./pages/NoteViewPage";
@@ -32,9 +33,10 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 function AppShell() {
   const { logout } = useAuth();
+  const { isZen } = useZenMode();
   return (
     <div className="app-layout">
-      <aside className="app-sidebar">
+      <aside className={isZen ? "app-sidebar is-zen" : "app-sidebar"}>
         <h1>Cerebrum</h1>
         <nav className="app-nav">
           <NavLink
@@ -99,7 +101,9 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <NotesProvider>
-              <AppShell />
+              <ZenModeProvider>
+                <AppShell />
+              </ZenModeProvider>
             </NotesProvider>
           </RequireAuth>
         ),

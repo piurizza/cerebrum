@@ -76,6 +76,21 @@ a {
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  transition:
+    width var(--transition),
+    padding var(--transition),
+    opacity var(--transition);
+}
+
+/* Zen mode (R12): collapses the sidebar for distraction-free reading.
+   Width/padding animate away rather than a hard display:none, so the
+   transition reads as "sliding away" instead of an abrupt cut. */
+.app-sidebar.is-zen {
+  width: 0;
+  padding: 1rem 0;
+  opacity: 0;
+  border-right-color: transparent;
+  overflow: hidden;
 }
 
 .app-nav {
@@ -588,9 +603,20 @@ a {
   overflow-wrap: anywhere;
 }
 
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .mode-toggle {
   display: inline-flex;
   width: fit-content;
+}
+
+.zen-toggle {
+  color: var(--text-muted);
 }
 
 .btn-toggle {

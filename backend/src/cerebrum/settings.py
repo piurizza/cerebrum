@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     auth_refresh_token_ttl_days: int = 30
     auth_cookie_secure: bool = False
 
+    watcher_enabled: bool = True
+    watcher_debounce_ms: int = 400
+    watcher_backstop_interval_seconds: int = 300
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @model_validator(mode="after")

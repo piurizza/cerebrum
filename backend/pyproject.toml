@@ -11,6 +11,7 @@ dependencies = [
     "pyjwt>=2.13.0",
     "python-frontmatter>=1.1.0",
     "uvicorn[standard]>=0.30.0",
+    "watchfiles>=1.2.0",
 ]
 
 [dependency-groups]

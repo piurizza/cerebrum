@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -14,9 +18,39 @@ from cerebrum.api.router import api_router
 from cerebrum.auth_db import connect as connect_auth_db
 from cerebrum.index.db import connect
 from cerebrum.index.indexer import rebuild_index
+from cerebrum.index.watcher import watch_vault
 from cerebrum.mcp.auth import DiscoverabilityHintMiddleware
 from cerebrum.mcp.server import create_mcp_server
-from cerebrum.settings import get_settings
+from cerebrum.settings import Settings, get_settings
+
+logger = logging.getLogger(__name__)
+
+
+async def _run_backstop_rescan(
+    conn: sqlite3.Connection, vault_root: Path, settings: Settings
+) -> None:
+    """Periodically rebuild the index from scratch as a self-healing
+    backstop for changes the live watcher missed (a debounce edge case, a
+    watcher restart gap, or `watch_vault` itself having given up after an
+    unrecoverable `awatch()` error -- R4).
+
+    Mirrors `watch_vault`'s loop-level try/except shape (see watcher.py),
+    but per-iteration rather than around the whole loop: one bad
+    `rebuild_index` call (a transiently locked file, an unexpected
+    exception) must not permanently kill this safety net for the rest of
+    the process's life (KTD9), so each tick is caught and logged on its
+    own rather than letting the loop -- and this task -- die outright.
+    """
+    while True:
+        try:
+            await asyncio.sleep(settings.watcher_backstop_interval_seconds)
+            await asyncio.to_thread(rebuild_index, conn, vault_root)
+        # `asyncio.CancelledError` is a `BaseException`, not an `Exception`
+        # (Python 3.8+) -- this deliberately does *not* catch it, so
+        # `task.cancel()` (shutdown, KTD9) still interrupts this loop
+        # normally rather than being swallowed as just another bad tick.
+        except Exception as exc:  # noqa: BLE001 -- one bad tick must not kill the loop
+            logger.warning("backstop rescan iteration failed: %s", exc)
 
 
 @asynccontextmanager
@@ -54,6 +88,55 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await stack.enter_async_context(mcp_app.lifespan(mcp_app))
 
         rebuild_index(app.state.db, settings.cerebrum_vault_path)
+
+        # Started after rebuild_index (not before): both tasks assume the
+        # index already reflects an initial full scan, and both stop via
+        # a single stack.push_async_callback registered last, below --
+        # after MCP and rebuild_index -- so they stop before app.state.db/
+        # auth_db close on shutdown (KTD2).
+        if settings.watcher_enabled:
+            stop_event = asyncio.Event()
+            watcher_task: asyncio.Task[None] | None = None
+            backstop_task: asyncio.Task[None] | None = None
+            try:
+                watcher_task = asyncio.create_task(
+                    watch_vault(
+                        app.state.db, settings.cerebrum_vault_path, settings, stop_event
+                    )
+                )
+                backstop_task = asyncio.create_task(
+                    _run_backstop_rescan(
+                        app.state.db, settings.cerebrum_vault_path, settings
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 -- see comment below
+                # Defensive backstop only -- task creation raising
+                # synchronously is not the primary protection R4 asks for.
+                # A missing/unreadable vault path surfaces asynchronously
+                # instead, on watch_vault's first awatch() iteration inside
+                # its own task, which watch_vault already catches
+                # internally (see watcher.py).
+                logger.warning("failed to start watcher/backstop tasks: %s", exc)
+
+            async def _stop_background_tasks() -> None:
+                stop_event.set()
+                for task in (watcher_task, backstop_task):
+                    if task is not None:
+                        task.cancel()
+                results = await asyncio.gather(
+                    *(t for t in (watcher_task, backstop_task) if t is not None),
+                    return_exceptions=True,
+                )
+                for result in results:
+                    if isinstance(result, BaseException) and not isinstance(
+                        result, asyncio.CancelledError
+                    ):
+                        logger.warning(
+                            "watcher/backstop task did not shut down cleanly: %s",
+                            result,
+                        )
+
+            stack.push_async_callback(_stop_background_tasks)
 
         yield
 

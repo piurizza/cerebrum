@@ -89,7 +89,8 @@ def rebuild_index(conn: sqlite3.Connection, vault_root: Path) -> None:
     """
     current_paths = set(iter_note_paths(vault_root))
 
-    existing_rows = conn.execute("SELECT path, mtime FROM notes").fetchall()
+    with write_lock:
+        existing_rows = conn.execute("SELECT path, mtime FROM notes").fetchall()
     existing_mtimes = {row["path"]: row["mtime"] for row in existing_rows}
 
     for path in existing_mtimes:

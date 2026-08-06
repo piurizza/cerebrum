@@ -1,27 +1,34 @@
-/* Reading/study-focused palette: warm, low-glare paper instead of pure
-   white/black (reduces eye strain over long sessions, like an e-reader),
-   contrast-checked in both modes against WCAG AA (confirmed via the
-   session's visual probe, then re-verified after a review pass found the
-   first draft's de-emphasized tier and dividers were too faint):
-   --text 13.5:1/12.3:1, --text-muted 7.0:1/8.1:1, --text-faint
-   4.5:1/4.6:1, --accent 6.4:1/5.9:1 (light/dark) on --bg. --border stays
-   a soft ~1.7:1/2.0:1 divider, not a control outline -- it separates
-   regions, it doesn't need to pop. */
+/* Kindle-Colorsoft-inspired palette: warm ink-on-parchment in light mode,
+   warm charcoal-on-cream (not OLED black-on-white-inverted) in dark mode --
+   e-ink readers avoid pure black backgrounds/pure white text even in their
+   software "dark mode" (it's a warm charcoal, not a void), and their
+   highlight/accent color is a muted amber/gold, not a saturated hue.
+   Replaces the session's earlier sage-green-accented palette, which read
+   as "greenish" once the accent color (links, primary buttons, highlighted
+   strong text) touched more surfaces than the original single-screenshot
+   probe showed. Contrast-checked (WCAG 2.1 relative luminance) against
+   all three background tiers (--bg, --bg-sidebar, --bg-subtle), the
+   hardest of which is noted per row: --text ~11-15:1, --text-muted
+   ~5-7.5:1, --text-faint ~4.5-7.2:1 (never below the 4.5:1 AE5 floor on
+   any background it actually appears on), --accent (link text) 5.1:1/
+   7.1:1, --accent-fg on --accent (button text) 5.6:1/7.5:1 (light/dark).
+   --border stays a soft ~1.7:1/2.0:1 divider, not a control outline --
+   see the original rationale below, unchanged by this repaint. */
 :root {
   color-scheme: light dark;
 
-  --bg: light-dark(#faf8f4, #1b1c1a);
-  --bg-sidebar: light-dark(#e9e2d1, #202120);
-  --bg-subtle: light-dark(#e2d9c2, #2a2b26);
-  --border: light-dark(#c4b998, #4e4c3e);
-  --text: light-dark(#2b2a26, #dedad0);
-  --text-muted: light-dark(#5a5546, #b8b39e);
-  --text-faint: light-dark(#79735f, #8a8570);
-  --accent: light-dark(#456249, #7fa082);
-  --accent-fg: light-dark(#ffffff, #12140f);
-  --danger: light-dark(#c0392b, #ff6b5b);
-  --danger-bg: light-dark(#fdecea, #3a2323);
-  --highlight-bg: light-dark(rgb(69 98 73 / 12%), rgb(127 160 130 / 18%));
+  --bg: light-dark(#f4ede0, #26221d);
+  --bg-sidebar: light-dark(#e8dcc4, #2e2a23);
+  --bg-subtle: light-dark(#ddd0b4, #383226);
+  --border: light-dark(#c9b995, #55503f);
+  --text: light-dark(#1f1b16, #ece4d3);
+  --text-muted: light-dark(#5c5142, #bdb29c);
+  --text-faint: light-dark(#584c3c, #a49c84);
+  --accent: light-dark(#8a5a1e, #d9a54a);
+  --accent-fg: light-dark(#fdf8ee, #241d10);
+  --danger: light-dark(#a5442d, #e08165);
+  --danger-bg: light-dark(#f3e3da, #3a241c);
+  --highlight-bg: light-dark(rgb(138 90 30 / 20%), rgb(217 165 74 / 22%));
   --radius: 8px;
   --transition: 120ms ease;
 }
@@ -34,33 +41,33 @@
    behavior. Values are the same literal pairs as the `light-dark()` calls
    above -- keep both in sync if the palette changes. */
 :root[data-theme="light"] {
-  --bg: #faf8f4;
-  --bg-sidebar: #e9e2d1;
-  --bg-subtle: #e2d9c2;
-  --border: #c4b998;
-  --text: #2b2a26;
-  --text-muted: #5a5546;
-  --text-faint: #79735f;
-  --accent: #456249;
-  --accent-fg: #ffffff;
-  --danger: #c0392b;
-  --danger-bg: #fdecea;
-  --highlight-bg: rgb(69 98 73 / 12%);
+  --bg: #f4ede0;
+  --bg-sidebar: #e8dcc4;
+  --bg-subtle: #ddd0b4;
+  --border: #c9b995;
+  --text: #1f1b16;
+  --text-muted: #5c5142;
+  --text-faint: #584c3c;
+  --accent: #8a5a1e;
+  --accent-fg: #fdf8ee;
+  --danger: #a5442d;
+  --danger-bg: #f3e3da;
+  --highlight-bg: rgb(138 90 30 / 20%);
 }
 
 :root[data-theme="dark"] {
-  --bg: #1b1c1a;
-  --bg-sidebar: #202120;
-  --bg-subtle: #2a2b26;
-  --border: #4e4c3e;
-  --text: #dedad0;
-  --text-muted: #b8b39e;
-  --text-faint: #8a8570;
-  --accent: #7fa082;
-  --accent-fg: #12140f;
-  --danger: #ff6b5b;
-  --danger-bg: #3a2323;
-  --highlight-bg: rgb(127 160 130 / 18%);
+  --bg: #26221d;
+  --bg-sidebar: #2e2a23;
+  --bg-subtle: #383226;
+  --border: #55503f;
+  --text: #ece4d3;
+  --text-muted: #bdb29c;
+  --text-faint: #a49c84;
+  --accent: #d9a54a;
+  --accent-fg: #241d10;
+  --danger: #e08165;
+  --danger-bg: #3a241c;
+  --highlight-bg: rgb(217 165 74 / 22%);
 }
 
 * {

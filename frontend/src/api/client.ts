@@ -130,7 +130,14 @@ async function toResult<T>(
   return (await response.json()) as T;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+// The shared 401-detect-refresh-retry logic, factored out from `request()`
+// so `fetchAttachmentBlobUrl()` below can reuse it without either calling
+// bare `fetchWithToken()` (which has no retry -- a stale access token would
+// just fail) or duplicating this retry logic ad-hoc (two copies of "detect
+// 401, refresh, retry once" drifting apart over time). Returns the raw
+// `Response`; each caller does its own response-to-value conversion
+// (`toResult()`'s JSON parsing here, blob reading in the attachments case).
+async function fetchWithRetry(path: string, init?: RequestInit): Promise<Response> {
   let response = await fetchWithToken(path, init, accessToken);
 
   if (response.status === 401 && !isAuthBootstrapPath(path)) {
@@ -139,12 +146,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       response = await fetchWithToken(path, init, refreshedToken);
     }
     // On refresh failure `refreshAccessToken()` has already cleared the
-    // access token; `response` here is still the original 401, which
-    // `toResult()` below turns into a thrown error -- no second retry, no
-    // navigation (this module has no router access; `AuthContext` is
-    // responsible for redirecting to /login once it observes this).
+    // access token; `response` here is still the original 401, which the
+    // caller's response handling below turns into a thrown error -- no
+    // second retry, no navigation (this module has no router access;
+    // `AuthContext` is responsible for redirecting to /login once it
+    // observes this).
   }
 
+  return response;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetchWithRetry(path, init);
   return toResult<T>(response, path, init);
 }
 
@@ -289,6 +302,33 @@ export function uploadAttachment(
       body: file,
     },
   );
+}
+
+// Fetches an attachment's raw image bytes through `GET
+// /api/attachments/{path}` and returns an object URL for the resulting
+// blob, so `<img>` tags can reference it without embedding the access
+// token in a URL (which `<img src>` can't attach an `Authorization` header
+// to anyway, and a URL-embedded token would leak into browser history/
+// logs). Built on `fetchWithRetry()` -- not `request()` -- because
+// `request()`/`toResult()` always parses the response as JSON; image bytes
+// need `response.blob()` instead. Still throws the same `ApiError` shape as
+// `request()` on a non-2xx response so callers can `.catch()` it the same
+// way as everywhere else in this codebase. Callers are responsible for
+// `URL.revokeObjectURL()`-ing the result once it's no longer displayed.
+export async function fetchAttachmentBlobUrl(attachmentPath: string): Promise<string> {
+  const path = `/attachments/${encodeNotePath(attachmentPath)}`;
+  const response = await fetchWithRetry(path);
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new ApiError(
+      detail ?? `GET ${path} failed: ${response.status}`,
+      response.status,
+    );
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 // --- Auth ---

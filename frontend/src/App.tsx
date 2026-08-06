@@ -1,7 +1,14 @@
 import type { ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes } from "react-router-dom";
+import {
+  createBrowserRouter,
+  Navigate,
+  NavLink,
+  Outlet,
+  Route,
+  Routes,
+} from "react-router-dom";
 import { NoteBrowser } from "./components/NoteBrowser/NoteBrowser";
-import { AuthProvider, useAuth } from "./context/AuthContext";
+import { useAuth } from "./context/AuthContext";
 import { NotesProvider } from "./context/NotesContext";
 import { GraphViewPage } from "./pages/GraphViewPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -67,41 +74,36 @@ function AppShell() {
   );
 }
 
-function AppRoutes() {
+/** Pathless root layout: replaces `AppRoutes`'s old pre-`<Routes>` `loading`
+ * gate, which has no equivalent in a data router's route tree (see KTD1).
+ * Blocks rendering every route until the initial silent-refresh attempt
+ * resolves one way or the other -- otherwise an unauthenticated visitor
+ * would flash the authenticated shell (and its mount-time `listNotes()`
+ * 401) before the redirect to `/login` kicks in. */
+function RootLayout() {
   const { loading } = useAuth();
-
-  // Renders nothing (well, a minimal hint) until the initial silent-refresh
-  // attempt resolves one way or the other -- otherwise an unauthenticated
-  // visitor would flash the authenticated shell (and its mount-time
-  // `listNotes()` 401) before the redirect to `/login` kicks in.
   if (loading) {
     return <p className="empty-hint">Loading...</p>;
   }
+  return <Outlet />;
+}
 
-  return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route
-        path="/*"
-        element={
+export const router = createBrowserRouter([
+  {
+    element: <RootLayout />,
+    children: [
+      { path: "/login", element: <LoginPage /> },
+      { path: "/register", element: <RegisterPage /> },
+      {
+        path: "/*",
+        element: (
           <RequireAuth>
             <NotesProvider>
               <AppShell />
             </NotesProvider>
           </RequireAuth>
-        }
-      />
-    </Routes>
-  );
-}
-
-function App() {
-  return (
-    <AuthProvider>
-      <AppRoutes />
-    </AuthProvider>
-  );
-}
-
-export default App;
+        ),
+      },
+    ],
+  },
+]);

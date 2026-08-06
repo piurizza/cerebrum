@@ -37,7 +37,7 @@ function AppShell() {
   return (
     <div className="app-layout">
       <aside className={isZen ? "app-sidebar is-zen" : "app-sidebar"}>
-        <h1>Cerebrum</h1>
+        <h1 className="app-title">Cerebrum</h1>
         <nav className="app-nav">
           <NavLink
             to="/graph"

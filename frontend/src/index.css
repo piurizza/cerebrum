@@ -70,9 +70,9 @@ a {
 }
 
 .app-sidebar {
-  width: 260px;
+  width: 240px;
   flex-shrink: 0;
-  padding: 1rem;
+  padding: 1.125rem 0.875rem;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   overflow-y: auto;
@@ -80,6 +80,18 @@ a {
     width var(--transition),
     padding var(--transition),
     opacity var(--transition);
+}
+
+/* Small, muted sidebar wordmark -- deliberately NOT the shared `h1` scale
+   used for real page titles (Login/Register/Settings): this is ambient
+   chrome, not content, and should recede per R11's "sidebar and note
+   actions desaturated so they recede" direction. */
+.app-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  margin: 0 0 0.9rem;
 }
 
 /* Zen mode (R12): collapses the sidebar for distraction-free reading.
@@ -95,19 +107,23 @@ a {
 
 .app-nav {
   display: flex;
+  gap: 0.25rem;
   margin-bottom: 1rem;
 }
 
 .app-nav a {
-  padding: 0.35rem 0.6rem;
+  padding: 0.25rem 0.5rem;
   border-radius: var(--radius);
   text-decoration: none;
+  color: var(--text-faint);
+  font-size: 0.8rem;
   font-weight: 500;
 }
 
 .app-nav a:hover,
 .app-nav a.is-active {
-  background: var(--bg-subtle);
+  color: var(--text-muted);
+  background: var(--bg);
 }
 
 .app-main {
@@ -201,14 +217,14 @@ a {
 .search-input {
   display: block;
   width: 100%;
-  padding: 0.45rem 0.6rem;
+  padding: 0.4rem 0.55rem;
   margin-bottom: 1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
-  color: var(--text);
+  color: var(--text-muted);
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
 
 .tag-filter {
@@ -253,10 +269,11 @@ a {
 .note-link {
   display: flex;
   flex-direction: column;
-  padding: 0.4rem 0.6rem;
+  padding: 0.35rem 0.55rem;
   border-radius: var(--radius);
   text-decoration: none;
-  color: var(--text);
+  color: var(--text-muted);
+  font-size: 0.8rem;
 }
 
 .note-title {
@@ -269,12 +286,13 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.75rem;
-  color: var(--text-muted);
+  font-size: 0.7rem;
+  color: var(--text-faint);
 }
 
 .note-link:hover {
-  background: var(--bg-subtle);
+  background: var(--bg);
+  color: var(--text);
 }
 
 .note-link.is-active {
@@ -306,20 +324,21 @@ a {
   align-items: center;
   gap: 0.3rem;
   width: 100%;
-  padding: 0.3rem 0.6rem;
+  padding: 0.3rem 0.55rem;
   border: none;
   border-radius: var(--radius);
   background: none;
-  color: var(--text-muted);
-  font-size: 0.9rem;
+  color: var(--text-faint);
+  font-size: 0.75rem;
   font-family: inherit;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
   cursor: pointer;
 }
 
 .note-folder:hover {
-  background: var(--bg-subtle);
+  background: var(--bg);
+  color: var(--text-muted);
 }
 
 .folder-caret {
@@ -600,7 +619,7 @@ a {
   gap: 0.4rem;
   margin: -0.5rem 0 0;
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .note-meta-sep {
@@ -704,6 +723,20 @@ a {
   color: var(--text);
 }
 
+/* Explicit sizing -- without it, the note title inherits the global `h1`
+   rule sized for the small sidebar wordmark (see `.app-title`), rendering
+   noticeably smaller than the confirmed probe's reading-well heading. Must
+   come after the shared h1/h2/h3 rule above so its `letter-spacing`
+   override (tighter, for a display-sized heading) wins over that rule's
+   `normal`. */
+.markdown-preview h1 {
+  font-size: 1.7rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 1.1rem;
+}
+
 .markdown-preview code {
   background: var(--bg-subtle);
   border-radius: 4px;
@@ -750,12 +783,12 @@ a {
 
 .save-status {
   font-size: 0.85rem;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .shortcut-hint {
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .shortcut-hint kbd {
@@ -767,12 +800,20 @@ a {
   font-size: 0.75rem;
 }
 
+/* A quiet divider, not a filled card -- a solid background box here
+   competed with the reading column for attention (the same "chrome
+   recedes, content leads" principle applied to the sidebar and note
+   actions). Reuses `.note-link`/`.note-title` from the sidebar tree, so
+   its typography already matches. */
 .note-backlinks {
-  width: 240px;
+  width: 220px;
   flex-shrink: 0;
-  padding: 1rem;
-  background: var(--bg-subtle);
-  border-radius: var(--radius);
+  padding-left: 1.25rem;
+  border-left: 1px solid var(--border);
+}
+
+.note-backlinks h2 {
+  font-size: 0.8rem;
 }
 
 /* Graph view */

@@ -21,8 +21,46 @@
   --accent-fg: light-dark(#ffffff, #12140f);
   --danger: light-dark(#c0392b, #ff6b5b);
   --danger-bg: light-dark(#fdecea, #3a2323);
+  --highlight-bg: light-dark(rgb(69 98 73 / 12%), rgb(127 160 130 / 18%));
   --radius: 8px;
   --transition: 120ms ease;
+}
+
+/* Manual light/dark override (ThemeContext) -- explicit literal values,
+   not light-dark(), so a `[data-theme]` attribute on the root
+   deterministically wins over the `light-dark()` defaults above via plain
+   CSS specificity (`:root[data-theme=...]` beats bare `:root`), rather
+   than depending on `light-dark()`'s own `color-scheme`-driven override
+   behavior. Values are the same literal pairs as the `light-dark()` calls
+   above -- keep both in sync if the palette changes. */
+:root[data-theme="light"] {
+  --bg: #faf8f4;
+  --bg-sidebar: #e9e2d1;
+  --bg-subtle: #e2d9c2;
+  --border: #c4b998;
+  --text: #2b2a26;
+  --text-muted: #5a5546;
+  --text-faint: #79735f;
+  --accent: #456249;
+  --accent-fg: #ffffff;
+  --danger: #c0392b;
+  --danger-bg: #fdecea;
+  --highlight-bg: rgb(69 98 73 / 12%);
+}
+
+:root[data-theme="dark"] {
+  --bg: #1b1c1a;
+  --bg-sidebar: #202120;
+  --bg-subtle: #2a2b26;
+  --border: #4e4c3e;
+  --text: #dedad0;
+  --text-muted: #b8b39e;
+  --text-faint: #8a8570;
+  --accent: #7fa082;
+  --accent-fg: #12140f;
+  --danger: #ff6b5b;
+  --danger-bg: #3a2323;
+  --highlight-bg: rgb(127 160 130 / 18%);
 }
 
 * {
@@ -694,10 +732,7 @@ a {
    confirmed visual probe), giving key phrases a "highlighter" look
    instead of just bolding them. */
 .markdown-preview strong {
-  background: light-dark(
-    color-mix(in srgb, var(--accent) 12%, transparent),
-    color-mix(in srgb, var(--accent) 18%, transparent)
-  );
+  background: var(--highlight-bg);
   padding: 0 0.15em;
   border-radius: 3px;
 }

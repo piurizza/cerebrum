@@ -19,19 +19,23 @@ function initialTheme(): Theme {
 }
 
 /** Manual per-device light/dark override, persisted across reloads (matches
- * the confirmed visual probe's theme toggle). The app already switches
- * palette automatically via `color-scheme: light dark` + `light-dark()` in
- * index.css, driven by OS preference -- this adds an explicit override on
- * top rather than a second set of variables: setting `color-scheme` to a
- * single value (`light` or `dark`, not `light dark`) on the document root
- * makes every `light-dark()` token resolve to that branch regardless of OS
- * preference. Falls back to the OS preference only on first load, before
- * any explicit choice has been stored -- once toggled, the explicit choice
- * always wins, matching the typical light/dark-toggle UX convention. */
+ * the confirmed visual probe's theme toggle). Sets a `data-theme` attribute
+ * on the document root; index.css pairs it with explicit
+ * `:root[data-theme="light"|"dark"]` blocks that override every token to a
+ * literal value -- a `[data-theme]` attribute selector on `:root` has
+ * higher specificity than the bare `:root` rule that declares the
+ * `light-dark()` defaults, so this deterministically wins regardless of OS
+ * preference, independent of `color-scheme`/`light-dark()`'s own (less
+ * battle-tested) override behavior. Still sets `color-scheme` too, so
+ * native UA chrome (scrollbars, form controls) matches. Falls back to the
+ * OS preference only on first load, before any explicit choice has been
+ * stored -- once toggled, the explicit choice always wins, matching the
+ * typical light/dark-toggle UX convention. */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(initialTheme);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);

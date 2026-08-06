@@ -6,6 +6,7 @@ import { UnsavedChangesDialog } from "../components/ConfirmDialog/UnsavedChanges
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
 import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
 import { NotePathHeader } from "../components/Editor/NotePathHeader";
+import { useTheme } from "../context/ThemeContext";
 import { useZenMode } from "../context/ZenModeContext";
 import { stripFrontmatter } from "../lib/noteContent";
 
@@ -32,6 +33,7 @@ export function NoteViewPage() {
   const [mode, setMode] = useState<ViewMode>("preview");
   const [blockerError, setBlockerError] = useState<string | null>(null);
   const { isZen, toggleZen } = useZenMode();
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     if (!path) return;
@@ -155,39 +157,47 @@ export function NoteViewPage() {
             }
           }}
           onDeleted={() => navigate("/")}
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn btn-sm theme-toggle"
+                aria-pressed={theme === "dark"}
+                onClick={toggleTheme}
+              >
+                {theme === "dark" ? "Light" : "Dark"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm zen-toggle"
+                aria-pressed={isZen}
+                onClick={toggleZen}
+              >
+                {isZen ? "Exit Zen mode" : "Zen mode"}
+              </button>
+            </>
+          }
         />
-        <div className="editor-toolbar">
-          <div className="mode-toggle" role="tablist" aria-label="Editor mode">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "edit"}
-              className={
-                mode === "edit" ? "btn btn-toggle is-active" : "btn btn-toggle"
-              }
-              onClick={() => setMode("edit")}
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "preview"}
-              className={
-                mode === "preview" ? "btn btn-toggle is-active" : "btn btn-toggle"
-              }
-              onClick={() => setMode("preview")}
-            >
-              Preview
-            </button>
-          </div>
+        <div className="mode-toggle" role="tablist" aria-label="Editor mode">
           <button
             type="button"
-            className="btn btn-sm zen-toggle"
-            aria-pressed={isZen}
-            onClick={toggleZen}
+            role="tab"
+            aria-selected={mode === "edit"}
+            className={mode === "edit" ? "btn btn-toggle is-active" : "btn btn-toggle"}
+            onClick={() => setMode("edit")}
           >
-            {isZen ? "Exit Zen mode" : "Enter Zen mode"}
+            Edit
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "preview"}
+            className={
+              mode === "preview" ? "btn btn-toggle is-active" : "btn btn-toggle"
+            }
+            onClick={() => setMode("preview")}
+          >
+            Preview
           </button>
         </div>
 

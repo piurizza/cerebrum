@@ -3,7 +3,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useState } from "react";
 import { useNotes } from "../../context/NotesContext";
-import { usePrefersDark } from "../../hooks/usePrefersDark";
+import { useTheme } from "../../context/ThemeContext";
 import { imagePasteExtension } from "./imagePaste";
 import { noteLinkCompletionSource } from "./noteLinkCompletion";
 
@@ -14,7 +14,7 @@ interface MarkdownEditorProps {
 }
 
 export function MarkdownEditor({ value, onChange, currentPath }: MarkdownEditorProps) {
-  const prefersDark = usePrefersDark();
+  const { theme } = useTheme();
   const { notes } = useNotes();
   const [pasteError, setPasteError] = useState<string | null>(null);
 
@@ -39,7 +39,7 @@ export function MarkdownEditor({ value, onChange, currentPath }: MarkdownEditorP
         extensions={extensions}
         onChange={onChange}
         height="100%"
-        theme={prefersDark ? "dark" : "light"}
+        theme={theme}
       />
     </>
   );

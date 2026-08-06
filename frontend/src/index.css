@@ -548,7 +548,22 @@ a {
   overflow: hidden;
 }
 
+/* One combined chrome row (path + secondary actions + Zen/theme toggles),
+   matching the confirmed visual probe -- `.note-actions` and `.actions`
+   (passed via NotePathHeader's `actions` prop) sit side by side here, with
+   `.chrome-spacer` pushing the toggles to the far right. */
 .note-path-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.chrome-spacer {
+  flex: 1;
+}
+
+.note-actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -562,7 +577,10 @@ a {
    restores full contrast so the row is never illegible, just quieter
    until you're about to use it. Scoped to `.note-actions` specifically
    (not the shared `.note-path-header`, which the delete-confirmation
-   variant also uses and should stay at full visual weight). */
+   variant also uses and should stay at full visual weight). `.note-actions`
+   is now its own nested div (not the whole chrome row), so the Zen/theme
+   toggles rendered as siblings via NotePathHeader's `actions` prop never
+   inherit this de-emphasis -- they're always-full-contrast controls. */
 .note-actions .btn {
   color: var(--text-faint);
 }
@@ -599,15 +617,9 @@ a {
   background: var(--bg-subtle);
   border-radius: 4px;
   font-size: 0.85rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--text-muted);
   overflow-wrap: anywhere;
-}
-
-.editor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
 }
 
 .mode-toggle {
@@ -615,7 +627,16 @@ a {
   width: fit-content;
 }
 
-.zen-toggle {
+/* Pill-shaped, always full-contrast (never routed through R11's
+   de-emphasis -- see `.note-actions` above): matches the confirmed visual
+   probe's `.theme-toggle`/`.zen-toggle` treatment. `.btn-sm` still
+   supplies the shared size/transition/focus-visible system (U5); these
+   add only the pill shape and a background that reads as a control, not
+   a de-emphasized label. */
+.zen-toggle,
+.theme-toggle {
+  border-radius: 999px;
+  background: var(--bg-sidebar);
   color: var(--text-muted);
 }
 
@@ -660,6 +681,19 @@ a {
 
 .markdown-preview > :last-child {
   margin-bottom: 0;
+}
+
+/* A soft accent-tinted highlight behind emphasized text -- reserves color
+   for the content itself rather than the chrome around it (matching the
+   confirmed visual probe), giving key phrases a "highlighter" look
+   instead of just bolding them. */
+.markdown-preview strong {
+  background: light-dark(
+    color-mix(in srgb, var(--accent) 12%, transparent),
+    color-mix(in srgb, var(--accent) 18%, transparent)
+  );
+  padding: 0 0.15em;
+  border-radius: 3px;
 }
 
 .markdown-preview h1,

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import { useNavigate } from "react-router-dom";
 import { encodeNotePath, getGraph } from "../../api/client";
-import { usePrefersDark } from "../../hooks/usePrefersDark";
+import { useTheme } from "../../context/ThemeContext";
 import type { GraphResponse } from "../../types/note";
 
 /** Resolves a CSS custom property (e.g. one of `index.css`'s `light-dark()`
@@ -28,11 +28,11 @@ export function NoteGraph() {
   // properties (U5's redesigned palette) instead of a second, independent
   // set of hardcoded hex values -- otherwise this view would keep
   // rendering the pre-redesign palette after every other surface moved
-  // on. `prefersDark` (already tracking the OS theme live) is the signal
-  // to recompute: `light-dark()` resolves differently once the palette
-  // that drives it changes.
-  const prefersDark = usePrefersDark();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: prefersDark drives re-resolution, not read inside the callback.
+  // on. `theme` (the active light/dark state -- manual override or OS
+  // preference, see ThemeContext) is the signal to recompute:
+  // `light-dark()` resolves differently once it changes.
+  const { theme } = useTheme();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: theme drives re-resolution, not read inside the callback.
   const colors = useMemo(
     () => ({
       background: resolveColorToken("--bg"),
@@ -40,7 +40,7 @@ export function NoteGraph() {
       node: resolveColorToken("--accent"),
       ghostNode: resolveColorToken("--text-faint"),
     }),
-    [prefersDark],
+    [theme],
   );
 
   useEffect(() => {

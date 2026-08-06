@@ -1,9 +1,10 @@
 import { autocompletion } from "@codemirror/autocomplete";
 import { markdown } from "@codemirror/lang-markdown";
 import CodeMirror from "@uiw/react-codemirror";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNotes } from "../../context/NotesContext";
 import { usePrefersDark } from "../../hooks/usePrefersDark";
+import { imagePasteExtension } from "./imagePaste";
 import { noteLinkCompletionSource } from "./noteLinkCompletion";
 
 interface MarkdownEditorProps {
@@ -15,22 +16,31 @@ interface MarkdownEditorProps {
 export function MarkdownEditor({ value, onChange, currentPath }: MarkdownEditorProps) {
   const prefersDark = usePrefersDark();
   const { notes } = useNotes();
+  const [pasteError, setPasteError] = useState<string | null>(null);
 
   const extensions = useMemo(
     () => [
       markdown(),
       autocompletion({ override: [noteLinkCompletionSource(notes, currentPath)] }),
+      imagePasteExtension(currentPath, setPasteError),
     ],
     [notes, currentPath],
   );
 
   return (
-    <CodeMirror
-      value={value}
-      extensions={extensions}
-      onChange={onChange}
-      height="100%"
-      theme={prefersDark ? "dark" : "light"}
-    />
+    <>
+      {pasteError && (
+        <p className="error-text image-paste-error" role="alert">
+          {pasteError}
+        </p>
+      )}
+      <CodeMirror
+        value={value}
+        extensions={extensions}
+        onChange={onChange}
+        height="100%"
+        theme={prefersDark ? "dark" : "light"}
+      />
+    </>
   );
 }

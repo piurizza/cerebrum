@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+from cerebrum.attachments.service import (
+    attachment_dir_for_note,
+    delete_attachment_dir,
+    move_attachment_dir,
+)
 from cerebrum.notes.models import Note
 from cerebrum.notes.parser import parse_note, rebase_links, render_note, retarget_links
 
@@ -92,6 +98,7 @@ def delete_note(vault_root: Path, path: str) -> None:
     if not file_path.is_file():
         raise NoteNotFoundError(path)
     file_path.unlink()
+    delete_attachment_dir(vault_root, path)
 
 
 def _retarget_other_notes(
@@ -124,6 +131,31 @@ def _retarget_other_notes(
     return retargeted
 
 
+def _rebase_attachment_references(body: str, old_path: str, new_path: str) -> str:
+    """Rewrite `<old-stem>.attachments/` occurrences in `body` to
+    `<new-stem>.attachments/` when the note's own filename stem changed
+    (not just its directory). No-op (returns `body` unchanged) when the
+    stem didn't change.
+
+    A plain (non-anchored) substring replace would also mangle an
+    unrelated reference whose own folder name merely *ends with* the old
+    stem -- e.g. renaming `idea.md` would corrupt a cross-note reference
+    like `![](other-idea.attachments/x.png)` into
+    `![](other-better-idea.attachments/x.png)`, since `"idea.attachments/"`
+    is a substring of `"other-idea.attachments/"`. Requiring a non-word
+    character (or start-of-string) immediately before the match keeps this
+    a plain string substitution (per KTD7 -- not a markdown-link reparse)
+    while still only matching the stem as its own token, not as a suffix
+    of a longer one.
+    """
+    old_stem = PurePosixPath(old_path).stem
+    new_stem = PurePosixPath(new_path).stem
+    if old_stem == new_stem:
+        return body
+    pattern = re.compile(rf"(?<![\w-]){re.escape(old_stem)}\.attachments/")
+    return pattern.sub(f"{new_stem}.attachments/", body)
+
+
 def move_note(
     vault_root: Path, path: str, new_path: str, title: str | None = None
 ) -> tuple[Note, list[str]]:
@@ -136,6 +168,14 @@ def move_note(
     A note with unreadable/malformed content is skipped (logged, not
     fatal) rather than aborting the whole move -- see rebuild_index for
     the same defensive pattern.
+
+    Also relocates the note's attachment folder (`<stem>.attachments/`,
+    sibling to the note file) so it travels with the note. If the move
+    also changes the note's filename stem (not just its directory), the
+    attachment folder is renamed to match the new stem, and any literal
+    `<old-stem>.attachments/` occurrence in the note's own body (e.g. an
+    embedded `![](old-stem.attachments/abc.png)` reference) is rewritten
+    to `<new-stem>.attachments/` so the note's own embeds keep resolving.
 
     If `title` is given, the note's frontmatter `title` is also updated
     as part of the same write -- this is the only way to rename a note's
@@ -156,15 +196,23 @@ def move_note(
     if is_relocation and destination.exists():
         raise NoteAlreadyExistsError(new_path)
 
+    had_attachment_dir = False
     if is_relocation:
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.rename(destination)
+        had_attachment_dir = attachment_dir_for_note(vault_root, path).exists()
+        move_attachment_dir(vault_root, path, new_path)
 
     raw_content = destination.read_text(encoding="utf-8")
     parsed = parse_note(new_path, raw_content)
 
     changed = False
     if is_relocation:
+        if had_attachment_dir:
+            rewritten_body = _rebase_attachment_references(parsed.body, path, new_path)
+            if rewritten_body != parsed.body:
+                parsed.body = rewritten_body
+                changed = True
         rebased_body = rebase_links(parsed.body, path, new_path)
         if rebased_body != parsed.body:
             parsed.body = rebased_body

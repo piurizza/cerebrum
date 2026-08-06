@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from cerebrum.attachments.service import attachment_dir_for_note
 from cerebrum.notes.service import (
     InvalidNotePathError,
     NoteAlreadyExistsError,
@@ -192,3 +193,104 @@ def test_move_note_title_only_does_not_raise_already_exists(vault: Path) -> None
 
     # Same path is not a collision when nothing is relocating.
     move_note(vault, "a.md", "a.md", title="Renamed")
+
+
+def test_move_note_relocates_attachment_dir_when_stem_unchanged(vault: Path) -> None:
+    write_note(vault, "a.md", "![](a.attachments/abc123.png)")
+    attachment_dir = attachment_dir_for_note(vault, "a.md")
+    attachment_dir.mkdir(parents=True)
+    (attachment_dir / "abc123.png").write_bytes(b"fake-png-bytes")
+
+    moved, _ = move_note(vault, "a.md", "folder/a.md")
+
+    # Same stem, only the directory changed -- the attachment dir moves
+    # alongside it under the same name, and the note's embedded relative
+    # reference (relative to the note's own folder) is still correct
+    # without any rewrite.
+    old_dir = attachment_dir_for_note(vault, "a.md")
+    new_dir = attachment_dir_for_note(vault, "folder/a.md")
+    assert not old_dir.exists()
+    assert new_dir.is_dir()
+    assert (new_dir / "abc123.png").read_bytes() == b"fake-png-bytes"
+    assert "![](a.attachments/abc123.png)" in moved.content
+
+
+def test_move_note_renaming_stem_renames_attachment_dir_and_rewrites_body(
+    vault: Path,
+) -> None:
+    write_note(vault, "idea.md", "![](idea.attachments/abc123.png)")
+    attachment_dir = attachment_dir_for_note(vault, "idea.md")
+    attachment_dir.mkdir(parents=True)
+    (attachment_dir / "abc123.png").write_bytes(b"fake-png-bytes")
+
+    moved, _ = move_note(vault, "idea.md", "better-idea.md")
+
+    old_dir = attachment_dir_for_note(vault, "idea.md")
+    new_dir = attachment_dir_for_note(vault, "better-idea.md")
+    assert not old_dir.exists()
+    assert new_dir.is_dir()
+    assert (new_dir / "abc123.png").read_bytes() == b"fake-png-bytes"
+    assert "better-idea.attachments/abc123.png" in moved.content
+    assert "](idea.attachments/abc123.png)" not in moved.content
+    # Persisted to disk too, not just the returned in-memory note.
+    assert (
+        "better-idea.attachments/abc123.png"
+        in read_note(vault, "better-idea.md").content
+    )
+
+
+def test_move_note_renaming_stem_does_not_corrupt_unrelated_suffix_match(
+    vault: Path,
+) -> None:
+    """Regression: a blind (non-anchored) substring replace of
+    `<old-stem>.attachments/` would also mangle an unrelated reference
+    whose own folder name merely *ends with* the old stem -- e.g. renaming
+    idea.md must not touch a cross-note reference to
+    `other-idea.attachments/...`, since `"idea.attachments/"` is a
+    substring of `"other-idea.attachments/"`."""
+    write_note(
+        vault,
+        "idea.md",
+        "![](idea.attachments/abc123.png)\nSee also ![](other-idea.attachments/x.png).",
+    )
+    attachment_dir = attachment_dir_for_note(vault, "idea.md")
+    attachment_dir.mkdir(parents=True)
+    (attachment_dir / "abc123.png").write_bytes(b"fake-png-bytes")
+
+    moved, _ = move_note(vault, "idea.md", "better-idea.md")
+
+    # The note's own reference is rewritten...
+    assert "better-idea.attachments/abc123.png" in moved.content
+    # ...but the unrelated cross-note reference is untouched.
+    assert "other-idea.attachments/x.png" in moved.content
+    assert "other-better-idea.attachments" not in moved.content
+
+
+def test_move_note_without_attachment_dir_does_not_raise_or_create_one(
+    vault: Path,
+) -> None:
+    write_note(vault, "a.md", "content")
+
+    move_note(vault, "a.md", "folder/a.md")
+
+    assert not attachment_dir_for_note(vault, "a.md").exists()
+    assert not attachment_dir_for_note(vault, "folder/a.md").exists()
+
+
+def test_delete_note_removes_attachment_dir(vault: Path) -> None:
+    write_note(vault, "a.md", "content")
+    attachment_dir = attachment_dir_for_note(vault, "a.md")
+    attachment_dir.mkdir(parents=True)
+    (attachment_dir / "abc123.png").write_bytes(b"fake-png-bytes")
+
+    delete_note(vault, "a.md")
+
+    assert not attachment_dir.exists()
+
+
+def test_delete_note_without_attachment_dir_does_not_raise(vault: Path) -> None:
+    write_note(vault, "a.md", "content")
+
+    delete_note(vault, "a.md")
+
+    assert not attachment_dir_for_note(vault, "a.md").exists()

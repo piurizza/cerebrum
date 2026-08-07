@@ -148,18 +148,6 @@ def _fetch_content_hashes(conn: sqlite3.Connection, paths: set[str]) -> dict[str
     return {row["path"]: row["content_hash"] for row in rows}
 
 
-def _fetch_indexed_paths(conn: sqlite3.Connection, paths: set[str]) -> set[str]:
-    if not paths:
-        return set()
-    placeholders = ",".join("?" * len(paths))
-    with write_lock:
-        rows = conn.execute(
-            f"SELECT path FROM notes WHERE path IN ({placeholders})",
-            tuple(paths),
-        ).fetchall()
-    return {row["path"] for row in rows}
-
-
 def _guarded_remove(conn: sqlite3.Connection, path: str) -> None:
     """Runs `remove_note` for one path, containing the same transient-race
     exceptions the watcher loop already tolerates (`watcher.py`'s
@@ -260,10 +248,19 @@ def apply_watch_batch(
     gone = {path for path in rel_paths if not (vault_root / path).exists()}
     present = rel_paths - gone
 
-    old_hashes = _fetch_content_hashes(conn, gone)
-    already_indexed = _fetch_indexed_paths(conn, present)
-    new_arrivals = present - already_indexed
-    new_hashes = _hash_new_arrivals(vault_root, new_arrivals)
+    # One query covers both lookups this classification needs: `gone`'s
+    # stored hashes (to find deleted notes worth pairing) and which
+    # `present` paths are already indexed (to exclude ordinary content
+    # edits from the "new arrival" candidate set, per R4) -- `gone` and
+    # `present` partition `rel_paths`, so a single IN(...) over the whole
+    # set replaces what would otherwise be two near-identical round-trips.
+    indexed_hashes = _fetch_content_hashes(conn, rel_paths)
+    old_hashes = {path: h for path, h in indexed_hashes.items() if path in gone}
+    new_arrivals = present - indexed_hashes.keys()
+    # Hashing reads and hashes each new file's full content -- skip that
+    # work when nothing was deleted this batch, since `_match_unambiguous_pairs`
+    # can never produce a pair without at least one `old_hashes` entry.
+    new_hashes = _hash_new_arrivals(vault_root, new_arrivals) if old_hashes else {}
 
     pairs = _match_unambiguous_pairs(old_hashes, new_hashes)
     paired_old, paired_new = _apply_pairs(conn, vault_root, pairs)

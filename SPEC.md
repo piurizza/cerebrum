@@ -390,17 +390,25 @@ history.
 - [x] see edits made outside the app (e.g. vim, a sync tool) reflected
       without restarting the server -- a background watcher (`watchfiles`)
       keeps the index in sync in near real-time, backed by a periodic
-      backstop rescan; see
-      [Known gaps](#10-known-gaps--future-work) for the one limitation
-      (external renames).
+      backstop rescan. An external rename/move is detected (by
+      content-hash match within one debounce batch) and link-preserving
+      the same way an in-app rename is; see
+      [Known gaps](#10-known-gaps--future-work) for the remaining edges
+      (multi-step renames, attachment folders).
 
 ## 10. Known gaps / future work
 
-- **External renames aren't link-preserving.** A note renamed/moved
-  outside the app (e.g. `mv old.md new.md`) is indexed as a plain
-  delete-then-create by the filesystem watcher; other notes' links to the
-  old path become broken (ghost) links rather than being repointed to the
-  new path, unlike an in-app rename (`POST /api/notes/{path}/move`).
+- **External renames are only link-preserving for a single atomic
+  rename.** A note renamed/moved outside the app in one atomic step
+  (`mv old.md new.md`, an editor's save-as, a sync tool's atomic rename)
+  is now detected by the filesystem watcher via content-hash matching and
+  repointed the same way an in-app rename (`POST /api/notes/{path}/move`)
+  already is. Two edges remain unhandled: a rename whose delete and
+  create land in different watcher debounce windows (e.g. a slower sync
+  tool doing copy-then-delete as two separate operations) is still
+  indexed as a plain delete-then-create, leaving other notes' links to
+  the old path broken; and the renamed note's `.attachments/` folder, if
+  any, is not relocated -- it's left in place at its old name.
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
 - **No generated API types.** Frontend `types/note.ts` is hand-kept in

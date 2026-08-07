@@ -64,19 +64,6 @@ export function NoteViewPage() {
     }
   }, [path, content]);
 
-  useEffect(() => {
-    if (!path) return;
-    function handleKeyDown(event: KeyboardEvent) {
-      const isSaveShortcut =
-        (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
-      if (!isSaveShortcut) return;
-      event.preventDefault();
-      if (!saving) handleSave();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [path, saving, handleSave]);
-
   // Warns on tab close/refresh (R2) -- browsers only allow a native,
   // unstyled confirmation here, no custom Save/Discard/Cancel UI is
   // possible (KTD3), unlike the router-navigation case below.
@@ -96,7 +83,7 @@ export function NoteViewPage() {
   // is mounted (KTD2). Requires the data router migration (KTD1).
   const blocker = useBlocker(isDirty);
 
-  async function handleBlockedSave() {
+  const handleBlockedSave = useCallback(async () => {
     setBlockerError(null);
     try {
       await handleSave();
@@ -108,7 +95,7 @@ export function NoteViewPage() {
       // Discard is chosen, or Cancel is chosen (R3).
       setBlockerError(errorMessage(err));
     }
-  }
+  }, [handleSave, blocker]);
 
   function handleBlockedDiscard() {
     setBlockerError(null);
@@ -119,6 +106,30 @@ export function NoteViewPage() {
     setBlockerError(null);
     if (blocker.state === "blocked") blocker.reset();
   }
+
+  useEffect(() => {
+    if (!path) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      const isSaveShortcut =
+        (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
+      if (!isSaveShortcut) return;
+      event.preventDefault();
+      if (saving) return;
+      // Route through the dialog's own Save handler while it's blocking
+      // navigation, so blocker.proceed()/the dialog's error state stay in
+      // sync -- the plain handleSave() never calls blocker.proceed(), so
+      // saving via the shortcut while blocked would leave the dialog
+      // rendered and stale, still claiming "unsaved changes" for content
+      // that's already clean.
+      if (blocker.state === "blocked") {
+        handleBlockedSave();
+      } else {
+        handleSave();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [path, saving, handleSave, blocker.state, handleBlockedSave]);
 
   if (!path) {
     return (

@@ -97,8 +97,7 @@ body {
      content (see .markdown-preview below) so the whole app benefits,
      not just the sans-vs-serif question, which the evidence doesn't
      clearly settle for screen reading either way. */
-  font-family:
-    "Atkinson Hyperlegible Next", system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: "Atkinson Hyperlegible Next", system-ui, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
   line-height: 1.5;
   color: var(--text);

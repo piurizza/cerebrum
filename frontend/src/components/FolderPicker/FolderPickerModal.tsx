@@ -38,7 +38,7 @@ export function FolderPickerModal({
   const [newFolderName, setNewFolderName] = useState("");
   const newFolderInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef, true);
+  const isTopmost = useFocusTrap(modalRef, true);
 
   const allFolders = collectFolderPaths(notes);
   const subfolders = childFolderNames(allFolders, currentFolder);
@@ -46,11 +46,16 @@ export function FolderPickerModal({
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onCancel();
+      // Gated on isTopmost: e.g. editing a dirty note, opening this modal
+      // via Rename -> Choose location, then triggering the unsaved-changes
+      // dialog (browser Back) stacks both -- a single Escape should only
+      // cancel the one actually in view (see useFocusTrap's module-level
+      // comment).
+      if (event.key === "Escape" && isTopmost) onCancel();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [onCancel, isTopmost]);
 
   useEffect(() => {
     if (isAddingFolder) newFolderInputRef.current?.focus();

@@ -24,15 +24,24 @@ export function UnsavedChangesDialog({
   onCancel,
 }: UnsavedChangesDialogProps) {
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef, true);
+  const isTopmost = useFocusTrap(modalRef, true);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onCancel();
+      // Gated on `busy` like the three action buttons below: Cancel calls
+      // blocker.reset() unconditionally, which would unmount this dialog
+      // out from under an in-flight save -- its eventual failure would
+      // then have nowhere to surface (setBlockerError firing into an
+      // already-unmounted component). Also gated on isTopmost: this dialog
+      // can stack on top of FolderPickerModal (dirty note -> Rename ->
+      // Choose location -> browser Back), and a single Escape should only
+      // cancel whichever one is actually in view (see useFocusTrap's
+      // module-level comment).
+      if (event.key === "Escape" && !busy && isTopmost) onCancel();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [onCancel, busy, isTopmost]);
 
   return (
     <div className="modal-overlay">
@@ -41,6 +50,7 @@ export function UnsavedChangesDialog({
         className="modal-backdrop"
         aria-label="Close dialog"
         onClick={onCancel}
+        disabled={busy}
       />
       <div
         ref={modalRef}

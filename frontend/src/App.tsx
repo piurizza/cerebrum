@@ -36,7 +36,18 @@ function AppShell() {
   const { isZen } = useZenMode();
   return (
     <div className="app-layout">
-      <aside className={isZen ? "app-sidebar is-zen" : "app-sidebar"}>
+      {/* Zen mode only collapses the sidebar visually (width/opacity in
+          index.css) -- without `inert`/`aria-hidden`, every nav link,
+          search box, tag filter, note, and Logout stays keyboard- and
+          screen-reader-reachable while invisible. `inert` (React 19) drops
+          it from both the tab order and the accessibility tree; `aria-
+          hidden` covers browsers where `inert` isn't yet respected by
+          assistive tech. */}
+      <aside
+        className={isZen ? "app-sidebar is-zen" : "app-sidebar"}
+        inert={isZen}
+        aria-hidden={isZen}
+      >
         <h1 className="app-title">Cerebrum</h1>
         <nav className="app-nav">
           <NavLink

@@ -12,10 +12,25 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const STORAGE_KEY = "cerebrum-theme";
 
-function initialTheme(): Theme {
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === "light" || stored === "dark") return stored;
+function osPreference(): Theme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+// This is the codebase's first localStorage usage, and it runs on every
+// app's very first render (ThemeProvider is the outermost provider, and
+// there's no ErrorBoundary anywhere) -- storage access can throw (Safari's
+// "Block all cookies", enterprise storage policies, a sandboxed iframe
+// embed without allow-same-origin), and an uncaught throw here would blank
+// the whole app with no recovery path. Falls back to OS preference on any
+// failure, same as "no stored value yet".
+function initialTheme(): Theme {
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+  } catch {
+    // Storage inaccessible -- fall through to the OS-preference default.
+  }
+  return osPreference();
 }
 
 /** Manual per-device light/dark override, persisted across reloads (matches
@@ -37,7 +52,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
-    window.localStorage.setItem(STORAGE_KEY, theme);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, theme);
+    } catch {
+      // Persistence is a nice-to-have -- the theme still applies for this
+      // session via the DOM attribute set above; it just won't survive a
+      // reload if storage is unavailable.
+    }
   }, [theme]);
 
   const toggleTheme = useCallback(() => {

@@ -27,15 +27,18 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef, true);
+  const isTopmost = useFocusTrap(modalRef, true);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onCancel();
+      // Gated on isTopmost: if another modal is stacked on top of this one,
+      // a single Escape press should cancel only the one actually in view,
+      // not both at once (see useFocusTrap's module-level comment).
+      if (event.key === "Escape" && isTopmost) onCancel();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [onCancel, isTopmost]);
 
   return (
     <div className="modal-overlay">

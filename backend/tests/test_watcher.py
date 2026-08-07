@@ -12,11 +12,12 @@ from watchfiles._rust_notify import (  # pylint: disable=no-name-in-module
     WatchfilesRustInternalError,
 )
 
-from cerebrum.index import watcher
+from cerebrum.graph.service import get_backlinks
+from cerebrum.index import indexer, watcher
 from cerebrum.index.db import list_notes
 from cerebrum.index.indexer import upsert_note
 from cerebrum.index.watcher import VaultFilter, watch_vault
-from cerebrum.notes.service import write_note
+from cerebrum.notes.service import read_note, write_note
 from cerebrum.settings import Settings
 
 
@@ -136,6 +137,54 @@ def test_external_rename_removes_old_and_indexes_new(
     asyncio.run(_run_and_wait(db, vault, settings, mutate, check))
 
 
+def test_external_rename_relinks_third_note(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """End-to-end complement to `test_apply_watch_batch_relinks_third_note_on_rename`
+    (test_indexer.py) -- proves the same rename-pairing + link-repointing
+    behavior through the REAL `watch_vault`/`awatch` loop, not by calling
+    `apply_watch_batch` directly.
+    """
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [T](target.md).")
+    upsert_note(db, vault, "target.md")
+    upsert_note(db, vault, "linker.md")
+    settings = _settings()
+
+    def mutate() -> None:
+        (vault / "target.md").rename(vault / "renamed.md")
+
+    def check() -> bool:
+        return {note.path for note in list_notes(db)} == {"renamed.md", "linker.md"}
+
+    asyncio.run(_run_and_wait(db, vault, settings, mutate, check))
+
+    linker = read_note(vault, "linker.md")
+    assert "[T](renamed.md)" in linker.content
+    assert [note.path for note in get_backlinks(db, "renamed.md")] == ["linker.md"]
+
+
+def test_unrelated_delete_and_create_in_same_batch_stay_independent(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """A plain delete and a plain create with DIFFERENT content landing in
+    the same debounce batch must not be mistaken for a rename -- both are
+    applied as independent remove/upsert through the real watch loop.
+    """
+    write_note(vault, "gone.md", "content that is going away")
+    upsert_note(db, vault, "gone.md")
+    settings = _settings()
+
+    def mutate() -> None:
+        (vault / "gone.md").unlink()
+        write_note(vault, "fresh.md", "totally different content")
+
+    def check() -> bool:
+        return {note.path for note in list_notes(db)} == {"fresh.md"}
+
+    asyncio.run(_run_and_wait(db, vault, settings, mutate, check))
+
+
 def test_awatch_file_not_found_error_is_caught(
     vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -240,7 +289,7 @@ def test_per_file_processing_error_does_not_kill_watcher(
     downgrading live sync to the 300s backstop rescan for the rest of the
     process's life.
     """
-    real_upsert_note = watcher.upsert_note
+    real_upsert_note = indexer.upsert_note
     calls: list[str] = []
 
     def flaky_upsert_note(
@@ -251,7 +300,7 @@ def test_per_file_processing_error_does_not_kill_watcher(
             raise FileNotFoundError("simulated delete-race")
         real_upsert_note(conn, vault_root, path)
 
-    monkeypatch.setattr(watcher, "upsert_note", flaky_upsert_note)
+    monkeypatch.setattr(indexer, "upsert_note", flaky_upsert_note)
     settings = _settings()
 
     async def run() -> None:
@@ -319,7 +368,7 @@ def test_burst_of_rapid_writes_dispatches_once(
     `watcher_debounce_ms` is actually wired through to `awatch`, not just
     present in config."""
     calls: list[str] = []
-    real_upsert_note = watcher.upsert_note
+    real_upsert_note = indexer.upsert_note
 
     def counting_upsert_note(
         conn: sqlite3.Connection, vault_root: Path, path: str
@@ -327,7 +376,7 @@ def test_burst_of_rapid_writes_dispatches_once(
         calls.append(path)
         real_upsert_note(conn, vault_root, path)
 
-    monkeypatch.setattr(watcher, "upsert_note", counting_upsert_note)
+    monkeypatch.setattr(indexer, "upsert_note", counting_upsert_note)
     settings = _settings(debounce_ms=400)
 
     async def run() -> None:

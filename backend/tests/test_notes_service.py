@@ -13,6 +13,7 @@ from cerebrum.notes.service import (
     iter_note_paths,
     move_note,
     read_note,
+    retarget_note_links,
     write_note,
 )
 
@@ -275,6 +276,117 @@ def test_move_note_without_attachment_dir_does_not_raise_or_create_one(
 
     assert not attachment_dir_for_note(vault, "a.md").exists()
     assert not attachment_dir_for_note(vault, "folder/a.md").exists()
+
+
+def test_retarget_note_links_rebases_its_own_relative_links(vault: Path) -> None:
+    # "folder/a.md" links to "target.md", meaning "folder/target.md".
+    write_note(vault, "folder/a.md", "See [T](target.md).")
+    write_note(vault, "folder/target.md", "content")
+
+    # Simulate the file already having been moved externally (e.g. `mv`)
+    # before retarget_note_links is called.
+    (vault / "folder" / "a.md").rename(vault / "a.md")
+
+    moved, _ = retarget_note_links(vault, "folder/a.md", "a.md")
+
+    # Now at the root, the same absolute target needs the full path.
+    assert "[T](folder/target.md)" in moved.content
+    assert "[T](folder/target.md)" in read_note(vault, "a.md").content
+
+
+def test_retarget_note_links_retargets_other_notes_incoming_links(
+    vault: Path,
+) -> None:
+    write_note(vault, "linker.md", "See [B](b.md) for details.")
+    write_note(vault, "b.md", "content")
+    (vault / "folder").mkdir()
+    (vault / "b.md").rename(vault / "folder" / "b.md")
+
+    _, retargeted = retarget_note_links(vault, "b.md", "folder/b.md")
+
+    assert retargeted == ["linker.md"]
+    linker = read_note(vault, "linker.md")
+    assert "[B](folder/b.md)" in linker.content
+    assert "for details" in linker.content
+
+
+def test_retarget_note_links_preserves_link_fragment(vault: Path) -> None:
+    write_note(vault, "linker.md", "See [B](b.md#section).")
+    write_note(vault, "b.md", "content")
+    (vault / "folder").mkdir()
+    (vault / "b.md").rename(vault / "folder" / "b.md")
+
+    retarget_note_links(vault, "b.md", "folder/b.md")
+
+    linker = read_note(vault, "linker.md")
+    assert "[B](folder/b.md#section)" in linker.content
+
+
+def test_retarget_note_links_same_directory_needs_no_self_rebase(
+    vault: Path,
+) -> None:
+    write_note(vault, "old-name.md", "See [T](target.md).")
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [B](old-name.md).")
+
+    (vault / "old-name.md").rename(vault / "new-name.md")
+
+    moved, retargeted = retarget_note_links(vault, "old-name.md", "new-name.md")
+
+    # Same directory -- the note's own relative link needed no rewrite.
+    assert "[T](target.md)" in moved.content
+    # But other notes still get retargeted.
+    assert retargeted == ["linker.md"]
+    assert "[B](new-name.md)" in read_note(vault, "linker.md").content
+
+
+def test_retarget_note_links_does_not_touch_unrelated_links(vault: Path) -> None:
+    write_note(vault, "linker.md", "See [C](c.md).")
+    write_note(vault, "b.md", "content")
+    write_note(vault, "c.md", "content")
+    (vault / "folder").mkdir()
+    (vault / "b.md").rename(vault / "folder" / "b.md")
+
+    _, retargeted = retarget_note_links(vault, "b.md", "folder/b.md")
+
+    assert not retargeted
+    assert "[C](c.md)" in read_note(vault, "linker.md").content
+
+
+def test_retarget_note_links_missing_destination_raises(vault: Path) -> None:
+    with pytest.raises(NoteNotFoundError):
+        retarget_note_links(vault, "old.md", "new.md")
+
+
+def test_retarget_note_links_skips_unreadable_other_note(vault: Path) -> None:
+    write_note(vault, "b.md", "content")
+    (vault / "bad.md").write_bytes(b"\xff\xfe not valid utf-8")
+    (vault / "folder").mkdir()
+    (vault / "b.md").rename(vault / "folder" / "b.md")
+
+    # An unreadable sibling note must not abort the whole operation.
+    _, retargeted = retarget_note_links(vault, "b.md", "folder/b.md")
+
+    assert not retargeted
+
+
+def test_retarget_note_links_leaves_attachment_dir_untouched(vault: Path) -> None:
+    write_note(vault, "idea.md", "![](idea.attachments/abc123.png)")
+    attachment_dir = attachment_dir_for_note(vault, "idea.md")
+    attachment_dir.mkdir(parents=True)
+    (attachment_dir / "abc123.png").write_bytes(b"fake-png-bytes")
+
+    (vault / "idea.md").rename(vault / "better-idea.md")
+
+    moved, _ = retarget_note_links(vault, "idea.md", "better-idea.md")
+
+    # R6: attachment folders/references are explicitly out of scope here
+    # -- unlike move_note, the folder stays put under its old name and
+    # the note's embedded reference is left as-is.
+    assert attachment_dir.is_dir()
+    assert (attachment_dir / "abc123.png").read_bytes() == b"fake-png-bytes"
+    assert not attachment_dir_for_note(vault, "better-idea.md").exists()
+    assert "![](idea.attachments/abc123.png)" in moved.content
 
 
 def test_delete_note_removes_attachment_dir(vault: Path) -> None:

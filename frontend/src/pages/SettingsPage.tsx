@@ -33,7 +33,7 @@ function OneTimeSecret({ label, value }: { label: string; value: string }) {
       </p>
       <div className="path-picker-trigger">
         <code className="note-path">{value}</code>
-        <button type="button" className="btn btn-copy" onClick={handleCopy}>
+        <button type="button" className="btn btn-sm" onClick={handleCopy}>
           {copied ? "Copied!" : "Copy"}
         </button>
       </div>
@@ -149,7 +149,7 @@ function ApiTokensSection() {
               {!token.revoked && (
                 <button
                   type="button"
-                  className="btn btn-copy btn-danger-outline"
+                  className="btn btn-sm btn-danger-outline"
                   onClick={() => {
                     setRevokeError(null);
                     setRevokeTarget(token);
@@ -278,7 +278,7 @@ function AdminSection() {
               {account.is_active && !isSelf && (
                 <button
                   type="button"
-                  className="btn btn-copy btn-danger-outline"
+                  className="btn btn-sm btn-danger-outline"
                   onClick={() => {
                     setDeactivateError(null);
                     setDeactivateTarget(account);

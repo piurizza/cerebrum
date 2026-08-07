@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useNotes } from "../../context/NotesContext";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import {
   childFolderNames,
   collectFolderPaths,
@@ -36,6 +37,8 @@ export function FolderPickerModal({
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const newFolderInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const isTopmost = useFocusTrap(modalRef, true);
 
   const allFolders = collectFolderPaths(notes);
   const subfolders = childFolderNames(allFolders, currentFolder);
@@ -43,11 +46,16 @@ export function FolderPickerModal({
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onCancel();
+      // Gated on isTopmost: e.g. editing a dirty note, opening this modal
+      // via Rename -> Choose location, then triggering the unsaved-changes
+      // dialog (browser Back) stacks both -- a single Escape should only
+      // cancel the one actually in view (see useFocusTrap's module-level
+      // comment).
+      if (event.key === "Escape" && isTopmost) onCancel();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [onCancel, isTopmost]);
 
   useEffect(() => {
     if (isAddingFolder) newFolderInputRef.current?.focus();
@@ -80,7 +88,13 @@ export function FolderPickerModal({
         aria-label="Close dialog"
         onClick={onCancel}
       />
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <h2 className="modal-title">{title}</h2>
 
         <div className="folder-breadcrumbs">
@@ -146,7 +160,7 @@ export function FolderPickerModal({
         ) : (
           <button
             type="button"
-            className="btn btn-copy"
+            className="btn btn-sm"
             onClick={() => setIsAddingFolder(true)}
           >
             + New folder

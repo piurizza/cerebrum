@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { encodeNotePath, getNote, putNote } from "../api/client";
+import { useBlocker, useNavigate, useParams } from "react-router-dom";
+import { encodeNotePath, errorMessage, getNote, putNote } from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
+import { UnsavedChangesDialog } from "../components/ConfirmDialog/UnsavedChangesDialog";
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
 import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
 import { NotePathHeader } from "../components/Editor/NotePathHeader";
+import { useTheme } from "../context/ThemeContext";
+import { useZenMode } from "../context/ZenModeContext";
 import { stripFrontmatter } from "../lib/noteContent";
 
 type ViewMode = "edit" | "preview";
+
+// Best-effort platform detection for the shortcut hint (R6) --
+// `navigator.platform` is deprecated but still universally supported;
+// worst case a non-Mac user briefly sees "⌘" instead of "Ctrl", which is
+// cosmetic only, since the keydown handler above already accepts both.
+const isMac =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 export function NoteViewPage() {
   const params = useParams();
@@ -20,12 +30,15 @@ export function NoteViewPage() {
   const [updated, setUpdated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [mode, setMode] = useState<ViewMode>("edit");
+  const [mode, setMode] = useState<ViewMode>("preview");
+  const [blockerError, setBlockerError] = useState<string | null>(null);
+  const { isZen, toggleZen } = useZenMode();
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     if (!path) return;
     setLoading(true);
-    setMode("edit");
+    setMode("preview");
     getNote(path)
       .then((note) => {
         setContent(note.content);
@@ -36,6 +49,8 @@ export function NoteViewPage() {
       })
       .finally(() => setLoading(false));
   }, [path]);
+
+  const isDirty = content !== savedContent;
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -49,6 +64,49 @@ export function NoteViewPage() {
     }
   }, [path, content]);
 
+  // Warns on tab close/refresh (R2) -- browsers only allow a native,
+  // unstyled confirmation here, no custom Save/Discard/Cancel UI is
+  // possible (KTD3), unlike the router-navigation case below.
+  useEffect(() => {
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (!isDirty) return;
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  // Intercepts every router-mediated navigation away from a dirty note --
+  // sidebar clicks, note-to-note links, graph node clicks, browser
+  // back/forward -- regardless of which component triggered it, since
+  // useBlocker fires on any attempted route change while this component
+  // is mounted (KTD2). Requires the data router migration (KTD1).
+  const blocker = useBlocker(isDirty);
+
+  const handleBlockedSave = useCallback(async () => {
+    setBlockerError(null);
+    try {
+      await handleSave();
+      if (blocker.state === "blocked") blocker.proceed();
+    } catch (err) {
+      // handleSave's own finally already reset `saving` -- only the
+      // dialog's error state is this function's responsibility. Do NOT
+      // proceed(): the edit must stay on this note until Save succeeds,
+      // Discard is chosen, or Cancel is chosen (R3).
+      setBlockerError(errorMessage(err));
+    }
+  }, [handleSave, blocker]);
+
+  function handleBlockedDiscard() {
+    setBlockerError(null);
+    if (blocker.state === "blocked") blocker.proceed();
+  }
+
+  function handleBlockedCancel() {
+    setBlockerError(null);
+    if (blocker.state === "blocked") blocker.reset();
+  }
+
   useEffect(() => {
     if (!path) return;
     function handleKeyDown(event: KeyboardEvent) {
@@ -56,11 +114,22 @@ export function NoteViewPage() {
         (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
       if (!isSaveShortcut) return;
       event.preventDefault();
-      if (!saving) handleSave();
+      if (saving) return;
+      // Route through the dialog's own Save handler while it's blocking
+      // navigation, so blocker.proceed()/the dialog's error state stay in
+      // sync -- the plain handleSave() never calls blocker.proceed(), so
+      // saving via the shortcut while blocked would leave the dialog
+      // rendered and stale, still claiming "unsaved changes" for content
+      // that's already clean.
+      if (blocker.state === "blocked") {
+        handleBlockedSave();
+      } else {
+        handleSave();
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [path, saving, handleSave]);
+  }, [path, saving, handleSave, blocker.state, handleBlockedSave]);
 
   if (!path) {
     return (
@@ -69,13 +138,20 @@ export function NoteViewPage() {
   }
 
   if (loading) {
-    return <p className="empty-hint">Loading...</p>;
+    return <p className="loading-indicator">Loading...</p>;
   }
-
-  const isDirty = content !== savedContent;
 
   return (
     <div className="note-view">
+      {blocker.state === "blocked" && (
+        <UnsavedChangesDialog
+          error={blockerError}
+          busy={saving}
+          onSave={handleBlockedSave}
+          onDiscard={handleBlockedDiscard}
+          onCancel={handleBlockedCancel}
+        />
+      )}
       <div className="note-editor">
         <NotePathHeader
           path={path}
@@ -92,29 +168,27 @@ export function NoteViewPage() {
             }
           }}
           onDeleted={() => navigate("/")}
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn btn-sm theme-toggle"
+                aria-pressed={theme === "dark"}
+                onClick={toggleTheme}
+              >
+                {theme === "dark" ? "Light" : "Dark"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm zen-toggle"
+                aria-pressed={isZen}
+                onClick={toggleZen}
+              >
+                {isZen ? "Exit Zen mode" : "Zen mode"}
+              </button>
+            </>
+          }
         />
-        <div className="mode-toggle" role="tablist" aria-label="Editor mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "edit"}
-            className={mode === "edit" ? "btn btn-toggle is-active" : "btn btn-toggle"}
-            onClick={() => setMode("edit")}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "preview"}
-            className={
-              mode === "preview" ? "btn btn-toggle is-active" : "btn btn-toggle"
-            }
-            onClick={() => setMode("preview")}
-          >
-            Preview
-          </button>
-        </div>
 
         {mode === "edit" ? (
           <MarkdownEditor value={content} onChange={setContent} currentPath={path} />
@@ -123,15 +197,34 @@ export function NoteViewPage() {
         )}
 
         <div className="note-editor-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
           <span className="save-status">{isDirty ? "Unsaved changes" : "Saved"}</span>
+          <span className="shortcut-hint">
+            <kbd>{isMac ? "⌘" : "Ctrl"}</kbd>+<kbd>S</kbd> to save
+          </span>
+          <span className="chrome-spacer" />
+          {mode === "edit" ? (
+            <>
+              <button type="button" className="btn" onClick={() => setMode("preview")}>
+                Preview
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSave}
+                disabled={saving}
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-edit"
+              onClick={() => setMode("edit")}
+            >
+              Edit
+            </button>
+          )}
         </div>
       </div>
       <aside className="note-backlinks">

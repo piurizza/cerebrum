@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { deleteNote, errorMessage, moveNote } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import { formatTimestamp } from "../../lib/formatDate";
@@ -12,6 +12,14 @@ interface NotePathHeaderProps {
   updated: string | null;
   onRenamed: (updated: Note) => void;
   onDeleted: () => void;
+  /** Rendered at the far right of the chrome row (Zen/theme toggles), after
+   * a spacer that pushes it away from the de-emphasized path/action
+   * cluster -- matches the confirmed visual probe's single combined chrome
+   * row. Sits outside `.note-actions` so it never inherits R11's
+   * de-emphasis (these are always-full-contrast controls, not secondary
+   * note actions). Omitted during rename/delete-confirm, which return
+   * before reaching the row that renders it. */
+  actions?: ReactNode;
 }
 
 export function NotePathHeader({
@@ -21,6 +29,7 @@ export function NotePathHeader({
   updated,
   onRenamed,
   onDeleted,
+  actions,
 }: NotePathHeaderProps) {
   const { notes, refreshNotes } = useNotes();
   const [copied, setCopied] = useState(false);
@@ -140,7 +149,7 @@ export function NotePathHeader({
               <code className="note-path">{newPath}</code>
               <button
                 type="button"
-                className="btn btn-copy"
+                className="btn btn-sm"
                 onClick={() => setIsPickerOpen(true)}
               >
                 Choose location
@@ -189,20 +198,28 @@ export function NotePathHeader({
   return (
     <>
       <div className="note-path-header">
-        <code className="note-path">{path}</code>
-        <button type="button" className="btn btn-copy" onClick={handleCopy}>
-          {copied ? "Copied!" : "Copy path"}
-        </button>
-        <button type="button" className="btn btn-copy" onClick={startRename}>
-          Rename
-        </button>
-        <button
-          type="button"
-          className="btn btn-copy btn-danger-outline"
-          onClick={() => setIsConfirmingDelete(true)}
-        >
-          Delete
-        </button>
+        <div className="note-actions">
+          <code className="note-path">{path}</code>
+          <button type="button" className="btn btn-sm" onClick={handleCopy}>
+            {copied ? "Copied!" : "Copy path"}
+          </button>
+          <button type="button" className="btn btn-sm" onClick={startRename}>
+            Rename
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-danger-outline"
+            onClick={() => setIsConfirmingDelete(true)}
+          >
+            Delete
+          </button>
+        </div>
+        {actions && (
+          <>
+            <span className="chrome-spacer" />
+            {actions}
+          </>
+        )}
       </div>
       {(createdLabel || updatedLabel) && (
         <p className="note-meta">

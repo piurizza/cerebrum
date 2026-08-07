@@ -155,7 +155,7 @@ export function NoteBrowser() {
       )}
       {results !== null ? (
         searching ? (
-          <p className="empty-hint">Searching...</p>
+          <p className="loading-indicator">Searching...</p>
         ) : results.length === 0 ? (
           <p className="empty-hint">No matches for "{query.trim()}".</p>
         ) : (

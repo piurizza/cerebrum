@@ -1,17 +1,87 @@
+/* Study-reading-optimized palette, grounded in the more robust findings
+   from vision-ergonomics and color-cognition research rather than a
+   single subjective "nice" scheme:
+   - Contrast matters far more than hue for reading fatigue and error
+     rate (poor contrast forces the visual system to work harder to
+     resolve letterforms) -- every pairing below is WCAG 2.1 contrast-
+     checked, well past the 4.5:1 AA floor in most cases.
+   - A warm, lower-luminance background (not stark #fff) measurably
+     reduces glare/visual fatigue over long reading sessions versus
+     pure white -- this is why the light background is a warm parchment
+     tone rather than white, and why dark mode uses a warm charcoal
+     rather than nested pure black (very high luminance contrast can
+     itself induce visual strain for some readers).
+   - Dark, muted, desaturated accent colors are used deliberately in
+     favor of a vivid/saturated hue: color-cognition research associates
+     strongly saturated red specifically with anxiety/avoidance framing
+     in evaluative contexts (relevant for an exam-prep app) -- red here
+     stays scoped to actual errors/danger states only, never ambient UI.
+   - Dark mode additionally shifts the whole palette warmer (lower blue
+     channel), consistent with research on blue light's effect on
+     alertness/circadian signaling, so evening study sessions aren't
+     fighting a cool-toned screen.
+   Contrast-checked (WCAG 2.1 relative luminance) against all three
+   background tiers (--bg, --bg-sidebar, --bg-subtle), the hardest of
+   which is noted per row: --text ~11-15:1, --text-muted ~5-7.5:1,
+   --text-faint ~4.5-7.2:1 (never below the 4.5:1 AE5 floor on any
+   background it actually appears on), --accent (link text) 5.1:1/7.1:1,
+   --accent-fg on --accent (button text) 5.6:1/7.5:1 (light/dark). --border
+   stays a soft ~1.7:1/2.0:1 divider, not a control outline -- it
+   separates regions, it doesn't need to pop. */
 :root {
   color-scheme: light dark;
 
-  --bg: light-dark(#ffffff, #17181c);
-  --bg-sidebar: light-dark(#f7f7f9, #1c1d22);
-  --bg-subtle: light-dark(#eeeef1, #24252b);
-  --border: light-dark(#e2e2e6, #33343c);
-  --text: light-dark(#1a1a1e, #e7e7ea);
-  --text-muted: light-dark(#6b6b73, #9a9aa3);
-  --accent: light-dark(#3a5bd9, #7b93ff);
-  --accent-fg: #ffffff;
-  --danger: light-dark(#c0392b, #ff6b5b);
-  --danger-bg: light-dark(#fdecea, #3a2323);
-  --radius: 6px;
+  --bg: light-dark(#f4ede0, #26221d);
+  --bg-sidebar: light-dark(#e8dcc4, #2e2a23);
+  --bg-subtle: light-dark(#ddd0b4, #383226);
+  --border: light-dark(#c9b995, #55503f);
+  --text: light-dark(#1f1b16, #ece4d3);
+  --text-muted: light-dark(#5c5142, #bdb29c);
+  --text-faint: light-dark(#584c3c, #a49c84);
+  --accent: light-dark(#8a5a1e, #d9a54a);
+  --accent-fg: light-dark(#fdf8ee, #241d10);
+  --danger: light-dark(#a5442d, #e08165);
+  --danger-bg: light-dark(#f3e3da, #3a241c);
+  --highlight-bg: light-dark(rgb(138 90 30 / 20%), rgb(217 165 74 / 22%));
+  --radius: 8px;
+  --transition: 120ms ease;
+}
+
+/* Manual light/dark override (ThemeContext) -- explicit literal values,
+   not light-dark(), so a `[data-theme]` attribute on the root
+   deterministically wins over the `light-dark()` defaults above via plain
+   CSS specificity (`:root[data-theme=...]` beats bare `:root`), rather
+   than depending on `light-dark()`'s own `color-scheme`-driven override
+   behavior. Values are the same literal pairs as the `light-dark()` calls
+   above -- keep both in sync if the palette changes. */
+:root[data-theme="light"] {
+  --bg: #f4ede0;
+  --bg-sidebar: #e8dcc4;
+  --bg-subtle: #ddd0b4;
+  --border: #c9b995;
+  --text: #1f1b16;
+  --text-muted: #5c5142;
+  --text-faint: #584c3c;
+  --accent: #8a5a1e;
+  --accent-fg: #fdf8ee;
+  --danger: #a5442d;
+  --danger-bg: #f3e3da;
+  --highlight-bg: rgb(138 90 30 / 20%);
+}
+
+:root[data-theme="dark"] {
+  --bg: #26221d;
+  --bg-sidebar: #2e2a23;
+  --bg-subtle: #383226;
+  --border: #55503f;
+  --text: #ece4d3;
+  --text-muted: #bdb29c;
+  --text-faint: #a49c84;
+  --accent: #d9a54a;
+  --accent-fg: #241d10;
+  --danger: #e08165;
+  --danger-bg: #3a241c;
+  --highlight-bg: rgb(217 165 74 / 22%);
 }
 
 * {
@@ -20,7 +90,14 @@
 
 body {
   margin: 0;
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  /* Atkinson Hyperlegible Next (loaded in index.html): designed and
+     iterated against legibility research -- character disambiguation
+     (1/l/I, 0/O), open counters, generous x-height -- rather than a
+     generic system-font stack. Used for both UI chrome and reading
+     content (see .markdown-preview below) so the whole app benefits,
+     not just the sans-vs-serif question, which the evidence doesn't
+     clearly settle for screen reading either way. */
+  font-family: "Atkinson Hyperlegible Next", system-ui, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
   line-height: 1.5;
   color: var(--text);
@@ -59,29 +136,60 @@ a {
 }
 
 .app-sidebar {
-  width: 260px;
+  width: 240px;
   flex-shrink: 0;
-  padding: 1rem;
+  padding: 1.125rem 0.875rem;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  transition:
+    width var(--transition),
+    padding var(--transition),
+    opacity var(--transition);
+}
+
+/* Small, muted sidebar wordmark -- deliberately NOT the shared `h1` scale
+   used for real page titles (Login/Register/Settings): this is ambient
+   chrome, not content, and should recede per R11's "sidebar and note
+   actions desaturated so they recede" direction. */
+.app-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  margin: 0 0 0.9rem;
+}
+
+/* Zen mode (R12): collapses the sidebar for distraction-free reading.
+   Width/padding animate away rather than a hard display:none, so the
+   transition reads as "sliding away" instead of an abrupt cut. */
+.app-sidebar.is-zen {
+  width: 0;
+  padding: 1rem 0;
+  opacity: 0;
+  border-right-color: transparent;
+  overflow: hidden;
 }
 
 .app-nav {
   display: flex;
+  gap: 0.25rem;
   margin-bottom: 1rem;
 }
 
 .app-nav a {
-  padding: 0.35rem 0.6rem;
+  padding: 0.25rem 0.5rem;
   border-radius: var(--radius);
   text-decoration: none;
+  color: var(--text-faint);
+  font-size: 0.8rem;
   font-weight: 500;
 }
 
 .app-nav a:hover,
 .app-nav a.is-active {
-  background: var(--bg-subtle);
+  color: var(--text-muted);
+  background: var(--bg);
 }
 
 .app-main {
@@ -105,10 +213,21 @@ a {
   font-size: 0.9rem;
   font-family: inherit;
   cursor: pointer;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    box-shadow var(--transition),
+    color var(--transition);
 }
 
 .btn:hover {
   background: var(--bg-subtle);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  border-color: var(--accent);
 }
 
 .btn:disabled {
@@ -151,17 +270,27 @@ a {
   margin-bottom: 1rem;
 }
 
+/* Size variant only -- shared by every former `.btn-copy` consumer (Copy
+   path/Rename/Delete, + New folder, Settings' token/account actions).
+   Deliberately carries no de-emphasis: that's a separate, narrower class
+   applied only to the note-path action row (see `.note-actions .btn`
+   below), so Settings' destructive actions stay at full visual weight. */
+.btn-sm {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+}
+
 .search-input {
   display: block;
   width: 100%;
-  padding: 0.45rem 0.6rem;
+  padding: 0.4rem 0.55rem;
   margin-bottom: 1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
-  color: var(--text);
+  color: var(--text-muted);
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
 
 .tag-filter {
@@ -206,10 +335,11 @@ a {
 .note-link {
   display: flex;
   flex-direction: column;
-  padding: 0.4rem 0.6rem;
+  padding: 0.35rem 0.55rem;
   border-radius: var(--radius);
   text-decoration: none;
-  color: var(--text);
+  color: var(--text-muted);
+  font-size: 0.8rem;
 }
 
 .note-title {
@@ -222,12 +352,13 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.75rem;
-  color: var(--text-muted);
+  font-size: 0.7rem;
+  color: var(--text-faint);
 }
 
 .note-link:hover {
-  background: var(--bg-subtle);
+  background: var(--bg);
+  color: var(--text);
 }
 
 .note-link.is-active {
@@ -259,20 +390,21 @@ a {
   align-items: center;
   gap: 0.3rem;
   width: 100%;
-  padding: 0.3rem 0.6rem;
+  padding: 0.3rem 0.55rem;
   border: none;
   border-radius: var(--radius);
   background: none;
-  color: var(--text-muted);
-  font-size: 0.9rem;
+  color: var(--text-faint);
+  font-size: 0.75rem;
   font-family: inherit;
-  font-weight: 500;
+  font-weight: 600;
   text-align: left;
   cursor: pointer;
 }
 
 .note-folder:hover {
-  background: var(--bg-subtle);
+  background: var(--bg);
+  color: var(--text-muted);
 }
 
 .folder-caret {
@@ -482,6 +614,14 @@ a {
 .note-editor {
   flex: 1;
   min-width: 0;
+  /* Width-constrained, centered reading column (R8) -- caps at a
+     comfortable reading measure and centers within the space left after
+     the app sidebar and backlinks panel, matching the probe's confirmed
+     column width. Applies to the whole note-editor column (header,
+     mode toggle, editor/preview, action row) so switching between Edit
+     and Preview doesn't shift the layout width. */
+  max-width: 46rem;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -493,6 +633,10 @@ a {
   overflow: hidden;
 }
 
+/* One combined chrome row (path + secondary actions + Zen/theme toggles),
+   matching the confirmed visual probe -- `.note-actions` and `.actions`
+   (passed via NotePathHeader's `actions` prop) sit side by side here, with
+   `.chrome-spacer` pushing the toggles to the far right. */
 .note-path-header {
   display: flex;
   align-items: center;
@@ -500,12 +644,48 @@ a {
   flex-wrap: wrap;
 }
 
+.chrome-spacer {
+  flex: 1;
+}
+
+.note-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* De-emphasizes Copy path/Rename/Delete relative to the reading content
+   (R11) -- but only via color, never opacity (opacity blends toward the
+   background and can silently undo the contrast floor, see U5's approach
+   step 4). --text-faint still meets 4.5:1 at rest (AE5); hover/focus
+   restores full contrast so the row is never illegible, just quieter
+   until you're about to use it. Scoped to `.note-actions` specifically
+   (not the shared `.note-path-header`, which the delete-confirmation
+   variant also uses and should stay at full visual weight). `.note-actions`
+   is now its own nested div (not the whole chrome row), so the Zen/theme
+   toggles rendered as siblings via NotePathHeader's `actions` prop never
+   inherit this de-emphasis -- they're always-full-contrast controls. */
+.note-actions .btn {
+  color: var(--text-faint);
+}
+
+.note-actions .btn:hover,
+.note-actions .btn:focus-visible {
+  color: var(--text);
+}
+
+.note-actions .btn-danger-outline:hover,
+.note-actions .btn-danger-outline:focus-visible {
+  color: var(--danger);
+}
+
 .note-meta {
   display: flex;
   gap: 0.4rem;
   margin: -0.5rem 0 0;
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .note-meta-sep {
@@ -522,47 +702,54 @@ a {
   background: var(--bg-subtle);
   border-radius: 4px;
   font-size: 0.85rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
-.btn-copy {
-  padding: 0.2rem 0.5rem;
-  font-size: 0.8rem;
+/* Pill-shaped, always full-contrast (never routed through R11's
+   de-emphasis -- see `.note-actions` above): matches the confirmed visual
+   probe's `.theme-toggle`/`.zen-toggle` treatment. `.btn-sm` still
+   supplies the shared size/transition/focus-visible system (U5); these
+   add only the pill shape and a background that reads as a control, not
+   a de-emphasized label. */
+.zen-toggle,
+.theme-toggle {
+  border-radius: 999px;
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
 }
 
-.mode-toggle {
-  display: inline-flex;
-  width: fit-content;
+/* The sole way into edit mode while reading (no persistent Edit/Preview
+   tab bar -- the confirmed probe treats reading as the default, singular
+   view, not one of two co-equal tabs). Styled as a quiet secondary
+   action, matching the probe's `.btn-edit`. */
+.btn-edit {
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
 }
 
-.btn-toggle {
-  border-radius: 0;
-  margin-left: -1px;
+.btn-edit:hover {
+  background: var(--border);
+  color: var(--text);
 }
 
-.btn-toggle:first-child {
-  border-radius: var(--radius) 0 0 var(--radius);
-  margin-left: 0;
-}
-
-.btn-toggle:last-child {
-  border-radius: 0 var(--radius) var(--radius) 0;
-}
-
-.btn-toggle.is-active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-  position: relative;
-  z-index: 1;
-}
-
+/* Reading content gets a distinctly larger size and more generous
+   line-height than the app's UI chrome (nav, buttons, metadata) -- R9's
+   differentiation, but by size/spacing rather than a serif-vs-sans-serif
+   font-family split: the evidence doesn't clearly favor serif for screen
+   reading (some studies find no significant comprehension difference by
+   font type at all), while larger size and roomier line-height do have
+   more consistent research support for reading speed/fatigue over long
+   sessions. Uses the same Atkinson Hyperlegible Next as the rest of the
+   app (see body's font-family) rather than a separate literary serif. */
 .markdown-preview {
   min-height: 200px;
-  padding: 0.75rem 1rem;
+  padding: 1.25rem 1.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  font-size: 1.2rem;
+  line-height: 1.7;
 }
 
 .markdown-preview > :first-child {
@@ -573,6 +760,16 @@ a {
   margin-bottom: 0;
 }
 
+/* A soft accent-tinted highlight behind emphasized text -- reserves color
+   for the content itself rather than the chrome around it (matching the
+   confirmed visual probe), giving key phrases a "highlighter" look
+   instead of just bolding them. */
+.markdown-preview strong {
+  background: var(--highlight-bg);
+  padding: 0 0.15em;
+  border-radius: 3px;
+}
+
 .markdown-preview h1,
 .markdown-preview h2,
 .markdown-preview h3 {
@@ -581,11 +778,26 @@ a {
   color: var(--text);
 }
 
+/* Explicit sizing -- without it, the note title inherits the global `h1`
+   rule sized for the small sidebar wordmark (see `.app-title`), rendering
+   noticeably smaller than the confirmed probe's reading-well heading. Must
+   come after the shared h1/h2/h3 rule above so its `letter-spacing`
+   override (tighter, for a display-sized heading) wins over that rule's
+   `normal`. */
+.markdown-preview h1 {
+  font-size: 1.7rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 1.1rem;
+}
+
 .markdown-preview code {
   background: var(--bg-subtle);
   border-radius: 4px;
   padding: 0.1em 0.35em;
-  font-size: 0.9em;
+  font-size: 0.85em;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 .markdown-preview pre {
@@ -593,6 +805,7 @@ a {
   border-radius: var(--radius);
   padding: 0.75rem;
   overflow-x: auto;
+  line-height: 1.5;
 }
 
 .markdown-preview pre code {
@@ -621,19 +834,44 @@ a {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 
 .save-status {
   font-size: 0.85rem;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
-.note-backlinks {
-  width: 240px;
-  flex-shrink: 0;
-  padding: 1rem;
+.shortcut-hint {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+.shortcut-hint kbd {
   background: var(--bg-subtle);
-  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
+/* A quiet divider, not a filled card -- a solid background box here
+   competed with the reading column for attention (the same "chrome
+   recedes, content leads" principle applied to the sidebar and note
+   actions). Reuses `.note-link`/`.note-title` from the sidebar tree, so
+   its typography already matches. */
+.note-backlinks {
+  width: 220px;
+  flex-shrink: 0;
+  padding-left: 1.25rem;
+  border-left: 1px solid var(--border);
+}
+
+.note-backlinks h2 {
+  font-size: 0.8rem;
 }
 
 /* Graph view */
@@ -649,6 +887,24 @@ a {
 
 .empty-hint {
   color: var(--text-muted);
+}
+
+/* One consistent loading treatment (initial auth check, note load,
+   search) instead of ad hoc "Loading..." text -- a subtle pulse so it
+   still reads as "in progress", not just muted static text. */
+.loading-indicator {
+  color: var(--text-muted);
+  animation: loading-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes loading-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .error-text {

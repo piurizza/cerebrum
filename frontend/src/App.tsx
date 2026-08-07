@@ -1,8 +1,16 @@
 import type { ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes } from "react-router-dom";
+import {
+  createBrowserRouter,
+  Navigate,
+  NavLink,
+  Outlet,
+  Route,
+  Routes,
+} from "react-router-dom";
 import { NoteBrowser } from "./components/NoteBrowser/NoteBrowser";
-import { AuthProvider, useAuth } from "./context/AuthContext";
+import { useAuth } from "./context/AuthContext";
 import { NotesProvider } from "./context/NotesContext";
+import { useZenMode, ZenModeProvider } from "./context/ZenModeContext";
 import { GraphViewPage } from "./pages/GraphViewPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NoteViewPage } from "./pages/NoteViewPage";
@@ -25,10 +33,22 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 function AppShell() {
   const { logout } = useAuth();
+  const { isZen } = useZenMode();
   return (
     <div className="app-layout">
-      <aside className="app-sidebar">
-        <h1>Cerebrum</h1>
+      {/* Zen mode only collapses the sidebar visually (width/opacity in
+          index.css) -- without `inert`/`aria-hidden`, every nav link,
+          search box, tag filter, note, and Logout stays keyboard- and
+          screen-reader-reachable while invisible. `inert` (React 19) drops
+          it from both the tab order and the accessibility tree; `aria-
+          hidden` covers browsers where `inert` isn't yet respected by
+          assistive tech. */}
+      <aside
+        className={isZen ? "app-sidebar is-zen" : "app-sidebar"}
+        inert={isZen}
+        aria-hidden={isZen}
+      >
+        <h1 className="app-title">Cerebrum</h1>
         <nav className="app-nav">
           <NavLink
             to="/graph"
@@ -67,41 +87,38 @@ function AppShell() {
   );
 }
 
-function AppRoutes() {
+/** Pathless root layout: replaces `AppRoutes`'s old pre-`<Routes>` `loading`
+ * gate, which has no equivalent in a data router's route tree (see KTD1).
+ * Blocks rendering every route until the initial silent-refresh attempt
+ * resolves one way or the other -- otherwise an unauthenticated visitor
+ * would flash the authenticated shell (and its mount-time `listNotes()`
+ * 401) before the redirect to `/login` kicks in. */
+function RootLayout() {
   const { loading } = useAuth();
-
-  // Renders nothing (well, a minimal hint) until the initial silent-refresh
-  // attempt resolves one way or the other -- otherwise an unauthenticated
-  // visitor would flash the authenticated shell (and its mount-time
-  // `listNotes()` 401) before the redirect to `/login` kicks in.
   if (loading) {
-    return <p className="empty-hint">Loading...</p>;
+    return <p className="loading-indicator">Loading...</p>;
   }
+  return <Outlet />;
+}
 
-  return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route
-        path="/*"
-        element={
+export const router = createBrowserRouter([
+  {
+    element: <RootLayout />,
+    children: [
+      { path: "/login", element: <LoginPage /> },
+      { path: "/register", element: <RegisterPage /> },
+      {
+        path: "/*",
+        element: (
           <RequireAuth>
             <NotesProvider>
-              <AppShell />
+              <ZenModeProvider>
+                <AppShell />
+              </ZenModeProvider>
             </NotesProvider>
           </RequireAuth>
-        }
-      />
-    </Routes>
-  );
-}
-
-function App() {
-  return (
-    <AuthProvider>
-      <AppRoutes />
-    </AuthProvider>
-  );
-}
-
-export default App;
+        ),
+      },
+    ],
+  },
+]);

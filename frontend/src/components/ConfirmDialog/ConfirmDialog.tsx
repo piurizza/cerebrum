@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface ConfirmDialogProps {
   title: string;
@@ -25,13 +26,19 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const isTopmost = useFocusTrap(modalRef, true);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onCancel();
+      // Gated on isTopmost: if another modal is stacked on top of this one,
+      // a single Escape press should cancel only the one actually in view,
+      // not both at once (see useFocusTrap's module-level comment).
+      if (event.key === "Escape" && isTopmost) onCancel();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [onCancel, isTopmost]);
 
   return (
     <div className="modal-overlay">
@@ -41,7 +48,13 @@ export function ConfirmDialog({
         aria-label="Close dialog"
         onClick={onCancel}
       />
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <h2 className="modal-title">{title}</h2>
         <p>{message}</p>
         <div className="modal-actions">

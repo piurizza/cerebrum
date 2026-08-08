@@ -115,18 +115,27 @@ def _retarget_other_notes(
         try:
             other_raw = other_file.read_text(encoding="utf-8")
             other_parsed = parse_note(other_path, other_raw)
+
+            new_body = retarget_links(
+                other_parsed.body, other_path, old_target, new_target
+            )
+            if new_body == other_parsed.body:
+                continue
+            other_parsed.body = new_body
+            other_parsed.updated = datetime.now(UTC)
+            other_file.write_text(render_note(other_parsed), encoding="utf-8")
         except Exception:  # noqa: BLE001 -- one bad note must not abort the move
+            # Covers both the read/parse step and the compute-and-write step:
+            # a write failure partway through this loop (permission error,
+            # disk full, a concurrent external edit) must not silently
+            # strand an already-rewritten note out of `retargeted` -- the
+            # caller (retarget_note_links's watcher-driven pairing path)
+            # relies on this list to re-sync the index for exactly the
+            # notes whose files actually changed on disk.
             logger.exception(
-                "Failed to check %s for links to relink; skipping", other_path
+                "Failed to relink %s to %s; skipping", other_path, new_target
             )
             continue
-
-        new_body = retarget_links(other_parsed.body, other_path, old_target, new_target)
-        if new_body == other_parsed.body:
-            continue
-        other_parsed.body = new_body
-        other_parsed.updated = datetime.now(UTC)
-        other_file.write_text(render_note(other_parsed), encoding="utf-8")
         retargeted.append(other_path)
     return retargeted
 

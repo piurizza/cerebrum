@@ -149,25 +149,30 @@ def _fetch_content_hashes(conn: sqlite3.Connection, paths: set[str]) -> dict[str
 
 
 def _guarded_remove(conn: sqlite3.Connection, path: str) -> None:
-    """Runs `remove_note` for one path, containing the same transient-race
-    exceptions the watcher loop already tolerates (`watcher.py`'s
-    `watch_vault`) so one bad file never aborts the rest of the batch.
+    """Runs `remove_note` for one path, containing any failure (transient
+    races like a concurrent delete, same as `rebuild_index`'s per-note
+    containment, but also a malformed note or a DB error) so one bad file
+    never aborts the rest of the batch.
     """
     try:
         remove_note(conn, path)
-    except (FileNotFoundError, PermissionError) as exc:
-        logger.warning("skipping transient change for %s: %s", path, exc)
+    except Exception:  # noqa: BLE001 -- one bad file must not abort the batch
+        logger.exception("skipping change for %s", path)
 
 
 def _guarded_upsert(conn: sqlite3.Connection, vault_root: Path, path: str) -> None:
-    """Runs `upsert_note` for one path, containing the same transient-race
-    exceptions the watcher loop already tolerates (`watcher.py`'s
-    `watch_vault`) so one bad file never aborts the rest of the batch.
+    """Runs `upsert_note` for one path, containing any failure -- not just
+    the transient-race `FileNotFoundError`/`PermissionError` the watcher
+    loop tolerates, but also `InvalidNoteContentError` (malformed
+    frontmatter is a normal user-triggerable condition, not rare) and any
+    other unexpected error -- so one bad file never aborts the rest of the
+    batch or kills the whole watcher task, mirroring `rebuild_index`'s
+    broad per-note containment.
     """
     try:
         upsert_note(conn, vault_root, path)
-    except (FileNotFoundError, PermissionError) as exc:
-        logger.warning("skipping transient change for %s: %s", path, exc)
+    except Exception:  # noqa: BLE001 -- one bad file must not abort the batch
+        logger.exception("skipping change for %s", path)
 
 
 def _hash_new_arrivals(vault_root: Path, new_arrivals: set[str]) -> dict[str, str]:
@@ -177,8 +182,8 @@ def _hash_new_arrivals(vault_root: Path, new_arrivals: set[str]) -> dict[str, st
             new_hashes[path] = _hash_content(
                 (vault_root / path).read_text(encoding="utf-8")
             )
-        except (FileNotFoundError, PermissionError) as exc:
-            logger.warning("skipping transient rename-hash read for %s: %s", path, exc)
+        except Exception:  # noqa: BLE001 -- one bad file must not abort the batch
+            logger.exception("skipping rename-hash read for %s", path)
     return new_hashes
 
 

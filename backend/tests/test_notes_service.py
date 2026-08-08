@@ -370,6 +370,38 @@ def test_retarget_note_links_skips_unreadable_other_note(vault: Path) -> None:
     assert not retargeted
 
 
+def test_retarget_note_links_write_failure_keeps_already_written_linkers(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a write failure partway through retargeting must not
+    discard the `retargeted` entries already earned by linkers processed
+    before it -- the caller (the watcher's rename-pairing path) relies on
+    that list to know exactly which notes' files actually changed on
+    disk, so it can keep their index rows in sync."""
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker-a.md", "See [A](target.md).")
+    write_note(vault, "linker-b.md", "See [B](target.md).")
+    (vault / "target.md").rename(vault / "renamed.md")
+
+    real_write_text = Path.write_text
+
+    def flaky_write_text(self: Path, *args: object, **kwargs: object) -> int:
+        if self.name == "linker-b.md":
+            raise OSError("simulated write failure")
+        return real_write_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "write_text", flaky_write_text)
+
+    _, retargeted = retarget_note_links(vault, "target.md", "renamed.md")
+
+    # linker-a.md's write succeeded and is reported; linker-b.md's write
+    # failed and is skipped (logged), but does not abort the loop or
+    # discard linker-a.md's already-earned entry.
+    assert retargeted == ["linker-a.md"]
+    assert "[A](renamed.md)" in read_note(vault, "linker-a.md").content
+    assert "[B](target.md)" in read_note(vault, "linker-b.md").content
+
+
 def test_retarget_note_links_leaves_attachment_dir_untouched(vault: Path) -> None:
     write_note(vault, "idea.md", "![](idea.attachments/abc123.png)")
     attachment_dir = attachment_dir_for_note(vault, "idea.md")

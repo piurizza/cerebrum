@@ -573,3 +573,72 @@ def test_apply_watch_batch_contains_upsert_failure_for_one_retargeted_path(
         "linker-b.md",
     }
     assert [note.path for note in get_backlinks(db, "renamed.md")] == ["linker-b.md"]
+
+
+def test_apply_watch_batch_malformed_frontmatter_does_not_crash_batch(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Regression: `_guarded_upsert` used to only catch
+    `FileNotFoundError`/`PermissionError`, so a note with malformed
+    frontmatter (a normal user-triggerable mistake, not a rare edge case
+    -- see `parser.py`) raised `InvalidNoteContentError` straight out of
+    `apply_watch_batch`, which would propagate through `watch_vault`'s
+    `asyncio.to_thread` call and kill the whole watcher task permanently,
+    since `InvalidNoteContentError` isn't `OSError`/
+    `WatchfilesRustInternalError` either."""
+    write_note(vault, "a.md", "content")
+    upsert_note(db, vault, "a.md")
+
+    # Written directly to disk (bypassing write_note's own validation) to
+    # simulate an external hand-edit that broke the frontmatter, mirroring
+    # test_parser.py::test_parse_note_raises_on_invalid_date.
+    (vault / "b.md").write_text(
+        "---\ntitle: B\ncreated: not-a-date\n---\nBody.\n", encoding="utf-8"
+    )
+
+    apply_watch_batch(db, vault, {"a.md", "b.md"})
+
+    # The malformed note is skipped (logged), not indexed -- but the
+    # well-formed note in the same batch still is, and nothing raised.
+    assert {note.path for note in list_notes(db)} == {"a.md"}
+
+
+def test_hash_new_arrivals_transient_read_failure_does_not_crash_batch(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new-arrival candidate that disappears between the batch's
+    existence check and `_hash_new_arrivals`'s per-file read (a
+    transient race the watcher already tolerates elsewhere) must not
+    abort the batch -- it just drops out of hashing and falls through to
+    the ordinary upsert path once resolved."""
+    write_note(vault, "old.md", "content")
+    write_note(vault, "flaky.md", "flaky content")
+    write_note(vault, "fine.md", "fine content")
+    upsert_note(db, vault, "old.md")
+
+    (vault / "old.md").unlink()  # a deletion is required to trigger hashing at all
+
+    real_read_text = Path.read_text
+    flaky_read_attempted = False
+
+    def flaky_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        nonlocal flaky_read_attempted
+        if self.name == "flaky.md" and not flaky_read_attempted:
+            # Fail only the first read (the hashing attempt inside
+            # _hash_new_arrivals) -- the race is transient, so the file
+            # is readable again by the time the ordinary upsert path
+            # reads it.
+            flaky_read_attempted = True
+            raise FileNotFoundError(str(self))
+        return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+
+    apply_watch_batch(db, vault, {"old.md", "flaky.md", "fine.md"})
+
+    # old.md is removed; both flaky.md and fine.md end up indexed via the
+    # ordinary upsert fallback -- flaky.md's hash-read failure inside
+    # _hash_new_arrivals was contained, not raised, and it fell through
+    # to that fallback rather than being treated as a rename candidate.
+    assert flaky_read_attempted
+    assert {note.path for note in list_notes(db)} == {"flaky.md", "fine.md"}

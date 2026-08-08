@@ -106,6 +106,19 @@ def test_lock_released_on_exception(tmp_path: Path) -> None:
     assert acquired.is_set()
 
 
+def test_relative_path_raises_instead_of_silently_defeating_locking() -> None:
+    """`file_lock` requires an already-resolved `Path` (see module
+    docstring) -- a relative path would hash to a different registry key
+    than the SAME physical file's resolved-path lock taken elsewhere,
+    silently defeating locking. A relative path must raise loudly instead
+    of being accepted."""
+    with (
+        pytest.raises(ValueError, match="already-resolved"),
+        file_lock(Path("relative/note.md")),
+    ):
+        pass
+
+
 def test_registry_lock_is_not_held_for_whole_critical_section(
     tmp_path: Path,
 ) -> None:

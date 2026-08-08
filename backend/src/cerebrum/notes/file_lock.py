@@ -50,6 +50,15 @@ def file_lock(path: Path) -> Iterator[None]:
     same (already-resolved) `Path`. Callers locking different paths do
     not block each other -- see module docstring.
     """
+    if not path.is_absolute():
+        # Cheap, partial guard for the resolved-path contract above: an
+        # unresolved relative Path is always a misuse (every current call
+        # site passes `resolve_note_path`'s output), and this catches it
+        # loudly instead of silently minting a second lock for the same
+        # physical file. Not exhaustive -- an absolute-but-unresolved
+        # symlink path still slips through -- but converts the common
+        # misuse case from silent non-enforcement into an immediate error.
+        raise ValueError(f"file_lock requires an already-resolved Path, got {path!r}")
     with _registry_lock:
         lock = _locks.setdefault(path, threading.Lock())
 

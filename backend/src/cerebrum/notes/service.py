@@ -115,7 +115,17 @@ def delete_note(vault_root: Path, path: str) -> None:
         if not file_path.is_file():
             raise NoteNotFoundError(path)
         file_path.unlink()
-    delete_attachment_dir(vault_root, path)
+        # Attachment-dir cleanup stays INSIDE this lock, not after it:
+        # `move_note` moves a *different* note's attachments into this same
+        # path while holding this same path's lock (see move_note's
+        # `move_attachment_dir` call under `_locked_paths`). Deleting them
+        # outside the lock let a concurrent move-into-this-path land its
+        # attachments first, then have this call's unlocked cleanup
+        # `shutil.rmtree` them out from under the just-moved-in note --
+        # silent, unrecoverable attachment data loss with no error to
+        # either caller. Sharing this path's lock with move_note's
+        # attachment-dir mutation closes that race.
+        delete_attachment_dir(vault_root, path)
 
 
 def _retarget_other_notes(
@@ -134,16 +144,22 @@ def _retarget_other_notes(
         if other_path == new_target:
             continue
         other_file = vault_root / other_path
-        # The lock key MUST be the resolved path, not the bare join above
-        # -- every other call site (write_note/delete_note/move_note)
-        # locks on `resolve_note_path`'s output, and `file_lock` locks on
-        # `Path` identity/hash with no normalization of its own (see
-        # file_lock.py's module docstring). A relative or symlinked
-        # `vault_root` would otherwise make this lock key never collide
-        # with the SAME physical file's lock taken elsewhere, silently
-        # defeating locking for exactly the race this exists to close.
-        lock_path = resolve_note_path(vault_root_resolved, other_path)
         try:
+            # The lock key MUST be the resolved path, not a bare join --
+            # every other call site (write_note/delete_note/move_note)
+            # locks on `resolve_note_path`'s output, and `file_lock` locks
+            # on `Path` identity/hash with no normalization of its own
+            # (see file_lock.py's module docstring). A relative or
+            # symlinked `vault_root` would otherwise make this lock key
+            # never collide with the SAME physical file's lock taken
+            # elsewhere, silently defeating locking for exactly the race
+            # this exists to close. This resolve call must stay INSIDE
+            # this try/except: `resolve_note_path` raises for any other
+            # note whose canonical path escapes the vault (e.g. a
+            # symlink), and that failure is exactly one bad note's
+            # problem -- it must not abort retargeting for every
+            # remaining note in the vault.
+            lock_path = resolve_note_path(vault_root_resolved, other_path)
             with file_lock(lock_path):
                 other_raw = other_file.read_text(encoding="utf-8")
                 other_parsed = parse_note(other_path, other_raw)
@@ -289,10 +305,9 @@ def move_note(
             destination.write_text(raw_content, encoding="utf-8")
 
     # Locks released above -- `_retarget_other_notes` discovers and locks
-    # its OWN set of paths (a later unit adds that locking), which must
-    # never overlap in time with this move still holding source/
-    # destination, or two concurrent cross-linked moves can form an
-    # AB-BA deadlock.
+    # its OWN set of paths (one at a time, per note), which must never
+    # overlap in time with this move still holding source/destination, or
+    # two concurrent cross-linked moves can form an AB-BA deadlock.
     retargeted = (
         _retarget_other_notes(vault_root, path, new_path) if is_relocation else []
     )

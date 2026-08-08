@@ -9,8 +9,13 @@ import pytest
 from cerebrum.graph.service import get_backlinks, get_graph
 from cerebrum.index import indexer
 from cerebrum.index.db import list_notes, search_notes
-from cerebrum.index.indexer import rebuild_index, remove_note, upsert_note
-from cerebrum.notes.service import write_note
+from cerebrum.index.indexer import (
+    apply_watch_batch,
+    rebuild_index,
+    remove_note,
+    upsert_note,
+)
+from cerebrum.notes.service import read_note, write_note
 
 
 def test_rebuild_index_populates_notes_and_links(
@@ -368,3 +373,272 @@ def test_concurrent_graph_reads_with_writes_do_not_raise(
         thread.join()
 
     assert outcomes == [None, None, None, None]
+
+
+def test_apply_watch_batch_pairs_unambiguous_rename(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "x.md", "content")
+    write_note(vault, "old.md", "See [X](x.md).")
+    upsert_note(db, vault, "x.md")
+    upsert_note(db, vault, "old.md")
+
+    (vault / "old.md").rename(vault / "new.md")
+
+    apply_watch_batch(db, vault, {"old.md", "new.md"})
+
+    assert {note.path for note in list_notes(db)} == {"x.md", "new.md"}
+    stale_rows = db.execute(
+        "SELECT * FROM links WHERE source_path = 'old.md'"
+    ).fetchall()
+    assert stale_rows == []
+    assert [note.path for note in get_backlinks(db, "x.md")] == ["new.md"]
+
+
+def test_apply_watch_batch_relinks_third_note_on_rename(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [T](target.md).")
+    upsert_note(db, vault, "target.md")
+    upsert_note(db, vault, "linker.md")
+
+    (vault / "target.md").rename(vault / "renamed.md")
+
+    apply_watch_batch(db, vault, {"target.md", "renamed.md"})
+
+    assert {note.path for note in list_notes(db)} == {"renamed.md", "linker.md"}
+    linker = read_note(vault, "linker.md")
+    assert "[T](renamed.md)" in linker.content
+    assert [note.path for note in get_backlinks(db, "renamed.md")] == ["linker.md"]
+
+
+def test_apply_watch_batch_pairs_multiple_independent_renames(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "a.md", "content a")
+    write_note(vault, "b.md", "content b")
+    upsert_note(db, vault, "a.md")
+    upsert_note(db, vault, "b.md")
+
+    (vault / "a.md").rename(vault / "a2.md")
+    (vault / "b.md").rename(vault / "b2.md")
+
+    apply_watch_batch(db, vault, {"a.md", "a2.md", "b.md", "b2.md"})
+
+    assert {note.path for note in list_notes(db)} == {"a2.md", "b2.md"}
+
+
+def test_apply_watch_batch_ambiguous_hash_falls_back_to_independent_ops(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    # Two simultaneous deletions with IDENTICAL content, and one new
+    # arrival matching that content: the hash is ambiguous on the "gone"
+    # side (two candidates), so no pairing occurs -- all three are
+    # applied as independent delete/delete/create.
+    (vault / "x.md").write_text("identical body", encoding="utf-8")
+    (vault / "y.md").write_text("identical body", encoding="utf-8")
+    upsert_note(db, vault, "x.md")
+    upsert_note(db, vault, "y.md")
+
+    (vault / "x.md").unlink()
+    (vault / "y.md").unlink()
+    (vault / "z.md").write_text("identical body", encoding="utf-8")
+
+    apply_watch_batch(db, vault, {"x.md", "y.md", "z.md"})
+
+    assert {note.path for note in list_notes(db)} == {"z.md"}
+
+
+def test_apply_watch_batch_never_treats_already_indexed_path_as_rename_target(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    # "deleted.md" is removed; "b.md" already has an index row (an
+    # existing note being edited) and just happens to be edited to the
+    # same content "deleted.md" used to have. R4: "b.md" must still be
+    # handled as a plain upsert, never as the rename target.
+    (vault / "deleted.md").write_text("shared content", encoding="utf-8")
+    write_note(vault, "linker.md", "See [D](deleted.md).")
+    upsert_note(db, vault, "deleted.md")
+    upsert_note(db, vault, "linker.md")
+
+    (vault / "deleted.md").unlink()
+    (vault / "b.md").write_text("shared content", encoding="utf-8")
+    upsert_note(db, vault, "b.md")  # b.md already tracked before this batch
+
+    apply_watch_batch(db, vault, {"deleted.md", "b.md"})
+
+    assert {note.path for note in list_notes(db)} == {"b.md", "linker.md"}
+    # No relinking happened -- linker.md's link still points at the
+    # (now-ghost) old target, not at "b.md".
+    linker = read_note(vault, "linker.md")
+    assert "[D](deleted.md)" in linker.content
+
+
+def test_apply_watch_batch_different_content_not_paired(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "old.md", "content")
+    write_note(vault, "linker.md", "See [Old](old.md).")
+    upsert_note(db, vault, "old.md")
+    upsert_note(db, vault, "linker.md")
+
+    (vault / "old.md").unlink()
+    (vault / "new.md").write_text("totally different content", encoding="utf-8")
+
+    apply_watch_batch(db, vault, {"old.md", "new.md"})
+
+    assert {note.path for note in list_notes(db)} == {"new.md", "linker.md"}
+    linker = read_note(vault, "linker.md")
+    assert "[Old](old.md)" in linker.content  # untouched -- not treated as a rename
+
+
+def test_apply_watch_batch_no_cross_call_pairing(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    (vault / "old.md").write_text("shared body", encoding="utf-8")
+    write_note(vault, "linker.md", "See [Old](old.md).")
+    upsert_note(db, vault, "old.md")
+    upsert_note(db, vault, "linker.md")
+
+    (vault / "old.md").unlink()
+    apply_watch_batch(db, vault, {"old.md"})  # delete-only batch
+
+    (vault / "new.md").write_text("shared body", encoding="utf-8")
+    apply_watch_batch(db, vault, {"new.md"})  # separate, later, create-only batch
+
+    assert {note.path for note in list_notes(db)} == {"new.md", "linker.md"}
+    linker = read_note(vault, "linker.md")
+    assert "[Old](old.md)" in linker.content  # not retargeted -- no cross-call pairing
+
+
+def test_apply_watch_batch_retarget_failure_falls_back_to_independent_ops(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_note(vault, "old.md", "content")
+    write_note(vault, "other.md", "unrelated content")
+    upsert_note(db, vault, "old.md")
+    upsert_note(db, vault, "other.md")
+
+    (vault / "old.md").rename(vault / "new.md")
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(indexer, "retarget_note_links", boom)
+
+    apply_watch_batch(db, vault, {"old.md", "new.md", "other.md"})
+
+    # Falls back to independent remove/upsert for the failed pair; an
+    # unrelated path in the same batch is still processed correctly.
+    assert {note.path for note in list_notes(db)} == {"new.md", "other.md"}
+
+
+def test_apply_watch_batch_contains_upsert_failure_for_one_retargeted_path(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker-a.md", "See [A](target.md).")
+    write_note(vault, "linker-b.md", "See [B](target.md).")
+    upsert_note(db, vault, "target.md")
+    upsert_note(db, vault, "linker-a.md")
+    upsert_note(db, vault, "linker-b.md")
+
+    (vault / "target.md").rename(vault / "renamed.md")
+
+    original_upsert = indexer.upsert_note
+
+    def flaky_upsert(conn: sqlite3.Connection, vault_root: Path, path: str) -> None:
+        if path == "linker-a.md":
+            raise FileNotFoundError(path)
+        original_upsert(conn, vault_root, path)
+
+    monkeypatch.setattr(indexer, "upsert_note", flaky_upsert)
+
+    apply_watch_batch(db, vault, {"target.md", "renamed.md"})
+
+    # retarget_note_links succeeded -- both linkers' files were rewritten
+    # on disk regardless of the monkeypatched upsert failure.
+    assert "[A](renamed.md)" in (vault / "linker-a.md").read_text(encoding="utf-8")
+    assert "[B](renamed.md)" in (vault / "linker-b.md").read_text(encoding="utf-8")
+
+    # old/new are indexed correctly, and the retargeted path whose upsert
+    # didn't fail (linker-b.md) is indexed correctly too. linker-a.md's
+    # index row failed to update (logged and skipped) but its prior row
+    # from before the rename is still present -- apply_watch_batch did
+    # not raise, and did not lose track of the other paths.
+    assert {note.path for note in list_notes(db)} == {
+        "renamed.md",
+        "linker-a.md",
+        "linker-b.md",
+    }
+    assert [note.path for note in get_backlinks(db, "renamed.md")] == ["linker-b.md"]
+
+
+def test_apply_watch_batch_malformed_frontmatter_does_not_crash_batch(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Regression: `_guarded_upsert` used to only catch
+    `FileNotFoundError`/`PermissionError`, so a note with malformed
+    frontmatter (a normal user-triggerable mistake, not a rare edge case
+    -- see `parser.py`) raised `InvalidNoteContentError` straight out of
+    `apply_watch_batch`, which would propagate through `watch_vault`'s
+    `asyncio.to_thread` call and kill the whole watcher task permanently,
+    since `InvalidNoteContentError` isn't `OSError`/
+    `WatchfilesRustInternalError` either."""
+    write_note(vault, "a.md", "content")
+    upsert_note(db, vault, "a.md")
+
+    # Written directly to disk (bypassing write_note's own validation) to
+    # simulate an external hand-edit that broke the frontmatter, mirroring
+    # test_parser.py::test_parse_note_raises_on_invalid_date.
+    (vault / "b.md").write_text(
+        "---\ntitle: B\ncreated: not-a-date\n---\nBody.\n", encoding="utf-8"
+    )
+
+    apply_watch_batch(db, vault, {"a.md", "b.md"})
+
+    # The malformed note is skipped (logged), not indexed -- but the
+    # well-formed note in the same batch still is, and nothing raised.
+    assert {note.path for note in list_notes(db)} == {"a.md"}
+
+
+def test_hash_new_arrivals_transient_read_failure_does_not_crash_batch(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A new-arrival candidate that disappears between the batch's
+    existence check and `_hash_new_arrivals`'s per-file read (a
+    transient race the watcher already tolerates elsewhere) must not
+    abort the batch -- it just drops out of hashing and falls through to
+    the ordinary upsert path once resolved."""
+    write_note(vault, "old.md", "content")
+    write_note(vault, "flaky.md", "flaky content")
+    write_note(vault, "fine.md", "fine content")
+    upsert_note(db, vault, "old.md")
+
+    (vault / "old.md").unlink()  # a deletion is required to trigger hashing at all
+
+    real_read_text = Path.read_text
+    flaky_read_attempted = False
+
+    def flaky_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        nonlocal flaky_read_attempted
+        if self.name == "flaky.md" and not flaky_read_attempted:
+            # Fail only the first read (the hashing attempt inside
+            # _hash_new_arrivals) -- the race is transient, so the file
+            # is readable again by the time the ordinary upsert path
+            # reads it.
+            flaky_read_attempted = True
+            raise FileNotFoundError(str(self))
+        return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+
+    apply_watch_batch(db, vault, {"old.md", "flaky.md", "fine.md"})
+
+    # old.md is removed; both flaky.md and fine.md end up indexed via the
+    # ordinary upsert fallback -- flaky.md's hash-read failure inside
+    # _hash_new_arrivals was contained, not raised, and it fell through
+    # to that fallback rather than being treated as a rename candidate.
+    assert flaky_read_attempted
+    assert {note.path for note in list_notes(db)} == {"flaky.md", "fine.md"}

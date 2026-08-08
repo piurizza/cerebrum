@@ -115,18 +115,27 @@ def _retarget_other_notes(
         try:
             other_raw = other_file.read_text(encoding="utf-8")
             other_parsed = parse_note(other_path, other_raw)
+
+            new_body = retarget_links(
+                other_parsed.body, other_path, old_target, new_target
+            )
+            if new_body == other_parsed.body:
+                continue
+            other_parsed.body = new_body
+            other_parsed.updated = datetime.now(UTC)
+            other_file.write_text(render_note(other_parsed), encoding="utf-8")
         except Exception:  # noqa: BLE001 -- one bad note must not abort the move
+            # Covers both the read/parse step and the compute-and-write step:
+            # a write failure partway through this loop (permission error,
+            # disk full, a concurrent external edit) must not silently
+            # strand an already-rewritten note out of `retargeted` -- the
+            # caller (retarget_note_links's watcher-driven pairing path)
+            # relies on this list to re-sync the index for exactly the
+            # notes whose files actually changed on disk.
             logger.exception(
-                "Failed to check %s for links to relink; skipping", other_path
+                "Failed to relink %s to %s; skipping", other_path, new_target
             )
             continue
-
-        new_body = retarget_links(other_parsed.body, other_path, old_target, new_target)
-        if new_body == other_parsed.body:
-            continue
-        other_parsed.body = new_body
-        other_parsed.updated = datetime.now(UTC)
-        other_file.write_text(render_note(other_parsed), encoding="utf-8")
         retargeted.append(other_path)
     return retargeted
 
@@ -229,6 +238,60 @@ def move_note(
     retargeted = (
         _retarget_other_notes(vault_root, path, new_path) if is_relocation else []
     )
+
+    return (
+        Note(
+            path=new_path,
+            title=parsed.title,
+            tags=parsed.tags,
+            created=parsed.created,
+            updated=parsed.updated,
+            content=raw_content,
+        ),
+        retargeted,
+    )
+
+
+def retarget_note_links(
+    vault_root: Path, old_path: str, new_path: str
+) -> tuple[Note, list[str]]:
+    """Repoint links for a note that has already been relocated on disk
+    from `old_path` to `new_path` (e.g. an external `mv` detected by the
+    filesystem watcher as a same-batch rename), producing the same
+    link-repointing outcome as `move_note`'s post-relocation steps --
+    without performing the physical file move itself.
+
+    Rewrites the note's own outgoing relative links so they still resolve
+    to the same absolute targets (they're relative to its own folder,
+    which already changed on disk), and repoints every OTHER note's
+    links that targeted `old_path` so they resolve to `new_path` instead.
+
+    Deliberately does NOT touch attachment folders or embedded attachment
+    references -- unlike `move_note`, which relocates the file and so
+    also relocates its attachment folder, an external rename that this
+    function reacts to has already left the attachment folder (if any)
+    exactly where it was, and repointing attachment references is out of
+    scope for this plan.
+
+    Returns the (possibly rewritten) note now at `new_path`, and the
+    vault-relative paths of any OTHER notes whose link text was
+    rewritten, so the caller can keep the index in sync for those too.
+    """
+    destination = resolve_note_path(vault_root, new_path)
+    if not destination.is_file():
+        raise NoteNotFoundError(new_path)
+
+    raw_content = destination.read_text(encoding="utf-8")
+    parsed = parse_note(new_path, raw_content)
+
+    rebased_body = rebase_links(parsed.body, old_path, new_path)
+    if rebased_body != parsed.body:
+        parsed.body = rebased_body
+        parsed.updated = datetime.now(UTC)
+        raw_content = render_note(parsed)
+        destination.write_text(raw_content, encoding="utf-8")
+
+    retargeted = _retarget_other_notes(vault_root, old_path, new_path)
 
     return (
         Note(

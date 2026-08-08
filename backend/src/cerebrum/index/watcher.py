@@ -15,7 +15,7 @@ from watchfiles._rust_notify import (  # noqa: PLC2701  # pylint: disable=no-nam
     WatchfilesRustInternalError,
 )
 
-from cerebrum.index.indexer import remove_note, upsert_note
+from cerebrum.index.indexer import apply_watch_batch
 from cerebrum.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -78,22 +78,14 @@ async def watch_vault(
                 Path(abs_path).relative_to(vault_root).as_posix()
                 for _, abs_path in changes
             }
-            for rel_path in rel_paths:
-                try:
-                    if (vault_root / rel_path).exists():
-                        await asyncio.to_thread(upsert_note, conn, vault_root, rel_path)
-                    else:
-                        await asyncio.to_thread(remove_note, conn, rel_path)
-                except (FileNotFoundError, PermissionError) as exc:
-                    # A single file's transient race (e.g. deleted between
-                    # the exists() check above and upsert_note's read)
-                    # must not end the whole watcher -- mirrors
-                    # rebuild_index's per-note error containment
-                    # (index/indexer.py). The next event or backstop tick
-                    # self-heals.
-                    logger.warning(
-                        "skipping transient change for %s: %s", rel_path, exc
-                    )
+            # `apply_watch_batch` (index/indexer.py) classifies the whole
+            # batch at once: a delete+create pair sharing a content hash is
+            # treated as a same-batch rename (repointing other notes'
+            # links), everything else is applied as independent
+            # deletes/upserts. It contains its own per-path/per-pair
+            # errors (transient races included), mirroring the containment
+            # this loop used to do itself.
+            await asyncio.to_thread(apply_watch_batch, conn, vault_root, rel_paths)
     except (OSError, WatchfilesRustInternalError) as exc:
         # OSError also covers FileNotFoundError/PermissionError raised by
         # awatch() itself (vault root removed/inaccessible), not just the

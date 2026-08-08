@@ -125,6 +125,11 @@ def _retarget_other_notes(
     resolve to `new_target` instead. Returns the vault-relative paths of
     the notes that were actually rewritten."""
     retargeted: list[str] = []
+    # Resolved once -- `vault_root` is invariant across the loop below, so
+    # resolving it fresh on every iteration (as passing the raw `vault_root`
+    # into `resolve_note_path` per-note would do) is redundant work
+    # repeated once per note in the vault.
+    vault_root_resolved = vault_root.resolve()
     for other_path in iter_note_paths(vault_root):
         if other_path == new_target:
             continue
@@ -137,7 +142,7 @@ def _retarget_other_notes(
         # `vault_root` would otherwise make this lock key never collide
         # with the SAME physical file's lock taken elsewhere, silently
         # defeating locking for exactly the race this exists to close.
-        lock_path = resolve_note_path(vault_root, other_path)
+        lock_path = resolve_note_path(vault_root_resolved, other_path)
         try:
             with file_lock(lock_path):
                 other_raw = other_file.read_text(encoding="utf-8")

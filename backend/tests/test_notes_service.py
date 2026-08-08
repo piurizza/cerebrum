@@ -1,8 +1,16 @@
+# pylint: disable=too-many-lines
+# This module is a flat sequence of independent test functions (plus a
+# couple of small thread-synchronization helpers used only by the
+# locking-related tests at the bottom) covering notes/service.py's CRUD,
+# move/retarget, and locking behavior. Its length tracks test count, not
+# a production module in need of decomposition.
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -819,3 +827,230 @@ def test_move_note_relocation_does_not_block_unrelated_write_note(
     assert elapsed < 1.0
     updated_note = read_note(vault, "unrelated.md")
     assert "updated while move is mid-flight" in updated_note.content
+
+
+_retarget_other_notes = (
+    notes_service._retarget_other_notes  # pylint: disable=protected-access
+)  # noqa: SLF001
+
+
+def _pause_retarget_links(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[threading.Event, threading.Event]:
+    """Patch `retarget_links` (called inside `_retarget_other_notes`'s
+    locked critical section, after its read and before its write) so a
+    caller can pause a retarget mid-flight, controlling the interleaving
+    instead of relying on timing alone."""
+    entered = threading.Event()
+    release = threading.Event()
+    original_retarget_links = notes_service.retarget_links
+
+    def paused_retarget_links(
+        body: str, note_path: str, old_target: str, new_target: str
+    ) -> str:
+        entered.set()
+        release.wait(timeout=5)
+        return original_retarget_links(body, note_path, old_target, new_target)
+
+    monkeypatch.setattr(notes_service, "retarget_links", paused_retarget_links)
+    return entered, release
+
+
+def _run_against_paused_retarget(
+    vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    old_target: str,
+    new_target: str,
+    second_op: Callable[[], None],
+) -> None:
+    """Pause `_retarget_other_notes(vault, old_target, new_target)`'s
+    critical section mid-flight, run `second_op` concurrently once the
+    pause is confirmed entered, then release and join both threads with
+    a bounded timeout -- the shared shape behind this unit's
+    paused-interleaving tests."""
+    retarget_entered, release_retarget = _pause_retarget_links(monkeypatch)
+
+    retargeter = threading.Thread(
+        target=_retarget_other_notes, args=(vault, old_target, new_target)
+    )
+    retargeter.start()
+    assert retarget_entered.wait(timeout=5)
+
+    second = threading.Thread(target=second_op)
+    second.start()
+    time.sleep(0.2)  # let second_op reach (and, if fixed, block on) the lock
+
+    release_retarget.set()
+    retargeter.join(timeout=5)
+    second.join(timeout=5)
+    assert not retargeter.is_alive()
+    assert not second.is_alive()
+
+
+def test_retarget_other_notes_relative_vault_root_lock_key_matches_write_note(
+    tmp_path: Path, vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for the lock-key bug this unit exists to fix: a bare
+    `vault_root / other_path` join (instead of
+    `resolve_note_path(vault_root, other_path)`) produces a RELATIVE
+    `Path` when `vault_root` itself is relative (a real local-dev config
+    -- `backend/.env.example` documents `CEREBRUM_VAULT_PATH=../vault`),
+    while every other call site's lock key is absolute -- two different
+    `Path` objects for the same physical file, so the lock silently
+    no-ops. Same shape as the lost-update test below, but with a
+    relative `vault_root`: if the lock keys don't collide, the
+    concurrent `write_note` races ahead unblocked, and the paused
+    retargeter's later, stale-read write reverts it on release.
+    """
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [T](target.md).")
+    (vault / "folder").mkdir()
+    (vault / "target.md").rename(vault / "folder" / "target.md")
+
+    monkeypatch.chdir(tmp_path)
+    relative_root = Path(os.path.relpath(vault, start=tmp_path))
+    assert not relative_root.is_absolute()
+
+    def do_write() -> None:
+        write_note(relative_root, "linker.md", "overwritten by concurrent write")
+
+    _run_against_paused_retarget(
+        relative_root, monkeypatch, "target.md", "folder/target.md", do_write
+    )
+
+    final = read_note(vault, "linker.md").content
+    assert "overwritten by concurrent write" in final
+    assert "[T](" not in final
+
+
+def test_retarget_other_notes_and_write_note_lost_update_closed(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reproduces the plan's lost-update scenario end-to-end:
+    `_retarget_other_notes`'s critical section for `linker.md`, paused
+    mid-flight, runs concurrently with a `write_note` for the SAME path.
+    Locking must serialize the two so the second-run operation's effect
+    fully lands -- not a hybrid, and not `write_note`'s content silently
+    reverted by the retargeter's stale-read write landing afterward."""
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [T](target.md).")
+    (vault / "folder").mkdir()
+    (vault / "target.md").rename(vault / "folder" / "target.md")
+
+    def do_write() -> None:
+        write_note(vault, "linker.md", "Overwritten directly, no link at all.")
+
+    _run_against_paused_retarget(
+        vault, monkeypatch, "target.md", "folder/target.md", do_write
+    )
+
+    # write_note ran second (blocked until the retargeter released), so
+    # its content is the final, complete state -- not reverted by a
+    # stale retarget write landing afterward, nor a byte hybrid.
+    final = read_note(vault, "linker.md").content
+    assert "Overwritten directly, no link at all." in final
+    assert "[T](" not in final
+
+
+def test_retarget_other_notes_and_delete_note_resurrection_closed(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reproduces the plan's resurrection scenario end-to-end:
+    `_retarget_other_notes`'s critical section for `linker.md`, paused
+    mid-flight, runs concurrently with a `delete_note` for the SAME
+    path. Locking must serialize the two so `linker.md` stays deleted --
+    the retargeter's write (from its earlier, pre-delete read) must not
+    resurrect a file a concurrent delete removed."""
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [T](target.md).")
+    (vault / "folder").mkdir()
+    (vault / "target.md").rename(vault / "folder" / "target.md")
+
+    delete_errors: dict[str, BaseException] = {}
+
+    def do_delete() -> None:
+        try:
+            delete_note(vault, "linker.md")
+        except BaseException as exc:  # noqa: BLE001 -- capture across threads
+            delete_errors["error"] = exc
+
+    _run_against_paused_retarget(
+        vault, monkeypatch, "target.md", "folder/target.md", do_delete
+    )
+
+    # delete_note ran second (blocked until the retargeter released,
+    # which lands its write first since the file still existed at read
+    # time) -- its unlink runs after, so the file stays gone rather than
+    # being resurrected by the retargeter's stale-read write.
+    assert "error" not in delete_errors
+    assert not (vault / "linker.md").exists()
+
+
+def test_retarget_other_notes_does_not_block_unrelated_write_note(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_retarget_other_notes`'s critical section for `linker.md`, paused
+    mid-flight, does not block a concurrent `write_note` for a wholly
+    unrelated, path-disjoint note -- the per-note locking added in this
+    unit must not accidentally serialize unrelated work."""
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [T](target.md).")
+    write_note(vault, "unrelated.md", "original")
+    (vault / "folder").mkdir()
+    (vault / "target.md").rename(vault / "folder" / "target.md")
+
+    elapsed: list[float] = []
+
+    def do_write() -> None:
+        start = time.monotonic()
+        write_note(vault, "unrelated.md", "updated while retarget is mid-flight")
+        elapsed.append(time.monotonic() - start)
+
+    _run_against_paused_retarget(
+        vault, monkeypatch, "target.md", "folder/target.md", do_write
+    )
+
+    assert elapsed[0] < 1.0
+    assert (
+        "updated while retarget is mid-flight"
+        in read_note(vault, "unrelated.md").content
+    )
+
+
+def test_move_note_cross_linked_concurrent_moves_do_not_deadlock(
+    vault: Path,
+) -> None:
+    """Two concurrent `move_note` calls, `a.md -> c.md` and `b.md ->
+    d.md`, where `a.md` links to `b.md` and vice versa (so each move's
+    retarget phase touches the other move's original path), must both
+    complete without hanging under REAL, fully-wired locking --
+    `_retarget_other_notes` now takes its own per-note locks (this
+    unit), unlike the monkeypatch simulation
+    `test_move_note_relocation_lock_released_before_retarget_call` used
+    when that locking didn't exist yet. Proves U2's release-before-
+    retarget scoping actually holds end-to-end."""
+    write_note(vault, "a.md", "See [B](b.md).")
+    write_note(vault, "b.md", "See [A](a.md).")
+
+    results: dict[str, BaseException | None] = {}
+
+    def do_move(name: str, old: str, new: str) -> None:
+        try:
+            move_note(vault, old, new)
+            results[name] = None
+        except BaseException as exc:  # noqa: BLE001 -- capture across threads
+            results[name] = exc
+
+    t1 = threading.Thread(target=do_move, args=("a", "a.md", "c.md"))
+    t2 = threading.Thread(target=do_move, args=("b", "b.md", "d.md"))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert not t1.is_alive()
+    assert not t2.is_alive()
+    assert results.get("a") is None
+    assert results.get("b") is None
+    assert (vault / "c.md").is_file()
+    assert (vault / "d.md").is_file()

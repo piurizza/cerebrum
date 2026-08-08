@@ -129,18 +129,28 @@ def _retarget_other_notes(
         if other_path == new_target:
             continue
         other_file = vault_root / other_path
+        # The lock key MUST be the resolved path, not the bare join above
+        # -- every other call site (write_note/delete_note/move_note)
+        # locks on `resolve_note_path`'s output, and `file_lock` locks on
+        # `Path` identity/hash with no normalization of its own (see
+        # file_lock.py's module docstring). A relative or symlinked
+        # `vault_root` would otherwise make this lock key never collide
+        # with the SAME physical file's lock taken elsewhere, silently
+        # defeating locking for exactly the race this exists to close.
+        lock_path = resolve_note_path(vault_root, other_path)
         try:
-            other_raw = other_file.read_text(encoding="utf-8")
-            other_parsed = parse_note(other_path, other_raw)
+            with file_lock(lock_path):
+                other_raw = other_file.read_text(encoding="utf-8")
+                other_parsed = parse_note(other_path, other_raw)
 
-            new_body = retarget_links(
-                other_parsed.body, other_path, old_target, new_target
-            )
-            if new_body == other_parsed.body:
-                continue
-            other_parsed.body = new_body
-            other_parsed.updated = datetime.now(UTC)
-            other_file.write_text(render_note(other_parsed), encoding="utf-8")
+                new_body = retarget_links(
+                    other_parsed.body, other_path, old_target, new_target
+                )
+                if new_body == other_parsed.body:
+                    continue
+                other_parsed.body = new_body
+                other_parsed.updated = datetime.now(UTC)
+                other_file.write_text(render_note(other_parsed), encoding="utf-8")
         except Exception:  # noqa: BLE001 -- one bad note must not abort the move
             # Covers both the read/parse step and the compute-and-write step:
             # a write failure partway through this loop (permission error,
@@ -321,19 +331,25 @@ def retarget_note_links(
     rewritten, so the caller can keep the index in sync for those too.
     """
     destination = resolve_note_path(vault_root, new_path)
-    if not destination.is_file():
-        raise NoteNotFoundError(new_path)
 
-    raw_content = destination.read_text(encoding="utf-8")
-    parsed = parse_note(new_path, raw_content)
+    with file_lock(destination):
+        if not destination.is_file():
+            raise NoteNotFoundError(new_path)
 
-    rebased_body = rebase_links(parsed.body, old_path, new_path)
-    if rebased_body != parsed.body:
-        parsed.body = rebased_body
-        parsed.updated = datetime.now(UTC)
-        raw_content = render_note(parsed)
-        destination.write_text(raw_content, encoding="utf-8")
+        raw_content = destination.read_text(encoding="utf-8")
+        parsed = parse_note(new_path, raw_content)
 
+        rebased_body = rebase_links(parsed.body, old_path, new_path)
+        if rebased_body != parsed.body:
+            parsed.body = rebased_body
+            parsed.updated = datetime.now(UTC)
+            raw_content = render_note(parsed)
+            destination.write_text(raw_content, encoding="utf-8")
+
+    # Lock released above -- must not be held across `_retarget_other_notes`,
+    # which acquires its own per-note locks, for the same cross-move AB-BA
+    # deadlock reason `move_note` releases source/destination before its
+    # own call to `_retarget_other_notes` (see that function's comment).
     retargeted = _retarget_other_notes(vault_root, old_path, new_path)
 
     return (

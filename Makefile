@@ -44,6 +44,7 @@ test-backend:
 	cd backend && $(UV) run pytest
 
 test-frontend:
+	cd frontend && $(NPM) run test:run
 	cd frontend && $(NPM) run build
 
 check: lint type-check test

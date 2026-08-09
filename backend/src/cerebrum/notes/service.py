@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -11,6 +12,7 @@ from cerebrum.attachments.service import (
     delete_attachment_dir,
     move_attachment_dir,
 )
+from cerebrum.notes.file_lock import file_lock
 from cerebrum.notes.models import Note
 from cerebrum.notes.parser import parse_note, rebase_links, render_note, retarget_links
 
@@ -70,18 +72,32 @@ def read_note(vault_root: Path, path: str) -> Note:
     )
 
 
-def write_note(vault_root: Path, path: str, raw_content: str) -> Note:
+def write_note(
+    vault_root: Path,
+    path: str,
+    raw_content: str,
+    *,
+    must_not_exist: bool = False,
+    must_exist: bool = False,
+) -> Note:
     file_path = resolve_note_path(vault_root, path)
-    parsed = parse_note(path, raw_content)
 
-    now = datetime.now(UTC)
-    if parsed.created is None:
-        parsed.created = now
-    parsed.updated = now
+    with file_lock(file_path):
+        if must_not_exist and file_path.exists():
+            raise NoteAlreadyExistsError(path)
+        if must_exist and not file_path.exists():
+            raise NoteNotFoundError(path)
 
-    rendered = render_note(parsed)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text(rendered, encoding="utf-8")
+        parsed = parse_note(path, raw_content)
+
+        now = datetime.now(UTC)
+        if parsed.created is None:
+            parsed.created = now
+        parsed.updated = now
+
+        rendered = render_note(parsed)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(rendered, encoding="utf-8")
 
     return Note(
         path=path,
@@ -95,10 +111,21 @@ def write_note(vault_root: Path, path: str, raw_content: str) -> Note:
 
 def delete_note(vault_root: Path, path: str) -> None:
     file_path = resolve_note_path(vault_root, path)
-    if not file_path.is_file():
-        raise NoteNotFoundError(path)
-    file_path.unlink()
-    delete_attachment_dir(vault_root, path)
+    with file_lock(file_path):
+        if not file_path.is_file():
+            raise NoteNotFoundError(path)
+        file_path.unlink()
+        # Attachment-dir cleanup stays INSIDE this lock, not after it:
+        # `move_note` moves a *different* note's attachments into this same
+        # path while holding this same path's lock (see move_note's
+        # `move_attachment_dir` call under `_locked_paths`). Deleting them
+        # outside the lock let a concurrent move-into-this-path land its
+        # attachments first, then have this call's unlocked cleanup
+        # `shutil.rmtree` them out from under the just-moved-in note --
+        # silent, unrecoverable attachment data loss with no error to
+        # either caller. Sharing this path's lock with move_note's
+        # attachment-dir mutation closes that race.
+        delete_attachment_dir(vault_root, path)
 
 
 def _retarget_other_notes(
@@ -108,22 +135,43 @@ def _retarget_other_notes(
     resolve to `new_target` instead. Returns the vault-relative paths of
     the notes that were actually rewritten."""
     retargeted: list[str] = []
+    # Resolved once -- `vault_root` is invariant across the loop below, so
+    # resolving it fresh on every iteration (as passing the raw `vault_root`
+    # into `resolve_note_path` per-note would do) is redundant work
+    # repeated once per note in the vault.
+    vault_root_resolved = vault_root.resolve()
     for other_path in iter_note_paths(vault_root):
         if other_path == new_target:
             continue
         other_file = vault_root / other_path
         try:
-            other_raw = other_file.read_text(encoding="utf-8")
-            other_parsed = parse_note(other_path, other_raw)
+            # The lock key MUST be the resolved path, not a bare join --
+            # every other call site (write_note/delete_note/move_note)
+            # locks on `resolve_note_path`'s output, and `file_lock` locks
+            # on `Path` identity/hash with no normalization of its own
+            # (see file_lock.py's module docstring). A relative or
+            # symlinked `vault_root` would otherwise make this lock key
+            # never collide with the SAME physical file's lock taken
+            # elsewhere, silently defeating locking for exactly the race
+            # this exists to close. This resolve call must stay INSIDE
+            # this try/except: `resolve_note_path` raises for any other
+            # note whose canonical path escapes the vault (e.g. a
+            # symlink), and that failure is exactly one bad note's
+            # problem -- it must not abort retargeting for every
+            # remaining note in the vault.
+            lock_path = resolve_note_path(vault_root_resolved, other_path)
+            with file_lock(lock_path):
+                other_raw = other_file.read_text(encoding="utf-8")
+                other_parsed = parse_note(other_path, other_raw)
 
-            new_body = retarget_links(
-                other_parsed.body, other_path, old_target, new_target
-            )
-            if new_body == other_parsed.body:
-                continue
-            other_parsed.body = new_body
-            other_parsed.updated = datetime.now(UTC)
-            other_file.write_text(render_note(other_parsed), encoding="utf-8")
+                new_body = retarget_links(
+                    other_parsed.body, other_path, old_target, new_target
+                )
+                if new_body == other_parsed.body:
+                    continue
+                other_parsed.body = new_body
+                other_parsed.updated = datetime.now(UTC)
+                other_file.write_text(render_note(other_parsed), encoding="utf-8")
         except Exception:  # noqa: BLE001 -- one bad note must not abort the move
             # Covers both the read/parse step and the compute-and-write step:
             # a write failure partway through this loop (permission error,
@@ -165,6 +213,18 @@ def _rebase_attachment_references(body: str, old_path: str, new_path: str) -> st
     return pattern.sub(f"{new_stem}.attachments/", body)
 
 
+@contextmanager
+def _locked_paths(*paths: Path) -> Iterator[None]:
+    """Acquire `file_lock` for every distinct path in `paths`, in a
+    fixed (sorted-by-string) order -- so two callers wanting the same
+    set of paths always request them in the same order regardless of
+    call-site argument order, and can't AB-BA deadlock on each other."""
+    with ExitStack() as stack:
+        for lock_path in sorted(set(paths), key=str):
+            stack.enter_context(file_lock(lock_path))
+        yield
+
+
 def move_note(
     vault_root: Path, path: str, new_path: str, title: str | None = None
 ) -> tuple[Note, list[str]]:
@@ -200,41 +260,54 @@ def move_note(
     destination = resolve_note_path(vault_root, new_path)
     is_relocation = source != destination
 
-    if not source.is_file():
-        raise NoteNotFoundError(path)
-    if is_relocation and destination.exists():
-        raise NoteAlreadyExistsError(new_path)
+    # `source == destination` for a title-only update, so `_locked_paths`
+    # collapses to a single lock there. This block (and only this block)
+    # must be exited BEFORE `_retarget_other_notes` is called below --
+    # see the module-level note in file_lock.py and this function's own
+    # docstring for why holding these locks across that call would risk
+    # a cross-move deadlock.
+    with _locked_paths(source, destination):
+        if not source.is_file():
+            raise NoteNotFoundError(path)
+        if is_relocation and destination.exists():
+            raise NoteAlreadyExistsError(new_path)
 
-    had_attachment_dir = False
-    if is_relocation:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        source.rename(destination)
-        had_attachment_dir = attachment_dir_for_note(vault_root, path).exists()
-        move_attachment_dir(vault_root, path, new_path)
+        had_attachment_dir = False
+        if is_relocation:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            source.rename(destination)
+            had_attachment_dir = attachment_dir_for_note(vault_root, path).exists()
+            move_attachment_dir(vault_root, path, new_path)
 
-    raw_content = destination.read_text(encoding="utf-8")
-    parsed = parse_note(new_path, raw_content)
+        raw_content = destination.read_text(encoding="utf-8")
+        parsed = parse_note(new_path, raw_content)
 
-    changed = False
-    if is_relocation:
-        if had_attachment_dir:
-            rewritten_body = _rebase_attachment_references(parsed.body, path, new_path)
-            if rewritten_body != parsed.body:
-                parsed.body = rewritten_body
+        changed = False
+        if is_relocation:
+            if had_attachment_dir:
+                rewritten_body = _rebase_attachment_references(
+                    parsed.body, path, new_path
+                )
+                if rewritten_body != parsed.body:
+                    parsed.body = rewritten_body
+                    changed = True
+            rebased_body = rebase_links(parsed.body, path, new_path)
+            if rebased_body != parsed.body:
+                parsed.body = rebased_body
                 changed = True
-        rebased_body = rebase_links(parsed.body, path, new_path)
-        if rebased_body != parsed.body:
-            parsed.body = rebased_body
+        if title is not None and title != parsed.title:
+            parsed.title = title
             changed = True
-    if title is not None and title != parsed.title:
-        parsed.title = title
-        changed = True
 
-    if changed:
-        parsed.updated = datetime.now(UTC)
-        raw_content = render_note(parsed)
-        destination.write_text(raw_content, encoding="utf-8")
+        if changed:
+            parsed.updated = datetime.now(UTC)
+            raw_content = render_note(parsed)
+            destination.write_text(raw_content, encoding="utf-8")
 
+    # Locks released above -- `_retarget_other_notes` discovers and locks
+    # its OWN set of paths (one at a time, per note), which must never
+    # overlap in time with this move still holding source/destination, or
+    # two concurrent cross-linked moves can form an AB-BA deadlock.
     retargeted = (
         _retarget_other_notes(vault_root, path, new_path) if is_relocation else []
     )
@@ -278,19 +351,25 @@ def retarget_note_links(
     rewritten, so the caller can keep the index in sync for those too.
     """
     destination = resolve_note_path(vault_root, new_path)
-    if not destination.is_file():
-        raise NoteNotFoundError(new_path)
 
-    raw_content = destination.read_text(encoding="utf-8")
-    parsed = parse_note(new_path, raw_content)
+    with file_lock(destination):
+        if not destination.is_file():
+            raise NoteNotFoundError(new_path)
 
-    rebased_body = rebase_links(parsed.body, old_path, new_path)
-    if rebased_body != parsed.body:
-        parsed.body = rebased_body
-        parsed.updated = datetime.now(UTC)
-        raw_content = render_note(parsed)
-        destination.write_text(raw_content, encoding="utf-8")
+        raw_content = destination.read_text(encoding="utf-8")
+        parsed = parse_note(new_path, raw_content)
 
+        rebased_body = rebase_links(parsed.body, old_path, new_path)
+        if rebased_body != parsed.body:
+            parsed.body = rebased_body
+            parsed.updated = datetime.now(UTC)
+            raw_content = render_note(parsed)
+            destination.write_text(raw_content, encoding="utf-8")
+
+    # Lock released above -- must not be held across `_retarget_other_notes`,
+    # which acquires its own per-note locks, for the same cross-move AB-BA
+    # deadlock reason `move_note` releases source/destination before its
+    # own call to `_retarget_other_notes` (see that function's comment).
     retargeted = _retarget_other_notes(vault_root, old_path, new_path)
 
     return (

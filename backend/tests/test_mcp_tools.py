@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastmcp import Client, FastMCP
+from fastmcp.client.client import CallToolResult
 
 from cerebrum.index.indexer import upsert_note
 from cerebrum.mcp.server import create_mcp_server
@@ -419,3 +423,108 @@ def test_create_note_succeeds_even_when_index_sync_fails(
     finally:
         get_settings.cache_clear()
     assert (vault / "new.md").read_text(encoding="utf-8").endswith("hello\n")
+
+
+@dataclass
+class _RaceState:
+    """Bundles one race attempt's shared objects so `_race_create_note`
+    only needs three arguments instead of threading each one through
+    separately, and so each attempt gets fresh `results`/`results_lock`
+    without leaking into the next."""
+
+    mcp: FastMCP
+    barrier: threading.Barrier
+    results: dict[int, CallToolResult] = field(default_factory=dict)
+    results_lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+def _race_create_note(state: _RaceState, thread_id: int, note_path: str) -> None:
+    """Run one side of a create-note race: wait at `state.barrier` so both
+    callers issue their `call_tool` at essentially the same instant, then
+    record the outcome under `state.results_lock`. A plain top-level
+    function (rather than a closure defined inside the per-attempt loop
+    below) so each call captures its own arguments by value, not by
+    reference to a loop variable a later iteration will reassign."""
+
+    async def run() -> None:
+        async with Client(state.mcp) as client:
+            state.barrier.wait(timeout=5)
+            result = await client.call_tool(
+                "create-note",
+                {"path": note_path, "content": f"content-{thread_id}"},
+                raise_on_error=False,
+            )
+            with state.results_lock:
+                state.results[thread_id] = result
+
+    asyncio.run(run())
+
+
+def test_create_note_concurrent_calls_for_same_new_path_only_one_succeeds(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two concurrent create-note calls racing for the SAME brand-new path
+    must never both succeed: exactly one wins, the other gets the
+    documented "already exists" ToolError, and the file on disk ends up
+    with the winner's content -- never a silent overwrite.
+
+    This is the scenario that exposed the original bug: create_note() used
+    to do its existence check via an unlocked read_note() call *before*
+    separately calling write_note(). Two threads could both observe
+    "nothing here yet" from that unlocked check before either had written
+    anything, then both proceed to write -- the second write silently
+    clobbering the first with no error raised to either caller, directly
+    contradicting the tool's documented contract.
+
+    A `threading.Barrier(2)` makes both threads issue their `call_tool`
+    request at essentially the same instant (rather than one strictly
+    after the other), which is exactly the interleaving needed to expose
+    that race: under the old code, both threads' unlocked pre-checks would
+    race to run before either write_note() call. Manually reverting
+    create_note()/update_note() to the old unlocked-pre-check
+    implementation and running this test reproduces the bug (both calls
+    report success, and the file ends up with whichever content happened
+    to be written last) -- confirming this test would have caught it.
+
+    Under the fix, write_note()'s own file_lock critical section
+    evaluates `must_not_exist` atomically with the write, so the outcome
+    is deterministic regardless of scheduling -- this loops several times
+    (fresh path per attempt) purely to build confidence that no timing
+    window slipped through, not because any single run is expected to be
+    flaky.
+    """
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    get_settings.cache_clear()
+    mcp = _mcp_server(db)
+
+    try:
+        for attempt in range(15):
+            path = f"race-{attempt}.md"
+            state = _RaceState(mcp=mcp, barrier=threading.Barrier(2, timeout=5))
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [
+                    executor.submit(_race_create_note, state, thread_id, path)
+                    for thread_id in (0, 1)
+                ]
+                for future in futures:
+                    future.result(timeout=10)
+
+            successes = [
+                tid for tid, result in state.results.items() if not result.is_error
+            ]
+            failures = [tid for tid, result in state.results.items() if result.is_error]
+            assert len(successes) == 1, (
+                f"attempt {attempt}: expected exactly one winner, got "
+                f"successes={successes} failures={failures}"
+            )
+            assert len(failures) == 1
+            assert "already exists" in state.results[failures[0]].content[0].text
+
+            winner_id = successes[0]
+            loser_id = failures[0]
+            final_content = (vault / path).read_text(encoding="utf-8")
+            assert f"content-{winner_id}" in final_content
+            assert f"content-{loser_id}" not in final_content
+    finally:
+        get_settings.cache_clear()

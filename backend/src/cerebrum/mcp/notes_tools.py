@@ -14,6 +14,7 @@ from cerebrum.notes.models import Note, NoteMeta
 from cerebrum.notes.parser import InvalidNoteContentError
 from cerebrum.notes.service import (
     InvalidNotePathError,
+    NoteAlreadyExistsError,
     NoteNotFoundError,
     read_note,
     write_note,
@@ -107,22 +108,10 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
         annotations=_CREATE_ANNOTATIONS,
     )
     def create_note(path: str, content: str) -> Note:
-        settings = get_settings()
         try:
-            read_note(settings.cerebrum_vault_path, path)
-        except NoteNotFoundError:
-            pass  # nothing at this path yet -- proceed to write
-        except InvalidNotePathError as exc:
-            raise _invalid_path_error(path) from exc
-        except InvalidNoteContentError as exc:
-            # A malformed-but-existing file still counts as "something is
-            # there" -- fail the same way a well-formed existing note would,
-            # rather than silently overwriting it.
+            return _write_and_sync_index(app, path, content, must_not_exist=True)
+        except NoteAlreadyExistsError as exc:
             raise ToolError(f"A note already exists at '{path}'") from exc
-        else:
-            raise ToolError(f"A note already exists at '{path}'")
-
-        return _write_and_sync_index(app, path, content)
 
     @mcp.tool(
         name="update-note",
@@ -135,28 +124,42 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
         annotations=_UPDATE_ANNOTATIONS,
     )
     def update_note(path: str, content: str) -> Note:
-        settings = get_settings()
         try:
-            read_note(settings.cerebrum_vault_path, path)
+            return _write_and_sync_index(app, path, content, must_exist=True)
         except NoteNotFoundError as exc:
             raise ToolError(f"No note exists at '{path}'") from exc
-        except InvalidNotePathError as exc:
-            raise _invalid_path_error(path) from exc
-        except InvalidNoteContentError:
-            pass  # malformed existing note -- replacing it is a valid repair
-
-        return _write_and_sync_index(app, path, content)
 
 
-def _write_and_sync_index(app: FastAPI, path: str, content: str) -> Note:
+def _write_and_sync_index(
+    app: FastAPI,
+    path: str,
+    content: str,
+    *,
+    must_not_exist: bool = False,
+    must_exist: bool = False,
+) -> Note:
     # create-note/update-note widen write_note()'s caller population from
     # the trusted local frontend to remote third-party LLM clients. Verified
     # safe: python-frontmatter's default YAML handler parses frontmatter
     # with yaml.SafeLoader (see frontmatter/default_handlers.py), not an
     # executing/unsafe loader -- a one-time check, not a per-call assertion.
+    #
+    # must_not_exist/must_exist are threaded straight through to write_note,
+    # whose own file_lock critical section evaluates them atomically with
+    # the write itself -- closing the race an earlier, separate unlocked
+    # read_note() pre-check here could not (R5). NoteAlreadyExistsError/
+    # NoteNotFoundError raised by that check are intentionally NOT caught
+    # here; they propagate to create_note/update_note, which translate them
+    # to the same ToolError messages the old pre-check produced.
     settings = get_settings()
     try:
-        note = write_note(settings.cerebrum_vault_path, path, content)
+        note = write_note(
+            settings.cerebrum_vault_path,
+            path,
+            content,
+            must_not_exist=must_not_exist,
+            must_exist=must_exist,
+        )
     except InvalidNotePathError as exc:
         raise _invalid_path_error(path) from exc
     except InvalidNoteContentError as exc:

@@ -5,10 +5,16 @@ import { afterEach, vi } from "vitest";
 // RTL doesn't auto-register cleanup outside a Jest-detected environment, so
 // register it explicitly: without this, a component left mounted by one
 // test (e.g. window keydown listeners, useFocusTrap's shared activeTraps
-// registry) leaks into the next.
-afterEach(() => {
-  cleanup();
-});
+// registry) leaks into the next. Guarded on `document` existing: this
+// setup file runs for every test file regardless of its per-file
+// `// @vitest-environment` override, and `cleanup()` touches `document`
+// directly, which the "node" environment (src/lib/'s pure-logic tests)
+// doesn't provide.
+if (typeof document !== "undefined") {
+  afterEach(() => {
+    cleanup();
+  });
+}
 
 // jsdom does not implement the Blob-URL APIs at all (both are `undefined`).
 // `MarkdownPreview.tsx`'s `AttachmentImage` calls `URL.revokeObjectURL` in

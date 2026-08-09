@@ -2,12 +2,9 @@ import { type Completion, CompletionContext } from "@codemirror/autocomplete";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
+import { makeNoteMeta } from "../../test/factories";
 import type { NoteMeta } from "../../types/note";
 import { noteLinkCompletionSource } from "./noteLinkCompletion";
-
-function note(path: string, title: string): NoteMeta {
-  return { path, title, tags: [], created: null, updated: null };
-}
 
 // Builds a `CompletionContext` against a real `EditorState` whose doc
 // already contains the trigger text typed at the end, so
@@ -37,11 +34,11 @@ function applyCompletion(
 }
 
 const manyNotes: NoteMeta[] = [
-  note("notes/apple.md", "Apple"),
-  note("notes/banana.md", "Banana"),
-  note("notes/cherry.md", "Cherry"),
-  note("notes/date.md", "Date"),
-  note("notes/elderberry.md", "Elderberry"),
+  makeNoteMeta("notes/apple.md", "Apple"),
+  makeNoteMeta("notes/banana.md", "Banana"),
+  makeNoteMeta("notes/cherry.md", "Cherry"),
+  makeNoteMeta("notes/date.md", "Date"),
+  makeNoteMeta("notes/elderberry.md", "Elderberry"),
 ];
 
 describe("noteLinkCompletionSource", () => {
@@ -53,7 +50,7 @@ describe("noteLinkCompletionSource", () => {
 
   it("returns candidates sorted by title, capped at 20 results", () => {
     const lots: NoteMeta[] = Array.from({ length: 25 }, (_, i) =>
-      note(`notes/n${i}.md`, `Note ${String(25 - i).padStart(2, "0")}`),
+      makeNoteMeta(`notes/n${i}.md`, `Note ${String(25 - i).padStart(2, "0")}`),
     );
     const source = noteLinkCompletionSource(lots, "notes/current.md");
 
@@ -99,13 +96,16 @@ describe("noteLinkCompletionSource", () => {
       state: EditorState.create({ doc }),
       parent: document.createElement("div"),
     });
-    const option = result?.options.find((o) => o.label === "Banana");
-    expect(option?.apply).toBeTypeOf("function");
+    try {
+      const option = result?.options.find((o) => o.label === "Banana");
+      expect(option?.apply).toBeTypeOf("function");
 
-    applyCompletion(option, view, result?.from ?? 0, doc.length);
+      applyCompletion(option, view, result?.from ?? 0, doc.length);
 
-    expect(view.state.doc.toString()).toBe("[Banana](../banana.md)");
-    view.destroy();
+      expect(view.state.doc.toString()).toBe("[Banana](../banana.md)");
+    } finally {
+      view.destroy();
+    }
   });
 
   it("consumes a trailing ]] instead of leaving it behind", () => {
@@ -120,11 +120,14 @@ describe("noteLinkCompletionSource", () => {
     expect(result).not.toBeNull();
 
     const view = new EditorView({ state, parent: document.createElement("div") });
-    const option = result?.options.find((o) => o.label === "Banana");
+    try {
+      const option = result?.options.find((o) => o.label === "Banana");
 
-    applyCompletion(option, view, result?.from ?? 0, cursorPos);
+      applyCompletion(option, view, result?.from ?? 0, cursorPos);
 
-    expect(view.state.doc.toString()).toBe("[Banana](banana.md)");
-    view.destroy();
+      expect(view.state.doc.toString()).toBe("[Banana](banana.md)");
+    } finally {
+      view.destroy();
+    }
   });
 });

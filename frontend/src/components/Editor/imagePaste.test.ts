@@ -151,8 +151,10 @@ describe("imagePasteExtension", () => {
     resolveUpload({ path: "notes/attachments/image.png" });
 
     // Flush the microtask queue for the resolved promise's .then callback,
-    // then assert the doc was left untouched by it.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // then assert the doc was left untouched by it. A microtask flush
+    // (not a setTimeout macrotask) is all that's needed here -- there's
+    // exactly one pending `.then` continuation to let run.
+    await Promise.resolve();
     expect(view.state.doc.toString()).toBe("something else entirely");
   });
 });

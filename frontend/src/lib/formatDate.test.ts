@@ -1,3 +1,5 @@
+// @vitest-environment node
+// Pure function, no DOM -- skip jsdom's window/document bootstrap cost.
 import { describe, expect, it } from "vitest";
 import { formatTimestamp } from "./formatDate";
 

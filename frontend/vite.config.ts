@@ -19,6 +19,10 @@ export default defineConfig({
     },
   },
   test: {
+    // Most tests render components or touch the DOM and need jsdom.
+    // Pure-logic files that don't (src/lib/*.test.ts) opt out with a
+    // `// @vitest-environment node` docblock instead, to skip jsdom's
+    // window/document bootstrap cost where it buys nothing.
     environment: "jsdom",
     globals: false,
     setupFiles: ["./src/test/setup.ts"],

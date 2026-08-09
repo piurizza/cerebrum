@@ -1,5 +1,7 @@
+// @vitest-environment node
+// Pure functions, no DOM -- skip jsdom's window/document bootstrap cost.
 import { describe, expect, it } from "vitest";
-import type { NoteMeta } from "../types/note";
+import { makeNoteMeta } from "../test/factories";
 import {
   buildNoteTree,
   childFolderNames,
@@ -7,16 +9,6 @@ import {
   joinNotePath,
   splitNotePath,
 } from "./noteTree";
-
-function makeNote(path: string, title?: string): NoteMeta {
-  return {
-    path,
-    title: title ?? path,
-    tags: [],
-    created: null,
-    updated: null,
-  };
-}
 
 describe("splitNotePath / joinNotePath", () => {
   it("are inverses for a nested path", () => {
@@ -38,12 +30,12 @@ describe("splitNotePath / joinNotePath", () => {
 
 describe("collectFolderPaths", () => {
   it("returns every ancestor folder for a deeply nested note path", () => {
-    const notes = [makeNote("a/b/c/note.md")];
+    const notes = [makeNoteMeta("a/b/c/note.md")];
     expect(collectFolderPaths(notes)).toEqual(["a", "a/b", "a/b/c"]);
   });
 
   it("returns no folders for a root-level note", () => {
-    expect(collectFolderPaths([makeNote("note.md")])).toEqual([]);
+    expect(collectFolderPaths([makeNoteMeta("note.md")])).toEqual([]);
   });
 });
 
@@ -62,12 +54,12 @@ describe("childFolderNames", () => {
 describe("buildNoteTree", () => {
   it("groups notes under shared folders and sorts folders before notes alphabetically", () => {
     const notes = [
-      makeNote("root-b.md"),
-      makeNote("root-a.md"),
-      makeNote("zeta/z.md"),
-      makeNote("alpha/b.md"),
-      makeNote("alpha/a.md"),
-      makeNote("alpha/nested/deep.md"),
+      makeNoteMeta("root-b.md"),
+      makeNoteMeta("root-a.md"),
+      makeNoteMeta("zeta/z.md"),
+      makeNoteMeta("alpha/b.md"),
+      makeNoteMeta("alpha/a.md"),
+      makeNoteMeta("alpha/nested/deep.md"),
     ];
 
     const tree = buildNoteTree(notes);

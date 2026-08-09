@@ -1,5 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeNoteMeta } from "../../test/factories";
 import type { NoteMeta } from "../../types/note";
 
 // The real `CodeMirror` component paints via a canvas-adjacent editing
@@ -17,12 +18,13 @@ vi.mock("@uiw/react-codemirror", () => ({
   },
 }));
 
-const mockUseNotes = vi.fn();
+const mockUseNotes =
+  vi.fn<() => { notes: NoteMeta[]; error: string | null; refreshNotes: () => void }>();
 vi.mock("../../context/NotesContext", () => ({
   useNotes: () => mockUseNotes(),
 }));
 
-const mockUseTheme = vi.fn();
+const mockUseTheme = vi.fn<() => { theme: string; toggleTheme: () => void }>();
 vi.mock("../../context/ThemeContext", () => ({
   useTheme: () => mockUseTheme(),
 }));
@@ -46,8 +48,8 @@ vi.mock("./noteLinkCompletion", () => ({
 import { MarkdownEditor } from "./MarkdownEditor";
 
 const notes: NoteMeta[] = [
-  { path: "notes/a.md", title: "A", tags: [], created: null, updated: null },
-  { path: "notes/b.md", title: "B", tags: [], created: null, updated: null },
+  makeNoteMeta("notes/a.md", "A"),
+  makeNoteMeta("notes/b.md", "B"),
 ];
 
 beforeEach(() => {

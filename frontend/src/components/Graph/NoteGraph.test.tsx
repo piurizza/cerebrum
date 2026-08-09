@@ -1,5 +1,5 @@
 import { render, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphResponse } from "../../types/note";
 
 // `react-force-graph-2d` paints on a `<canvas>` via a third-party force
@@ -7,7 +7,12 @@ import type { GraphResponse } from "../../types/note";
 // API-to-graph-data transform and the callbacks it hands the library).
 // Stubbing it as a prop-capturing component lets the tests assert on
 // exactly what `NoteGraph` computed and passed down, without needing a
-// real canvas or force simulation in jsdom.
+// real canvas or force simulation in jsdom (mirrors MarkdownEditor.test.tsx's
+// stubbing of @uiw/react-codemirror). A plain module-level variable, not a
+// shared helper: Vitest's `vi.mock` hoisting only recognizes variables it
+// can statically move above the mock call (a `mock`-prefixed `vi.fn()`, or a
+// value from `vi.hoisted`) -- a value built by calling an imported factory
+// isn't eligible, so each mocked file owns its own capture variable.
 // biome-ignore lint/suspicious/noExplicitAny: captured props mirror whatever shape NoteGraph passes; typing them narrowly would just re-describe the library's own (untyped-here) prop surface.
 let capturedProps: any = null;
 vi.mock("react-force-graph-2d", () => ({
@@ -18,16 +23,20 @@ vi.mock("react-force-graph-2d", () => ({
   },
 }));
 
-const mockNavigate = vi.fn();
+const mockNavigate = vi.fn<() => void>();
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
 }));
 
-const mockGetGraph = vi.fn();
-vi.mock("../../api/client", () => ({
-  getGraph: () => mockGetGraph(),
-  encodeNotePath: (path: string) => path.split("/").map(encodeURIComponent).join("/"),
-}));
+const mockGetGraph = vi.fn<() => Promise<GraphResponse>>();
+// `encodeNotePath` is real logic worth exercising as-is (matches
+// MarkdownPreview.test.tsx's pattern) -- only `getGraph` touches the
+// network and needs mocking.
+vi.mock("../../api/client", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../api/client")>("../../api/client");
+  return { ...actual, getGraph: () => mockGetGraph() };
+});
 
 vi.mock("../../context/ThemeContext", () => ({
   useTheme: () => ({ theme: "light", toggleTheme: vi.fn() }),
@@ -54,14 +63,9 @@ beforeEach(() => {
   mockGetGraph.mockResolvedValue(graphResponse);
 });
 
-afterEach(() => {
-  vi.clearAllMocks();
-});
-
 async function renderGraph() {
   render(<NoteGraph />);
-  await waitFor(() => expect(capturedProps).not.toBeNull());
-  await waitFor(() => expect(capturedProps.graphData.nodes).toHaveLength(2));
+  await waitFor(() => expect(capturedProps?.graphData.nodes).toHaveLength(2));
   return capturedProps;
 }
 

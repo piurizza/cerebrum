@@ -1,13 +1,17 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NoteMeta } from "../../types/note";
 
 const mockGetBacklinks = vi.fn<(path: string) => Promise<NoteMeta[]>>();
-vi.mock("../../api/client", () => ({
-  getBacklinks: (path: string) => mockGetBacklinks(path),
-  encodeNotePath: (path: string) => path.split("/").map(encodeURIComponent).join("/"),
-}));
+// `encodeNotePath` is real logic worth exercising as-is (matches
+// MarkdownPreview.test.tsx's pattern) -- only `getBacklinks` touches the
+// network and needs mocking.
+vi.mock("../../api/client", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../api/client")>("../../api/client");
+  return { ...actual, getBacklinks: (path: string) => mockGetBacklinks(path) };
+});
 
 // Importing after the mocks above are registered, matching how vi.mock's
 // hoisting requires them to be declared -- import placement doesn't matter
@@ -22,10 +26,6 @@ const backlinks: NoteMeta[] = [
 
 beforeEach(() => {
   mockGetBacklinks.mockReset();
-});
-
-afterEach(() => {
-  vi.clearAllMocks();
 });
 
 describe("BacklinksPanel", () => {

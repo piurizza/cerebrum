@@ -29,9 +29,21 @@ function extractPasteHandler(
   extension: Extension,
 ): (event: unknown, view: EditorView) => boolean {
   const plugin = extension as unknown as {
-    domEventHandlers: { paste: (event: unknown, view: EditorView) => boolean };
+    domEventHandlers?: { paste?: (event: unknown, view: EditorView) => boolean };
   };
-  return plugin.domEventHandlers.paste;
+  const paste = plugin.domEventHandlers?.paste;
+  if (typeof paste !== "function") {
+    // This reaches into `ViewPlugin`'s undocumented internal shape (no
+    // public accessor exists for a domEventHandlers extension's own
+    // handler map) -- if a future CodeMirror version changes it, fail
+    // with a clear diagnosis here instead of every dependent test below
+    // throwing a generic "cannot read properties of undefined".
+    throw new Error(
+      "extractPasteHandler: extension.domEventHandlers.paste is not a function -- " +
+        "@codemirror/view's ViewPlugin internal shape may have changed.",
+    );
+  }
+  return paste;
 }
 
 function createView(extension: Extension): EditorView {

@@ -63,6 +63,18 @@ beforeEach(() => {
   mockGetGraph.mockResolvedValue(graphResponse);
 });
 
+// Mirrors NoteGraph.tsx's own (unexported) `resolveColorToken` exactly, so
+// the nodeColor test above can assert the specific mapping rather than
+// just distinctness -- see that test's comment.
+function resolveColorTokenForTest(varName: string): string {
+  const probe = document.createElement("span");
+  probe.style.color = `var(${varName})`;
+  document.body.appendChild(probe);
+  const resolved = getComputedStyle(probe).color;
+  document.body.removeChild(probe);
+  return resolved;
+}
+
 async function renderGraph() {
   render(<NoteGraph />);
   await waitFor(() => expect(capturedProps?.graphData.nodes).toHaveLength(2));
@@ -87,13 +99,22 @@ describe("NoteGraph", () => {
     ]);
   });
 
-  it("nodeColor returns a different token for exists:true than exists:false", async () => {
+  it("nodeColor maps exists:true to --accent and exists:false to --text-faint", async () => {
     const props = await renderGraph();
 
-    const existingColor = props.nodeColor({ exists: true });
-    const ghostColor = props.nodeColor({ exists: false });
-
-    expect(existingColor).not.toBe(ghostColor);
+    // jsdom's getComputedStyle never resolves CSS custom properties -- it
+    // echoes the literal `var(--name)` string regardless of what index.css
+    // defines -- so two different variable names are trivially "different"
+    // even if NoteGraph.tsx's exists ? ... : ... branches were swapped.
+    // Resolving each token independently the same way NoteGraph.tsx's own
+    // resolveColorToken does, and asserting the specific mapping (not just
+    // distinctness), catches that swap.
+    expect(props.nodeColor({ exists: true })).toBe(
+      resolveColorTokenForTest("--accent"),
+    );
+    expect(props.nodeColor({ exists: false })).toBe(
+      resolveColorTokenForTest("--text-faint"),
+    );
   });
 
   it("onNodeClick navigates to the clicked node's encoded path when it exists", async () => {

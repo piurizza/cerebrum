@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeNoteMeta } from "../../test/factories";
 import type { NoteMeta } from "../../types/note";
 
 const mockGetBacklinks = vi.fn<(path: string) => Promise<NoteMeta[]>>();
@@ -20,8 +21,8 @@ vi.mock("../../api/client", async () => {
 import { BacklinksPanel } from "./BacklinksPanel";
 
 const backlinks: NoteMeta[] = [
-  { path: "notes/a.md", title: "Note A", tags: [], created: null, updated: null },
-  { path: "notes/b.md", title: "Note B", tags: [], created: null, updated: null },
+  makeNoteMeta("notes/a.md", "Note A"),
+  makeNoteMeta("notes/b.md", "Note B"),
 ];
 
 beforeEach(() => {

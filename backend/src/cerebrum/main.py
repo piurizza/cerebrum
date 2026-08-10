@@ -17,7 +17,7 @@ from cerebrum.api.auth import unauthenticated_router
 from cerebrum.api.router import api_router
 from cerebrum.auth_db import connect as connect_auth_db
 from cerebrum.index.db import connect
-from cerebrum.index.indexer import rebuild_index
+from cerebrum.index.indexer import PendingRenameCache, rebuild_index
 from cerebrum.index.watcher import watch_vault
 from cerebrum.mcp.auth import DiscoverabilityHintMiddleware
 from cerebrum.mcp.server import create_mcp_server
@@ -27,7 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_backstop_rescan(
-    conn: sqlite3.Connection, vault_root: Path, settings: Settings
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    settings: Settings,
+    pending_renames: PendingRenameCache | None = None,
 ) -> None:
     """Periodically rebuild the index from scratch as a self-healing
     backstop for changes the live watcher missed (a debounce edge case, a
@@ -40,11 +43,17 @@ async def _run_backstop_rescan(
     exception) must not permanently kill this safety net for the rest of
     the process's life (KTD9), so each tick is caught and logged on its
     own rather than letting the loop -- and this task -- die outright.
+
+    `pending_renames` should be the SAME instance passed to `watch_vault`
+    (see `lifespan` below) -- sharing it is what lets a cross-window
+    rename survive a backstop tick landing between its two watcher
+    batches (R9), rather than the tick indexing the new path first and
+    permanently defeating pairing for that rename.
     """
     while True:
         try:
             await asyncio.sleep(settings.watcher_backstop_interval_seconds)
-            await asyncio.to_thread(rebuild_index, conn, vault_root)
+            await asyncio.to_thread(rebuild_index, conn, vault_root, pending_renames)
         # `asyncio.CancelledError` is a `BaseException`, not an `Exception`
         # (Python 3.8+) -- this deliberately does *not* catch it, so
         # `task.cancel()` (shutdown, KTD9) still interrupts this loop
@@ -98,15 +107,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             stop_event = asyncio.Event()
             watcher_task: asyncio.Task[None] | None = None
             backstop_task: asyncio.Task[None] | None = None
+            # Shared across both tasks (R9) so a rename whose delete and
+            # create land in separate watcher debounce batches also
+            # survives a backstop tick landing between them -- passing
+            # each task its own instance would let the backstop index the
+            # new path first and permanently defeat pairing for that
+            # rename, since an already-indexed path is never a rename
+            # target.
+            pending_renames = PendingRenameCache(
+                settings.watcher_rename_pairing_window_seconds
+            )
             try:
                 watcher_task = asyncio.create_task(
                     watch_vault(
-                        app.state.db, settings.cerebrum_vault_path, settings, stop_event
+                        app.state.db,
+                        settings.cerebrum_vault_path,
+                        settings,
+                        stop_event,
+                        pending_renames,
                     )
                 )
                 backstop_task = asyncio.create_task(
                     _run_backstop_rescan(
-                        app.state.db, settings.cerebrum_vault_path, settings
+                        app.state.db,
+                        settings.cerebrum_vault_path,
+                        settings,
+                        pending_renames,
                     )
                 )
             except Exception as exc:  # noqa: BLE001 -- see comment below

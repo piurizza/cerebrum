@@ -154,11 +154,13 @@ def test_backstop_rescan_survives_iteration_failure(
     calls: list[int] = []
     real_rebuild_index = main_module.rebuild_index
 
-    def flaky_rebuild_index(conn: sqlite3.Connection, vault_root: Path) -> None:
+    def flaky_rebuild_index(
+        conn: sqlite3.Connection, vault_root: Path, pending_renames: object = None
+    ) -> None:
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("boom")
-        real_rebuild_index(conn, vault_root)
+        real_rebuild_index(conn, vault_root, pending_renames)
 
     monkeypatch.setattr(main_module, "rebuild_index", flaky_rebuild_index)
     settings = _settings(vault, watcher_backstop_interval_seconds=1)

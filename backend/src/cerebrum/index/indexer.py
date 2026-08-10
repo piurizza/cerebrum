@@ -139,7 +139,11 @@ def remove_note(conn: sqlite3.Connection, path: str) -> None:
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
 
 
-def rebuild_index(conn: sqlite3.Connection, vault_root: Path) -> None:
+def rebuild_index(
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    pending_renames: PendingRenameCache | None = None,
+) -> None:
     """Full rescan: upsert changed/new notes, drop rows for deleted ones.
 
     Always safe to call — the index is a disposable cache, never the
@@ -147,6 +151,19 @@ def rebuild_index(conn: sqlite3.Connection, vault_root: Path) -> None:
     is logged and skipped rather than aborting the whole rescan: this
     runs at FastAPI startup, and users hand-edit vault files outside the
     API, so one bad file must not take down the entire app.
+
+    `pending_renames`, when supplied and non-empty, is consulted for a
+    genuinely new (never-before-indexed) path the same way
+    `apply_watch_batch`'s new-arrival matching does (R9) -- without this,
+    a backstop tick landing between a cross-window rename's delete and
+    create batches would index the new path as an ordinary note first,
+    permanently defeating pairing for that rename (an already-indexed
+    path is never a rename target, R2/R4). Omitted or empty, this
+    behaves exactly as before this plan -- the startup rescan (which
+    runs before any watcher state exists) always calls it this way.
+    An already-indexed, merely-*changed* path never consults the cache
+    either way -- only a path with no prior row at all is eligible,
+    mirroring R4.
     """
     current_paths = set(iter_note_paths(vault_root))
 
@@ -161,11 +178,23 @@ def rebuild_index(conn: sqlite3.Connection, vault_root: Path) -> None:
             except Exception:  # noqa: BLE001 -- one bad row must not abort the rescan
                 logger.exception("Failed to remove stale index entry for %s", path)
 
+    consult_cache = pending_renames is not None and not pending_renames.is_empty()
     for path in current_paths:
         try:
             mtime = (vault_root / path).stat().st_mtime
             if existing_mtimes.get(path) == mtime:
                 continue
+            if consult_cache and path not in existing_mtimes:
+                assert (
+                    pending_renames is not None
+                )  # narrows for mypy; see consult_cache
+                content_hash = _hash_content(
+                    (vault_root / path).read_text(encoding="utf-8")
+                )
+                if _maybe_cross_window_pair(
+                    conn, vault_root, path, content_hash, pending_renames
+                ):
+                    continue
             upsert_note(conn, vault_root, path)
         except Exception:  # noqa: BLE001 -- one bad note must not abort the rescan
             logger.exception("Failed to index note %s; skipping", path)

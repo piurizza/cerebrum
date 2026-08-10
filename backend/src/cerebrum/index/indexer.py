@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -286,8 +287,139 @@ def _apply_pairs(
     return paired_old, paired_new
 
 
+def _maybe_cross_window_pair(
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    new_path: str,
+    content_hash: str,
+    pending_renames: PendingRenameCache,
+) -> bool:
+    """Checks `pending_renames` for an unambiguous match on
+    `content_hash`; if found, applies the same rename outcome
+    `_apply_pairs` does for a same-batch pair, minus `remove_note` for
+    the old side (already applied in the batch that deleted it, possibly
+    several batches ago). Shared by both `apply_watch_batch`'s
+    new-arrival matching (U3) and `rebuild_index`'s backstop-rescan path
+    (U4) -- the caller owns any batch-local ambiguity grouping before
+    calling this; the cache's own hash-ambiguity rule (KTD1) always
+    applies regardless.
+
+    Returns whether `new_path` was handled as a cross-window rename. On
+    `False` (no match, or the match's `retarget_note_links` call failed),
+    the caller falls back to an ordinary upsert -- the consumed pending
+    entry, if any, is not restored, so a failed match is not retried on a
+    later batch or rescan tick.
+    """
+    old_path = pending_renames.pop_unambiguous_match(content_hash)
+    if old_path is None:
+        return False
+
+    try:
+        _, retargeted = retarget_note_links(vault_root, old_path, new_path)
+    except Exception as exc:  # noqa: BLE001 -- falls back to ordinary upsert
+        logger.warning(
+            "failed to retarget links for cross-window rename %s -> %s; "
+            "falling back to ordinary upsert: %s",
+            old_path,
+            new_path,
+            exc,
+        )
+        return False
+
+    _guarded_upsert(conn, vault_root, new_path)
+    for retargeted_path in retargeted:
+        _guarded_upsert(conn, vault_root, retargeted_path)
+    return True
+
+
+@dataclass
+class _BatchClassification:
+    gone: set[str]
+    present: set[str]
+    old_hashes: dict[str, str]
+    new_hashes: dict[str, str]
+
+
+def _classify_batch(
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    rel_paths: set[str],
+    pending_renames: PendingRenameCache,
+) -> _BatchClassification:
+    """Splits `rel_paths` into `gone`/`present`, invalidates any pending
+    cross-window entry for a path that reappeared (R8), and computes the
+    content hashes same-batch and cross-window pairing both need.
+    """
+    gone = {path for path in rel_paths if not (vault_root / path).exists()}
+    present = rel_paths - gone
+
+    # R8: a path that reappeared in the vault can never remain eligible
+    # as an unrelated later arrival's cross-window match source, whether
+    # or not its new content happens to match its own old hash.
+    for path in present:
+        pending_renames.remove_by_path(path)
+
+    # One query covers both lookups this classification needs: `gone`'s
+    # stored hashes (to find deleted notes worth pairing) and which
+    # `present` paths are already indexed (to exclude ordinary content
+    # edits from the "new arrival" candidate set, per R4) -- `gone` and
+    # `present` partition `rel_paths`, so a single IN(...) over the whole
+    # set replaces what would otherwise be two near-identical round-trips.
+    indexed_hashes = _fetch_content_hashes(conn, rel_paths)
+    old_hashes = {path: h for path, h in indexed_hashes.items() if path in gone}
+    new_arrivals = present - indexed_hashes.keys()
+    # Hashing reads and hashes each new file's full content -- skip that
+    # work only when nothing was deleted this batch AND the cache holds
+    # nothing from an earlier batch, since neither same-batch nor
+    # cross-window pairing can produce a match without one of those.
+    new_hashes = (
+        _hash_new_arrivals(vault_root, new_arrivals)
+        if old_hashes or not pending_renames.is_empty()
+        else {}
+    )
+    return _BatchClassification(gone, present, old_hashes, new_hashes)
+
+
+def _match_cross_window_arrivals(
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    new_hashes: dict[str, str],
+    paired_new: set[str],
+    pending_renames: PendingRenameCache,
+) -> set[str]:
+    """Runs cross-window matching for this batch's unpaired new-arrival
+    paths against `pending_renames`, per R2's batch-level ambiguity rule
+    (KTD2 step 6): a hash shared by more than one new arrival *in this
+    batch* is skipped entirely, mirroring `_match_unambiguous_pairs`'s
+    two-sided grouping rather than a naive per-path lookup.
+
+    Returns the set of new-arrival paths successfully matched and applied
+    via `_maybe_cross_window_pair`, so the caller can exclude them from
+    its ordinary-upsert fallback.
+    """
+    unpaired_new_hashes = {
+        path: h for path, h in new_hashes.items() if path not in paired_new
+    }
+    hash_counts: dict[str, int] = {}
+    for content_hash in unpaired_new_hashes.values():
+        hash_counts[content_hash] = hash_counts.get(content_hash, 0) + 1
+
+    matched: set[str] = set()
+    for path, content_hash in unpaired_new_hashes.items():
+        if hash_counts[content_hash] != 1:
+            continue
+        if _maybe_cross_window_pair(
+            conn, vault_root, path, content_hash, pending_renames
+        ):
+            matched.add(path)
+    return matched
+
+
 def apply_watch_batch(
-    conn: sqlite3.Connection, vault_root: Path, rel_paths: set[str]
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    rel_paths: set[str],
+    pending_renames: PendingRenameCache,
 ) -> None:
     """Classify one watcher debounce batch's changed paths into confirmed
     renames vs. plain deletes/upserts, and apply the right index action
@@ -305,33 +437,47 @@ def apply_watch_batch(
     only genuinely new, previously-untracked paths qualify as the "new"
     side of a pair.
 
+    A delete and create landing in DIFFERENT batches still pair, as long
+    as they fall within `pending_renames`'s configured window (R1): an
+    unpaired `gone` path's hash is remembered via `pending_renames.add`,
+    and a later batch's unpaired new-arrival paths are checked against it
+    via `_maybe_cross_window_pair` before falling back to an ordinary
+    upsert -- but only when a new-arrival hash is unique within *this*
+    batch too (R2), mirroring `_match_unambiguous_pairs`'s two-sided
+    grouping rather than a naive per-path lookup. A path that reappears
+    in the vault invalidates its own pending entry first (R8), so it can
+    never be used as an unrelated later arrival's match source.
+
     Every per-path/per-pair operation is individually contained (mirrors
     `rebuild_index`'s and `watch_vault`'s log-and-continue pattern), so
     one bad file, and a failed rename link-repointing (R7), never abort
     the rest of the batch.
     """
-    gone = {path for path in rel_paths if not (vault_root / path).exists()}
-    present = rel_paths - gone
+    now = time.monotonic()
+    pending_renames.prune(now)
 
-    # One query covers both lookups this classification needs: `gone`'s
-    # stored hashes (to find deleted notes worth pairing) and which
-    # `present` paths are already indexed (to exclude ordinary content
-    # edits from the "new arrival" candidate set, per R4) -- `gone` and
-    # `present` partition `rel_paths`, so a single IN(...) over the whole
-    # set replaces what would otherwise be two near-identical round-trips.
-    indexed_hashes = _fetch_content_hashes(conn, rel_paths)
-    old_hashes = {path: h for path, h in indexed_hashes.items() if path in gone}
-    new_arrivals = present - indexed_hashes.keys()
-    # Hashing reads and hashes each new file's full content -- skip that
-    # work when nothing was deleted this batch, since `_match_unambiguous_pairs`
-    # can never produce a pair without at least one `old_hashes` entry.
-    new_hashes = _hash_new_arrivals(vault_root, new_arrivals) if old_hashes else {}
+    batch = _classify_batch(conn, vault_root, rel_paths, pending_renames)
 
-    pairs = _match_unambiguous_pairs(old_hashes, new_hashes)
+    pairs = _match_unambiguous_pairs(batch.old_hashes, batch.new_hashes)
     paired_old, paired_new = _apply_pairs(conn, vault_root, pairs)
 
-    for path in gone - paired_old:
+    # Cross-window matching runs against `pending_renames` as it stood
+    # BEFORE this batch's own unpaired `gone` paths are added below --
+    # otherwise a same-batch pair that just failed (both sides still
+    # unpaired) would immediately "cross-window" match against itself
+    # within this same call, re-attempting the identical doomed
+    # `retarget_note_links` call for no benefit. Genuine cross-window
+    # pairing is for a LATER batch observing an EARLIER one's leftover
+    # entry, never this batch's own.
+    cross_window_matched = _match_cross_window_arrivals(
+        conn, vault_root, batch.new_hashes, paired_new, pending_renames
+    )
+
+    for path in batch.gone - paired_old:
+        gone_hash = batch.old_hashes.get(path)
+        if gone_hash is not None:
+            pending_renames.add(path, gone_hash, now)
         _guarded_remove(conn, path)
 
-    for path in present - paired_new:
+    for path in batch.present - paired_new - cross_window_matched:
         _guarded_upsert(conn, vault_root, path)

@@ -64,6 +64,49 @@ def test_watcher_task_indexes_externally_written_file(
         _wait_until(check)
 
 
+def test_watcher_shares_one_pending_rename_cache_through_real_lifespan_wiring(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Integration (R9, found missing in code review): every existing
+    cross-window test calls apply_watch_batch/rebuild_index directly with
+    a manually-shared PendingRenameCache -- none of them prove that
+    lifespan() itself actually constructs and shares ONE instance between
+    the real watch_vault and _run_backstop_rescan tasks. This drives the
+    real app: a note is deleted, then (after the debounce window has
+    elapsed, well within the default 30s pairing window) a differently-
+    named file with identical content appears -- proving the two live
+    background tasks started by lifespan() cooperate through one shared
+    cache, not just that the underlying functions can when handed one
+    directly."""
+    monkeypatch.setenv("WATCHER_DEBOUNCE_MS", "50")
+    with mcp_test_client(vault, monkeypatch) as client:
+        token = issue_test_access_token(client)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        (vault / "linker.md").write_text(
+            "---\ntitle: Linker\n---\nSee [Old](old.md).", encoding="utf-8"
+        )
+        (vault / "old.md").write_text("shared body", encoding="utf-8")
+
+        def indexed(path: str) -> bool:
+            response = client.get("/api/notes", headers=headers)
+            return response.status_code == 200 and any(
+                note["path"] == path for note in response.json()
+            )
+
+        _wait_until(lambda: indexed("linker.md") and indexed("old.md"))
+
+        (vault / "old.md").unlink()
+        _wait_until(lambda: not indexed("old.md"))
+
+        (vault / "new.md").write_text("shared body", encoding="utf-8")
+        _wait_until(lambda: indexed("new.md"))
+
+        response = client.get("/api/notes/linker.md", headers=headers)
+        assert response.status_code == 200
+        assert "[Old](new.md)" in response.json()["content"]
+
+
 def test_watcher_disabled_does_not_index_externally_written_file(
     vault: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

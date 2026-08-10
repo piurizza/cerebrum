@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -41,15 +42,23 @@ def _base_env() -> dict[str, str]:
     # have `backend/.env` populated, this would silently pass without
     # testing the no-secrets path -- there is no `.env` in this repo
     # checkout's `backend/` by default, matching CI).
-    return {"PATH": __import__("os").environ.get("PATH", "")}
+    return {"PATH": os.environ.get("PATH", "")}
 
 
-def test_no_env_vars_set_produces_valid_schema_json() -> None:
-    stdout = _run_script(env=_base_env())
-    schema = json.loads(stdout)
-    assert "openapi" in schema
-    assert "/api/notes" in schema["paths"]
-    assert "/api/graph" in schema["paths"]
+@pytest.fixture(scope="module")
+def base_schema() -> dict:
+    """The `--output`-less, no-secrets-set schema, shared by every test
+    below that just inspects its content -- `_base_env()`'s invocation is
+    identical across those tests, so spawning it once here instead of
+    once per test avoids 2 redundant interpreter-startup-plus-full-app-
+    construction subprocess spawns."""
+    return json.loads(_run_script(env=_base_env()))
+
+
+def test_no_env_vars_set_produces_valid_schema_json(base_schema: dict) -> None:
+    assert "openapi" in base_schema
+    assert "/api/notes" in base_schema["paths"]
+    assert "/api/graph" in base_schema["paths"]
 
 
 def test_real_env_vars_already_set_does_not_raise() -> None:
@@ -68,17 +77,17 @@ def test_output_flag_writes_to_file(tmp_path: Path) -> None:
     assert "openapi" in schema
 
 
-def test_attachment_upload_response_schema_names_path_field() -> None:
-    stdout = _run_script(env=_base_env())
-    schema = json.loads(stdout)
-    upload_response = schema["components"]["schemas"]["AttachmentUploadResponse"]
+def test_attachment_upload_response_schema_names_path_field(
+    base_schema: dict,
+) -> None:
+    upload_response = base_schema["components"]["schemas"]["AttachmentUploadResponse"]
     assert upload_response["properties"]["path"]["type"] == "string"
 
 
-def test_upload_attachments_response_uses_named_schema_not_generic_object() -> None:
-    stdout = _run_script(env=_base_env())
-    schema = json.loads(stdout)
-    responses = schema["paths"]["/api/attachments"]["post"]["responses"]
+def test_upload_attachments_response_uses_named_schema_not_generic_object(
+    base_schema: dict,
+) -> None:
+    responses = base_schema["paths"]["/api/attachments"]["post"]["responses"]
     content = responses["200"]["content"]["application/json"]["schema"]
     assert content["$ref"].endswith("AttachmentUploadResponse")
 

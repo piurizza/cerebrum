@@ -23,14 +23,17 @@ import json
 import os
 
 # Must run before any import that triggers `get_settings()` -- in
-# particular before `from cerebrum.main import create_app` below, since
-# `cerebrum.main` builds a module-level `app = create_app()` at import
-# time (see that module's own comment on why).
+# particular before `from cerebrum.main import app` below, since that
+# import itself builds `cerebrum.main`'s module-level `app = create_app()`
+# (see that module's own comment on why). Importing the already-built
+# `app` here -- rather than calling `create_app()` again -- avoids paying
+# for a second full app (and, when MCP is enabled, a second MCP server)
+# construction on every run of this script.
 os.environ.setdefault("AUTH_JWT_SECRET", "0" * 32)
 os.environ.setdefault("AUTH_SETUP_TOKEN", "1" * 32)
 
 # pylint: disable=wrong-import-position
-from cerebrum.main import create_app  # noqa: E402
+from cerebrum.main import app  # noqa: E402
 
 # pylint: enable=wrong-import-position
 
@@ -44,7 +47,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    app = create_app()
     schema = json.dumps(app.openapi(), indent=2)
 
     if args.output:

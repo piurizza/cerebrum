@@ -4,11 +4,33 @@
 // exports so every existing import site (`from "../types/note"`) needs no
 // changes. Do not hand-edit these shapes; edit the backend model and
 // regenerate instead.
+//
+// The `_Pin*` types below are unused-by-design (never imported) -- they
+// exist only to make `tsc` fail if a maintainer ever points one of these
+// aliases at the wrong schema key. See pinSchema.ts for why.
 import type { components } from "../api/generated/schema";
+import type { EqualKeys, Expect } from "./pinSchema";
 
 export type NoteMeta = components["schemas"]["NoteMeta"];
+export type _PinNoteMeta = Expect<
+  EqualKeys<NoteMeta, "path" | "title" | "tags" | "created" | "updated">
+>;
+
 export type Note = components["schemas"]["Note"];
+export type _PinNote = Expect<
+  EqualKeys<Note, "path" | "title" | "tags" | "created" | "updated" | "content">
+>;
+
 export type GraphNode = components["schemas"]["GraphNode"];
+export type _PinGraphNode = Expect<EqualKeys<GraphNode, "path" | "title" | "exists">>;
+
 export type GraphEdge = components["schemas"]["GraphEdge"];
+export type _PinGraphEdge = Expect<EqualKeys<GraphEdge, "source" | "target">>;
+
 export type GraphResponse = components["schemas"]["GraphResponse"];
+export type _PinGraphResponse = Expect<EqualKeys<GraphResponse, "nodes" | "edges">>;
+
 export type AttachmentUploadResult = components["schemas"]["AttachmentUploadResponse"];
+export type _PinAttachmentUploadResult = Expect<
+  EqualKeys<AttachmentUploadResult, "path">
+>;

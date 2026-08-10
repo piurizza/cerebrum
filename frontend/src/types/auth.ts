@@ -5,10 +5,36 @@
 // changes. Backend schema names differ from these two; alias explicitly.
 // Do not hand-edit these shapes; edit the backend model and regenerate
 // instead.
+//
+// The `_Pin*` types below are unused-by-design (never imported) -- they
+// exist only to make `tsc` fail if a maintainer ever points one of these
+// aliases at the wrong schema key (see pinSchema.ts). This matters most
+// for the deliberately-renamed aliases below (CreateApiTokenResult,
+// CreateInviteResult), where a wrong-but-similarly-named schema key is
+// an easy typo to make.
 import type { components } from "../api/generated/schema";
+import type { EqualKeys, Expect } from "./pinSchema";
 
 export type ApiTokenMeta = components["schemas"]["ApiTokenMeta"];
+export type _PinApiTokenMeta = Expect<
+  EqualKeys<ApiTokenMeta, "id" | "name" | "created_at" | "last_used_at" | "revoked">
+>;
+
 export type CreateApiTokenResult = components["schemas"]["CreateApiTokenResponse"];
+export type _PinCreateApiTokenResult = Expect<
+  EqualKeys<
+    CreateApiTokenResult,
+    "id" | "name" | "created_at" | "last_used_at" | "revoked" | "token"
+  >
+>;
+
 export type AccountSummary = components["schemas"]["AccountSummary"];
+export type _PinAccountSummary = Expect<
+  EqualKeys<AccountSummary, "id" | "username" | "is_admin" | "is_active">
+>;
+
 export type CreateInviteResult = components["schemas"]["CreateInviteResponse"];
+export type _PinCreateInviteResult = Expect<EqualKeys<CreateInviteResult, "token">>;
+
 export type LoginResponse = components["schemas"]["LoginResponse"];
+export type _PinLoginResponse = Expect<EqualKeys<LoginResponse, "access_token">>;

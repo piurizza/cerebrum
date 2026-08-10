@@ -3,8 +3,14 @@ import type {
   ApiTokenMeta,
   CreateApiTokenResult,
   CreateInviteResult,
+  LoginResponse,
 } from "../types/auth";
-import type { GraphResponse, Note, NoteMeta } from "../types/note";
+import type {
+  AttachmentUploadResult,
+  GraphResponse,
+  Note,
+  NoteMeta,
+} from "../types/note";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -191,7 +197,7 @@ async function refreshSession(): Promise<string> {
     if (!response.ok) {
       throw new Error(`POST /auth/refresh failed: ${response.status}`);
     }
-    const data = (await response.json()) as { access_token: string };
+    const data = (await response.json()) as LoginResponse;
     return data.access_token;
   } finally {
     window.clearTimeout(timeout);
@@ -293,8 +299,8 @@ export function searchNotes(query: string): Promise<NoteMeta[]> {
 export function uploadAttachment(
   notePath: string,
   file: File,
-): Promise<{ path: string }> {
-  return request<{ path: string }>(
+): Promise<AttachmentUploadResult> {
+  return request<AttachmentUploadResult>(
     `/attachments?note_path=${encodeURIComponent(notePath)}`,
     {
       method: "POST",
@@ -334,7 +340,7 @@ export async function fetchAttachmentBlobUrl(attachmentPath: string): Promise<st
 // --- Auth ---
 
 export async function login(username: string, password: string): Promise<void> {
-  const data = await request<{ access_token: string }>("/auth/login", {
+  const data = await request<LoginResponse>("/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),

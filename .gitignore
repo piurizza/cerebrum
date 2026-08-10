@@ -17,6 +17,11 @@ node_modules/
 frontend/dist/
 frontend/.env
 
+# Disposable bridge artifact between the backend's OpenAPI schema export
+# and the frontend's type generation (see Makefile's generate-api-types) —
+# regenerated on demand, never a source of truth
+/openapi.json
+
 # Vault data (user notes + derived index) — never commit personal notes
 /vault/*
 !/vault/.gitkeep

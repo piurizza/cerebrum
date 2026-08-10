@@ -95,6 +95,7 @@ def test_watcher_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WATCHER_ENABLED", raising=False)
     monkeypatch.delenv("WATCHER_DEBOUNCE_MS", raising=False)
     monkeypatch.delenv("WATCHER_BACKSTOP_INTERVAL_SECONDS", raising=False)
+    monkeypatch.delenv("WATCHER_RENAME_PAIRING_WINDOW_SECONDS", raising=False)
     _set_valid_auth_env(monkeypatch)
     get_settings.cache_clear()
     try:
@@ -102,6 +103,7 @@ def test_watcher_settings_default(monkeypatch: pytest.MonkeyPatch) -> None:
         assert settings.watcher_enabled is True
         assert settings.watcher_debounce_ms == 400
         assert settings.watcher_backstop_interval_seconds == 300
+        assert settings.watcher_rename_pairing_window_seconds == 30
     finally:
         get_settings.cache_clear()
 
@@ -112,6 +114,7 @@ def test_watcher_settings_read_from_environment(
     monkeypatch.setenv("WATCHER_ENABLED", "false")
     monkeypatch.setenv("WATCHER_DEBOUNCE_MS", "200")
     monkeypatch.setenv("WATCHER_BACKSTOP_INTERVAL_SECONDS", "60")
+    monkeypatch.setenv("WATCHER_RENAME_PAIRING_WINDOW_SECONDS", "10")
     _set_valid_auth_env(monkeypatch)
     get_settings.cache_clear()
     try:
@@ -119,5 +122,6 @@ def test_watcher_settings_read_from_environment(
         assert settings.watcher_enabled is False
         assert settings.watcher_debounce_ms == 200
         assert settings.watcher_backstop_interval_seconds == 60
+        assert settings.watcher_rename_pairing_window_seconds == 10
     finally:
         get_settings.cache_clear()

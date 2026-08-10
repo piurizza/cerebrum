@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     watcher_enabled: bool = True
     watcher_debounce_ms: int = 400
     watcher_backstop_interval_seconds: int = 300
+    watcher_rename_pairing_window_seconds: int = 30
 
     max_attachment_size_bytes: int = 10_000_000
 

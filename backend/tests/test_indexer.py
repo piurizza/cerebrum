@@ -10,6 +10,7 @@ from cerebrum.graph.service import get_backlinks, get_graph
 from cerebrum.index import indexer
 from cerebrum.index.db import list_notes, search_notes
 from cerebrum.index.indexer import (
+    PendingRenameCache,
     apply_watch_batch,
     rebuild_index,
     remove_note,
@@ -642,3 +643,85 @@ def test_hash_new_arrivals_transient_read_failure_does_not_crash_batch(
     # to that fallback rather than being treated as a rename candidate.
     assert flaky_read_attempted
     assert {note.path for note in list_notes(db)} == {"flaky.md", "fine.md"}
+
+
+# --- PendingRenameCache (U2) -----------------------------------------------
+
+
+def test_pending_rename_cache_add_then_pop_returns_path() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+    cache.add("old.md", "hash-a", now=0.0)
+
+    assert cache.pop_unambiguous_match("hash-a") == "old.md"
+
+
+def test_pending_rename_cache_pop_with_no_entries_returns_none() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+
+    assert cache.pop_unambiguous_match("nonexistent") is None
+
+
+def test_pending_rename_cache_pop_leaves_cache_empty_after_match() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+    cache.add("old.md", "hash-a", now=0.0)
+    cache.pop_unambiguous_match("hash-a")
+
+    assert cache.is_empty()
+
+
+def test_pending_rename_cache_ambiguous_hash_returns_none_and_keeps_both() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+    cache.add("a.md", "shared-hash", now=0.0)
+    cache.add("b.md", "shared-hash", now=0.0)
+
+    assert cache.pop_unambiguous_match("shared-hash") is None
+    # Neither entry was consumed -- a later unambiguous state (e.g. one
+    # expires) could still resolve the other.
+    assert not cache.is_empty()
+
+
+def test_pending_rename_cache_prune_drops_expired_entries() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+    cache.add("old.md", "hash-a", now=0.0)
+
+    cache.prune(now=31.0)
+
+    assert cache.pop_unambiguous_match("hash-a") is None
+
+
+def test_pending_rename_cache_prune_keeps_entries_still_within_window() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+    cache.add("old.md", "hash-a", now=0.0)
+
+    cache.prune(now=29.0)
+
+    assert cache.pop_unambiguous_match("hash-a") == "old.md"
+
+
+def test_pending_rename_cache_is_empty_reflects_state_changes() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+    assert cache.is_empty()
+
+    cache.add("old.md", "hash-a", now=0.0)
+    assert not cache.is_empty()
+
+    cache.pop_unambiguous_match("hash-a")
+    assert cache.is_empty()
+
+
+def test_pending_rename_cache_remove_by_path_invalidates_entry() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+    cache.add("old.md", "hash-a", now=0.0)
+
+    cache.remove_by_path("old.md")
+
+    assert cache.pop_unambiguous_match("hash-a") is None
+
+
+def test_pending_rename_cache_remove_by_path_no_entry_is_a_no_op() -> None:
+    cache = PendingRenameCache(window_seconds=30)
+    cache.add("old.md", "hash-a", now=0.0)
+
+    cache.remove_by_path("unrelated.md")
+
+    assert cache.pop_unambiguous_match("hash-a") == "old.md"

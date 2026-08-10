@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from cerebrum.index.db import write_lock
@@ -12,6 +13,65 @@ from cerebrum.notes.parser import parse_note
 from cerebrum.notes.service import iter_note_paths, retarget_note_links
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _PendingDeletion:
+    path: str
+    content_hash: str
+    deleted_at: float
+
+
+class PendingRenameCache:
+    """Remembers recently-deleted note content hashes for a bounded
+    window, so a create arriving in a LATER watcher debounce batch (or
+    observed by the periodic backstop rescan) can still be paired as a
+    rename with a delete from an EARLIER one -- extending the same-batch
+    detection `apply_watch_batch` already does on its own.
+
+    Not thread-safe by design: `apply_watch_batch` and `rebuild_index`
+    are never invoked concurrently with each other or themselves (each
+    runs via a single sequential `asyncio.to_thread` call per caller), so
+    a lock would only add overhead with nothing to protect against.
+    """
+
+    def __init__(self, window_seconds: float) -> None:
+        self._window_seconds = window_seconds
+        self._entries: list[_PendingDeletion] = []
+
+    def add(self, path: str, content_hash: str, now: float) -> None:
+        self._entries.append(_PendingDeletion(path, content_hash, now))
+
+    def prune(self, now: float) -> None:
+        self._entries = [
+            entry
+            for entry in self._entries
+            if now - entry.deleted_at <= self._window_seconds
+        ]
+
+    def pop_unambiguous_match(self, content_hash: str) -> str | None:
+        """Returns and removes the matching pending path, but only if
+        exactly one entry shares `content_hash`. Zero or multiple matches
+        return `None` and leave the cache unchanged -- ambiguous matches
+        are never paired, mirroring `_match_unambiguous_pairs`'s
+        same-batch rule applied across time instead of within one batch.
+        """
+        matches = [
+            entry for entry in self._entries if entry.content_hash == content_hash
+        ]
+        if len(matches) != 1:
+            return None
+        self._entries.remove(matches[0])
+        return matches[0].path
+
+    def remove_by_path(self, path: str) -> None:
+        """Drops any entry for `path`, regardless of hash or age -- used
+        when a path reappears in the vault, so it can never be used as an
+        unrelated later arrival's cross-window match source."""
+        self._entries = [entry for entry in self._entries if entry.path != path]
+
+    def is_empty(self) -> bool:
+        return not self._entries
 
 
 def _hash_content(content: str) -> str:

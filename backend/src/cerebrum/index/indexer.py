@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -31,25 +32,38 @@ class PendingRenameCache:
     rename with a delete from an EARLIER one -- extending the same-batch
     detection `apply_watch_batch` already does on its own.
 
-    Not thread-safe by design: `apply_watch_batch` and `rebuild_index`
-    are never invoked concurrently with each other or themselves (each
-    runs via a single sequential `asyncio.to_thread` call per caller), so
-    a lock would only add overhead with nothing to protect against.
+    Locked, not "not thread-safe by design": `watch_vault` and
+    `_run_backstop_rescan` run as two independent `asyncio.Task`s (see
+    `main.py`'s `lifespan`), each dispatching its own `asyncio.to_thread`
+    call -- meaning `apply_watch_batch` and `rebuild_index` genuinely CAN
+    execute on separate OS threads at the same wall-clock moment; nothing
+    serializes the two tasks against each other. This is the same dual-
+    caller-thread topology `index/db.py`'s `write_lock` already guards
+    the shared `sqlite3.Connection` against (see its module comment) --
+    an initial version of this class wrongly assumed the two callers were
+    mutually exclusive and shipped without a lock; code review caught the
+    race before it reached production. All five methods below acquire
+    `self._lock` for their full body, since `prune`/`pop_unambiguous_match`
+    each do a read-then-mutate sequence on `self._entries` that isn't
+    safe to interleave with a concurrent mutation from the other thread.
     """
 
     def __init__(self, window_seconds: float) -> None:
         self._window_seconds = window_seconds
         self._entries: list[_PendingDeletion] = []
+        self._lock = threading.Lock()
 
     def add(self, path: str, content_hash: str, now: float) -> None:
-        self._entries.append(_PendingDeletion(path, content_hash, now))
+        with self._lock:
+            self._entries.append(_PendingDeletion(path, content_hash, now))
 
     def prune(self, now: float) -> None:
-        self._entries = [
-            entry
-            for entry in self._entries
-            if now - entry.deleted_at <= self._window_seconds
-        ]
+        with self._lock:
+            self._entries = [
+                entry
+                for entry in self._entries
+                if now - entry.deleted_at <= self._window_seconds
+            ]
 
     def pop_unambiguous_match(self, content_hash: str) -> str | None:
         """Returns and removes the matching pending path, but only if
@@ -58,22 +72,25 @@ class PendingRenameCache:
         are never paired, mirroring `_match_unambiguous_pairs`'s
         same-batch rule applied across time instead of within one batch.
         """
-        matches = [
-            entry for entry in self._entries if entry.content_hash == content_hash
-        ]
-        if len(matches) != 1:
-            return None
-        self._entries.remove(matches[0])
-        return matches[0].path
+        with self._lock:
+            matches = [
+                entry for entry in self._entries if entry.content_hash == content_hash
+            ]
+            if len(matches) != 1:
+                return None
+            self._entries.remove(matches[0])
+            return matches[0].path
 
     def remove_by_path(self, path: str) -> None:
         """Drops any entry for `path`, regardless of hash or age -- used
         when a path reappears in the vault, so it can never be used as an
         unrelated later arrival's cross-window match source."""
-        self._entries = [entry for entry in self._entries if entry.path != path]
+        with self._lock:
+            self._entries = [entry for entry in self._entries if entry.path != path]
 
     def is_empty(self) -> bool:
-        return not self._entries
+        with self._lock:
+            return not self._entries
 
 
 def _hash_content(content: str) -> str:
@@ -167,20 +184,28 @@ def rebuild_index(
     runs at FastAPI startup, and users hand-edit vault files outside the
     API, so one bad file must not take down the entire app.
 
-    `pending_renames`, when supplied and non-empty, is consulted for a
-    genuinely new (never-before-indexed) path the same way
-    `apply_watch_batch`'s new-arrival matching does (R9) -- without this,
-    a backstop tick landing between a cross-window rename's delete and
-    create batches would index the new path as an ordinary note first,
-    permanently defeating pairing for that rename (an already-indexed
-    path is never a rename target, R2/R4). Omitted or empty, this
+    `pending_renames`, when supplied, is consulted for a genuinely new
+    (never-before-indexed) path the same way `apply_watch_batch`'s
+    new-arrival matching does (R9) -- without this, a backstop tick
+    landing between a cross-window rename's delete and create batches
+    would index the new path as an ordinary note first, permanently
+    defeating pairing for that rename (an already-indexed path is never
+    a rename target, R2/R4). Before that, it runs the same
+    `_prepare_pending_renames` preamble `apply_watch_batch` does (prune
+    expired entries, invalidate any entry for a path that currently
+    exists, R3/R8) -- found missing in code review; without it, a
+    backstop-only rescan (the exact case R9 exists for) could match an
+    already-expired entry, or let a resurrected path's stale entry
+    hijack an unrelated later arrival's link retargeting. Omitted, this
     behaves exactly as before this plan -- the startup rescan (which
-    runs before any watcher state exists) always calls it this way.
-    An already-indexed, merely-*changed* path never consults the cache
+    runs before any watcher state exists) always calls it this way. An
+    already-indexed, merely-*changed* path never consults the cache
     either way -- only a path with no prior row at all is eligible,
     mirroring R4.
     """
     current_paths = set(iter_note_paths(vault_root))
+    if pending_renames is not None:
+        _prepare_pending_renames(pending_renames, current_paths, time.monotonic())
 
     with write_lock:
         existing_rows = conn.execute("SELECT path, mtime FROM notes").fetchall()
@@ -393,24 +418,45 @@ class _BatchClassification:
     new_hashes: dict[str, str]
 
 
+def _prepare_pending_renames(
+    pending_renames: PendingRenameCache, present_paths: set[str], now: float
+) -> None:
+    """Shared preamble both `apply_watch_batch` and `rebuild_index` must
+    run before consulting `pending_renames` for a match: prune entries
+    older than the configured window (R3), then invalidate any entry for
+    a path that currently exists (R8) -- a path that reappeared in the
+    vault can never remain eligible as an unrelated later arrival's
+    cross-window match source, whether or not its new content happens to
+    match its own old hash.
+
+    Originally only `apply_watch_batch` ran this (via its own `.prune()`
+    call plus `_classify_batch`'s R8 loop); `rebuild_index`'s cache-aware
+    branch consulted the cache without either step, found in code review
+    -- an unpruned entry could match past its window, and an uninvalidated
+    resurrected path's stale entry could hijack an unrelated later
+    arrival's link retargeting.
+    """
+    pending_renames.prune(now)
+    for path in present_paths:
+        pending_renames.remove_by_path(path)
+
+
 def _classify_batch(
     conn: sqlite3.Connection,
     vault_root: Path,
     rel_paths: set[str],
     pending_renames: PendingRenameCache,
+    now: float,
 ) -> _BatchClassification:
-    """Splits `rel_paths` into `gone`/`present`, invalidates any pending
-    cross-window entry for a path that reappeared (R8), and computes the
-    content hashes same-batch and cross-window pairing both need.
+    """Splits `rel_paths` into `gone`/`present`, runs
+    `_prepare_pending_renames` for this batch's `present` set, and
+    computes the content hashes same-batch and cross-window pairing both
+    need.
     """
     gone = {path for path in rel_paths if not (vault_root / path).exists()}
     present = rel_paths - gone
 
-    # R8: a path that reappeared in the vault can never remain eligible
-    # as an unrelated later arrival's cross-window match source, whether
-    # or not its new content happens to match its own old hash.
-    for path in present:
-        pending_renames.remove_by_path(path)
+    _prepare_pending_renames(pending_renames, present, now)
 
     # One query covers both lookups this classification needs: `gone`'s
     # stored hashes (to find deleted notes worth pairing) and which
@@ -505,9 +551,7 @@ def apply_watch_batch(
     the rest of the batch.
     """
     now = time.monotonic()
-    pending_renames.prune(now)
-
-    batch = _classify_batch(conn, vault_root, rel_paths, pending_renames)
+    batch = _classify_batch(conn, vault_root, rel_paths, pending_renames, now)
 
     pairs = _match_unambiguous_pairs(batch.old_hashes, batch.new_hashes)
     paired_old, paired_new = _apply_pairs(conn, vault_root, pairs)

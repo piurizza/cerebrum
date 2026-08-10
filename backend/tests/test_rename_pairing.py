@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -132,6 +133,119 @@ def test_backstop_rescan_pairs_rename_split_across_watcher_and_backstop(
 
     linker = read_note(vault, "linker.md")
     assert "[Old](new.md)" in linker.content
+
+
+def test_backstop_rescan_prunes_expired_entries_before_matching(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Regression (found in code review): rebuild_index's cache-aware
+    branch never called pending_renames.prune() -- only apply_watch_batch
+    did. A backstop-only rescan (the exact case R9 exists for: the watcher
+    has died and only the backstop keeps running) could match an entry
+    well past the configured window. Uses a near-zero window so an
+    apply_watch_batch call is never in the picture to incidentally prune
+    it via the code path that already did."""
+    cache = PendingRenameCache(window_seconds=0.01)
+    write_note(vault, "linker.md", "See [Old](old.md).")
+    (vault / "old.md").write_text("shared body", encoding="utf-8")
+    upsert_note(db, vault, "linker.md")
+    upsert_note(db, vault, "old.md")
+
+    (vault / "old.md").unlink()
+    apply_watch_batch(db, vault, {"old.md"}, cache)
+
+    time.sleep(0.05)  # well past the 0.01s window
+
+    (vault / "new.md").write_text("shared body", encoding="utf-8")
+    # Only rebuild_index observes the new arrival from here on -- no
+    # further apply_watch_batch call to incidentally prune the cache.
+    rebuild_index(db, vault, cache)
+
+    linker = read_note(vault, "linker.md")
+    assert "[Old](old.md)" in linker.content  # not retargeted -- pairing expired
+    # old.md was already removed from the index by the earlier
+    # apply_watch_batch call; only new.md and linker.md remain.
+    assert {note.path for note in list_notes(db)} == {"new.md", "linker.md"}
+
+
+def test_backstop_rescan_reappeared_path_invalidates_pending_entry(
+    vault: Path, db: sqlite3.Connection, pending_renames: PendingRenameCache
+) -> None:
+    """Regression (found in code review): rebuild_index's cache-aware
+    branch never invalidated a reappeared path's stale entry (R8) --
+    only apply_watch_batch's _classify_batch did. If a path is deleted
+    (observed by apply_watch_batch), then reappears with different
+    content observed ONLY by the backstop rescan (watcher dead), its
+    stale pending entry must not survive to hijack an unrelated later
+    arrival's link retargeting."""
+    write_note(vault, "linker.md", "See [Old](old.md).")
+    (vault / "old.md").write_text("shared body", encoding="utf-8")
+    upsert_note(db, vault, "linker.md")
+    upsert_note(db, vault, "old.md")
+
+    (vault / "old.md").unlink()
+    apply_watch_batch(db, vault, {"old.md"}, pending_renames)
+
+    # old.md comes back with DIFFERENT content -- not a rename after all.
+    # Observed only by rebuild_index (the watcher is presumed dead here).
+    (vault / "old.md").write_text("resurrected, different content", encoding="utf-8")
+    rebuild_index(db, vault, pending_renames)
+
+    # A later, unrelated new arrival with the ORIGINAL hash, also only
+    # observed by rebuild_index, must not wrongly pair against the
+    # now-invalid entry.
+    (vault / "unrelated.md").write_text("shared body", encoding="utf-8")
+    rebuild_index(db, vault, pending_renames)
+
+    assert {note.path for note in list_notes(db)} == {
+        "old.md",
+        "unrelated.md",
+        "linker.md",
+    }
+    linker = read_note(vault, "linker.md")
+    assert "[Old](old.md)" in linker.content  # untouched -- old.md is still live
+
+
+def test_pending_rename_cache_survives_concurrent_add_and_pop_from_two_threads() -> (
+    None
+):
+    """Regression (found in code review): PendingRenameCache's docstring
+    originally claimed apply_watch_batch and rebuild_index are "never
+    invoked concurrently with each other" -- false, since watch_vault and
+    _run_backstop_rescan run as two independent asyncio.Tasks, each
+    issuing its own asyncio.to_thread call with no synchronization
+    between them. This drives real concurrent mutation from two OS
+    threads via a threading.Barrier to maximize interleaving and confirms
+    no exception (e.g. ValueError from list.remove() racing a concurrent
+    mutation) escapes, and the cache ends in a consistent state."""
+    cache = PendingRenameCache(window_seconds=30)
+    iterations = 500
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def writer() -> None:
+        barrier.wait()
+        for i in range(iterations):
+            cache.add(f"writer-{i}.md", f"hash-{i}", now=float(i))
+
+    def reader() -> None:
+        barrier.wait()
+        for i in range(iterations):
+            try:
+                cache.prune(now=float(i))
+                cache.pop_unambiguous_match(f"hash-{i}")
+                cache.remove_by_path(f"writer-{i}.md")
+                cache.is_empty()
+            except BaseException as exc:  # noqa: BLE001 -- captured for the assertion
+                errors.append(exc)
+
+    threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
 
 
 def test_apply_watch_batch_pairs_unambiguous_rename(

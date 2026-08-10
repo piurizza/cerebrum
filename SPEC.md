@@ -419,9 +419,13 @@ history.
   in-flight pairing.
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
-- **No generated API types.** Frontend `types/note.ts` is hand-kept in
-  sync with the backend's pydantic models; an OpenAPI-generated client is
-  a reasonable future improvement.
+- **Frontend request/parameter types stay hand-kept for non-JSON
+  contracts.** `frontend/src/types/note.ts` and `types/auth.ts` are
+  generated from the backend's OpenAPI schema (`make generate-api-types`,
+  checked by CI), so response shapes can no longer silently drift. This
+  doesn't cover endpoints whose request body isn't a JSON-typed
+  contract today -- `PUT /notes/{path}`'s raw-markdown body and
+  `POST /attachments`'s raw-bytes body -- those stay untyped by design.
 - **`npm audit` flags a high-severity advisory in `react-router`** (RSC-mode
   CSRF bypass). Not applicable here — this app uses plain client-side
   routing, not React Router's RSC/framework mode. Revisit if that changes.

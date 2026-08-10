@@ -51,6 +51,21 @@ def test_upsert_note_updates_backlinks(vault: Path, db: sqlite3.Connection) -> N
     assert [note.path for note in backlinks] == ["a.md"]
 
 
+def test_upsert_note_raw_content_skips_disk_read(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """upsert_note's optional raw_content param uses the supplied content
+    instead of reading the file -- used by rebuild_index's cache-aware
+    branch to avoid a redundant read+hash for content it already read to
+    check for a cross-window rename match."""
+    write_note(vault, "a.md", "on-disk content")
+
+    upsert_note(db, vault, "a.md", raw_content="See [B](b.md).")
+
+    # The index reflects the SUPPLIED content, not what's on disk.
+    assert [note.path for note in get_backlinks(db, "b.md")] == ["a.md"]
+
+
 def test_remove_note_drops_its_outgoing_links(
     vault: Path, db: sqlite3.Connection
 ) -> None:

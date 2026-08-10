@@ -73,6 +73,40 @@ def test_rebuild_index_empty_pending_renames_short_circuits(
     assert {note.path for note in list_notes(db)} == {"a.md"}
 
 
+def test_rebuild_index_cache_miss_reads_new_file_only_once(
+    vault: Path,
+    db: sqlite3.Connection,
+    pending_renames: PendingRenameCache,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: rebuild_index's cache-aware branch reads a new file
+    once to compute its hash for the match attempt, then reuses that
+    content for the upsert on a miss -- not a second disk read."""
+    (vault / "unrelated.md").write_text("some other content", encoding="utf-8")
+    upsert_note(db, vault, "unrelated.md")
+    (vault / "unrelated.md").unlink()
+    apply_watch_batch(db, vault, {"unrelated.md"}, pending_renames)
+
+    (vault / "new.md").write_text("brand new content", encoding="utf-8")
+
+    real_read_text = Path.read_text
+    read_counts: dict[str, int] = {}
+
+    def counting_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self.name == "new.md":
+            read_counts["new.md"] = read_counts.get("new.md", 0) + 1
+        return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    # pending_renames is non-empty (holds "unrelated.md"'s hash) but
+    # doesn't match "new.md"'s content -- this exercises the miss path.
+    rebuild_index(db, vault, pending_renames)
+
+    assert read_counts["new.md"] == 1
+    assert {note.path for note in list_notes(db)} == {"new.md"}
+
+
 def test_backstop_rescan_pairs_rename_split_across_watcher_and_backstop(
     vault: Path, db: sqlite3.Connection, pending_renames: PendingRenameCache
 ) -> None:

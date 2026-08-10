@@ -5,6 +5,7 @@ import json
 import logging
 import sqlite3
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -90,9 +91,23 @@ def _dedupe_links(links: list[ParsedLink]) -> list[ParsedLink]:
     return deduped
 
 
-def upsert_note(conn: sqlite3.Connection, vault_root: Path, path: str) -> None:
+def upsert_note(
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    path: str,
+    raw_content: str | None = None,
+) -> None:
+    """Reads (or reuses an already-read) `path`, and writes its parsed
+    note/links/FTS rows.
+
+    `raw_content`, when supplied, skips the disk read -- for a caller
+    that already read the file to compute its content hash for rename
+    matching (`rebuild_index`'s cache-aware branch), re-reading here
+    would cost a second file read and SHA-256 hash for no reason.
+    """
     file_path = vault_root / path
-    raw_content = file_path.read_text(encoding="utf-8")
+    if raw_content is None:
+        raw_content = file_path.read_text(encoding="utf-8")
     parsed = parse_note(path, raw_content)
     links = _dedupe_links(parsed.links)
 
@@ -178,23 +193,27 @@ def rebuild_index(
             except Exception:  # noqa: BLE001 -- one bad row must not abort the rescan
                 logger.exception("Failed to remove stale index entry for %s", path)
 
-    consult_cache = pending_renames is not None and not pending_renames.is_empty()
     for path in current_paths:
         try:
             mtime = (vault_root / path).stat().st_mtime
             if existing_mtimes.get(path) == mtime:
                 continue
-            if consult_cache and path not in existing_mtimes:
-                assert (
-                    pending_renames is not None
-                )  # narrows for mypy; see consult_cache
-                content_hash = _hash_content(
-                    (vault_root / path).read_text(encoding="utf-8")
-                )
+            if (
+                pending_renames is not None
+                and not pending_renames.is_empty()
+                and path not in existing_mtimes
+            ):
+                # Read once, reuse for both the match attempt and the
+                # eventual upsert on a miss -- avoids reading and
+                # SHA-256-hashing the same file twice.
+                raw_content = (vault_root / path).read_text(encoding="utf-8")
+                content_hash = _hash_content(raw_content)
                 if _maybe_cross_window_pair(
                     conn, vault_root, path, content_hash, pending_renames
                 ):
                     continue
+                upsert_note(conn, vault_root, path, raw_content)
+                continue
             upsert_note(conn, vault_root, path)
         except Exception:  # noqa: BLE001 -- one bad note must not abort the rescan
             logger.exception("Failed to index note %s; skipping", path)
@@ -277,41 +296,63 @@ def _hash_new_arrivals(vault_root: Path, new_arrivals: set[str]) -> dict[str, st
     return new_hashes
 
 
+def _apply_retarget(
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    old_path: str,
+    new_path: str,
+    *,
+    remove_old: bool,
+) -> bool:
+    """Calls `retarget_note_links(old_path, new_path)` and, on success,
+    indexes `new_path` and every retargeted note as independent,
+    individually-guarded operations (R7); on failure, logs and leaves the
+    caller to fall back to independent delete/create handling.
+
+    `remove_old` controls whether `old_path`'s index row is also removed
+    here: a same-batch pair (`_apply_pairs`) needs it, since `old_path`
+    hasn't been removed yet; a cross-window match
+    (`_maybe_cross_window_pair`) doesn't, since that already happened in
+    the earlier batch that deleted it.
+
+    Returns whether the pair was applied.
+    """
+    try:
+        _, retargeted = retarget_note_links(vault_root, old_path, new_path)
+    except Exception as exc:  # noqa: BLE001 -- pair falls back to independent ops
+        logger.warning(
+            "failed to retarget links for rename %s -> %s; falling back to "
+            "independent delete/create: %s",
+            old_path,
+            new_path,
+            exc,
+        )
+        return False
+
+    if remove_old:
+        _guarded_remove(conn, old_path)
+    _guarded_upsert(conn, vault_root, new_path)
+    for retargeted_path in retargeted:
+        _guarded_upsert(conn, vault_root, retargeted_path)
+    return True
+
+
 def _apply_pairs(
     conn: sqlite3.Connection, vault_root: Path, pairs: list[tuple[str, str]]
 ) -> tuple[set[str], set[str]]:
-    """Applies each confirmed rename pair: repoints links via
-    `retarget_note_links`, then indexes `old_path`, `new_path`, and every
-    retargeted note as independent, individually-guarded operations (R7).
-    A pair whose link-repointing itself fails is logged and left for the
-    caller to fall back to independent delete/create handling.
+    """Applies each confirmed same-batch rename pair via
+    `_apply_retarget` (removing `old_path`'s row, since it hasn't been
+    removed yet).
 
     Returns the `old_path`/`new_path` sets that were actually applied as
-    renames, so the caller can exclude them from that independent
-    handling.
+    renames, so the caller can exclude them from independent handling.
     """
     paired_old: set[str] = set()
     paired_new: set[str] = set()
     for old_path, new_path in pairs:
-        try:
-            _, retargeted = retarget_note_links(vault_root, old_path, new_path)
-        except Exception as exc:  # noqa: BLE001 -- pair falls back to independent ops
-            logger.warning(
-                "failed to retarget links for rename %s -> %s; falling back to "
-                "independent delete/create: %s",
-                old_path,
-                new_path,
-                exc,
-            )
-            continue
-
-        paired_old.add(old_path)
-        paired_new.add(new_path)
-
-        _guarded_remove(conn, old_path)
-        _guarded_upsert(conn, vault_root, new_path)
-        for retargeted_path in retargeted:
-            _guarded_upsert(conn, vault_root, retargeted_path)
+        if _apply_retarget(conn, vault_root, old_path, new_path, remove_old=True):
+            paired_old.add(old_path)
+            paired_new.add(new_path)
 
     return paired_old, paired_new
 
@@ -324,14 +365,13 @@ def _maybe_cross_window_pair(
     pending_renames: PendingRenameCache,
 ) -> bool:
     """Checks `pending_renames` for an unambiguous match on
-    `content_hash`; if found, applies the same rename outcome
-    `_apply_pairs` does for a same-batch pair, minus `remove_note` for
-    the old side (already applied in the batch that deleted it, possibly
-    several batches ago). Shared by both `apply_watch_batch`'s
-    new-arrival matching (U3) and `rebuild_index`'s backstop-rescan path
-    (U4) -- the caller owns any batch-local ambiguity grouping before
-    calling this; the cache's own hash-ambiguity rule (KTD1) always
-    applies regardless.
+    `content_hash`; if found, applies the rename via `_apply_retarget`
+    (without removing the old side -- already applied in the batch that
+    deleted it, possibly several batches ago). Shared by both
+    `apply_watch_batch`'s new-arrival matching (U3) and `rebuild_index`'s
+    backstop-rescan path (U4) -- the caller owns any batch-local
+    ambiguity grouping before calling this; the cache's own
+    hash-ambiguity rule (KTD1) always applies regardless.
 
     Returns whether `new_path` was handled as a cross-window rename. On
     `False` (no match, or the match's `retarget_note_links` call failed),
@@ -342,23 +382,7 @@ def _maybe_cross_window_pair(
     old_path = pending_renames.pop_unambiguous_match(content_hash)
     if old_path is None:
         return False
-
-    try:
-        _, retargeted = retarget_note_links(vault_root, old_path, new_path)
-    except Exception as exc:  # noqa: BLE001 -- falls back to ordinary upsert
-        logger.warning(
-            "failed to retarget links for cross-window rename %s -> %s; "
-            "falling back to ordinary upsert: %s",
-            old_path,
-            new_path,
-            exc,
-        )
-        return False
-
-    _guarded_upsert(conn, vault_root, new_path)
-    for retargeted_path in retargeted:
-        _guarded_upsert(conn, vault_root, retargeted_path)
-    return True
+    return _apply_retarget(conn, vault_root, old_path, new_path, remove_old=False)
 
 
 @dataclass
@@ -429,9 +453,7 @@ def _match_cross_window_arrivals(
     unpaired_new_hashes = {
         path: h for path, h in new_hashes.items() if path not in paired_new
     }
-    hash_counts: dict[str, int] = {}
-    for content_hash in unpaired_new_hashes.values():
-        hash_counts[content_hash] = hash_counts.get(content_hash, 0) + 1
+    hash_counts = Counter(unpaired_new_hashes.values())
 
     matched: set[str] = set()
     for path, content_hash in unpaired_new_hashes.items():

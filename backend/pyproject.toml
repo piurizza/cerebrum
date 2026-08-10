@@ -27,6 +27,7 @@ dev = [
 
 [project.scripts]
 cerebrum = "cerebrum.main:run"
+cerebrum-export-openapi-schema = "cerebrum.scripts.export_openapi_schema:main"
 
 [build-system]
 requires = ["hatchling"]

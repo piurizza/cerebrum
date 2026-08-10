@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from cerebrum.attachments.service import (
     AttachmentTooLargeError,
@@ -16,8 +17,21 @@ from cerebrum.settings import get_settings
 router = APIRouter(prefix="/attachments")
 
 
-@router.post("")
-async def upload_attachment(note_path: str, request: Request) -> dict[str, str]:
+class AttachmentUploadResponse(BaseModel):
+    """A named schema for `upload_attachment`'s response -- previously a
+    bare `dict[str, str]`, which OpenAPI (and therefore the frontend's
+    generated types, see `scripts/export_openapi_schema.py`) can only
+    describe as a generic string-keyed object, not a `{path: string}`
+    shape. Wire format is unchanged; this only gives the existing shape a
+    name."""
+
+    path: str
+
+
+@router.post("", response_model=AttachmentUploadResponse)
+async def upload_attachment(
+    note_path: str, request: Request
+) -> AttachmentUploadResponse:
     """Accept a raw image body (no multipart/`UploadFile`) for an existing
     note and persist it via `attachments/service.py`'s `save_attachment`.
 
@@ -71,7 +85,7 @@ async def upload_attachment(note_path: str, request: Request) -> dict[str, str]:
     except AttachmentTooLargeError as exc:
         raise HTTPException(status_code=413, detail="Attachment too large") from exc
 
-    return {"path": relative_path}
+    return AttachmentUploadResponse(path=relative_path)
 
 
 @router.get("/{path:path}")

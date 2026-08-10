@@ -1,5 +1,7 @@
 # Cerebrum
 
+[![CI](https://github.com/piurizza/cerebrum/actions/workflows/ci.yml/badge.svg)](https://github.com/piurizza/cerebrum/actions/workflows/ci.yml)
+
 A self-hosted second brain: notes are plain `.md` files on disk, cross-referenced
 with standard markdown links, with a visual graph of how they connect.
 
@@ -25,7 +27,7 @@ dependencies, and (in a git repo) installs pre-commit hooks.
     make format       # ruff (backend) + biome (frontend)
     make lint         # ruff + pylint (backend), biome (frontend)
     make type-check   # mypy --strict (backend), tsc (frontend)
-    make test         # pytest (backend), production build (frontend)
+    make test         # pytest (backend), vitest + production build (frontend)
     make check        # lint + type-check + test
 
 ## Run locally (without Docker)

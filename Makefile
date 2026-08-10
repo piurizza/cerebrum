@@ -24,7 +24,7 @@ lint-backend:
 	cd backend && $(UV) run ruff check src tests && $(UV) run pylint src tests
 
 lint-frontend:
-	cd frontend && $(NPM) run lint
+	cd frontend && $(NPM) run check
 
 format: format-backend format-frontend
 

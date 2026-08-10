@@ -23,6 +23,7 @@ os.environ.setdefault("AUTH_SETUP_TOKEN", "y" * 32)
 # pylint: disable=wrong-import-position
 from cerebrum.auth_db import connect as connect_auth_db  # noqa: E402
 from cerebrum.index.db import connect  # noqa: E402
+from cerebrum.index.indexer import PendingRenameCache  # noqa: E402
 from cerebrum.main import create_app  # noqa: E402
 from cerebrum.settings import get_settings  # noqa: E402
 from tests.mcp_test_support import issue_test_access_token  # noqa: E402
@@ -42,6 +43,14 @@ def db(vault: Path) -> Iterator[sqlite3.Connection]:
     conn = connect(vault / ".cerebrum" / "index.sqlite3")
     yield conn
     conn.close()
+
+
+@pytest.fixture
+def pending_renames() -> PendingRenameCache:
+    """A fresh, isolated cross-window rename cache per test -- mirrors
+    the `vault`/`db` fixture pattern rather than a module-level global,
+    so tests never leak pending state into one another."""
+    return PendingRenameCache(window_seconds=30)
 
 
 @pytest.fixture

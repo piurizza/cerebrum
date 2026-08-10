@@ -227,6 +227,7 @@ API calls.
 | `WATCHER_ENABLED` | backend | `true` | watch the vault for out-of-band `.md` changes and keep the index in sync |
 | `WATCHER_DEBOUNCE_MS` | backend | `400` | debounce window for batching filesystem change events |
 | `WATCHER_BACKSTOP_INTERVAL_SECONDS` | backend | `300` | interval for the periodic backstop rescan alongside real-time watching |
+| `WATCHER_RENAME_PAIRING_WINDOW_SECONDS` | backend | `30` | how long a deleted note's content hash is remembered for cross-batch external-rename pairing |
 | `WATCHFILES_FORCE_POLLING` | backend | *(unset)* | force polling instead of native filesystem events; opt in on bind-mount/network filesystems (Docker Desktop on macOS/Windows, NFS) |
 | `MAX_ATTACHMENT_SIZE_BYTES` | backend | `10000000` | max size (bytes) of a single pasted image upload |
 | `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
@@ -391,31 +392,36 @@ history.
       without restarting the server -- a background watcher (`watchfiles`)
       keeps the index in sync in near real-time, backed by a periodic
       backstop rescan. An external rename/move is detected (by
-      content-hash match within one debounce batch) and link-preserving
-      the same way an in-app rename is; see
-      [Known gaps](#10-known-gaps--future-work) for the remaining edges
-      (multi-step renames, attachment folders).
+      content-hash match, whether its delete and create land in the same
+      debounce batch or separate ones within a bounded window) and
+      link-preserving the same way an in-app rename is, including
+      relocating its attachment folder; see
+      [Known gaps](#10-known-gaps--future-work) for the narrower
+      constraints that remain.
 
 ## 10. Known gaps / future work
 
-- **External renames are only link-preserving for a single atomic
-  rename.** A note renamed/moved outside the app in one atomic step
-  (`mv old.md new.md`, an editor's save-as, a sync tool's atomic rename)
-  is now detected by the filesystem watcher via content-hash matching and
-  repointed the same way an in-app rename (`POST /api/notes/{path}/move`)
-  already is. Two edges remain unhandled: a rename whose delete and
-  create land in different watcher debounce windows (e.g. a slower sync
-  tool doing copy-then-delete as two separate operations) is still
-  indexed as a plain delete-then-create, leaving other notes' links to
-  the old path broken; and the renamed note's `.attachments/` folder, if
-  any, is not relocated -- it's left in place at its old name.
+- **External rename detection has a bounded time window and doesn't
+  handle a combined rename+edit.** A note renamed/moved outside the app
+  (`mv old.md new.md`, an editor's save-as, a sync tool's atomic rename
+  or a slower copy-then-delete across two separate filesystem
+  operations) is detected by the filesystem watcher via content-hash
+  matching and repointed the same way an in-app rename
+  (`POST /api/notes/{path}/move`) already is -- including relocating its
+  `.attachments/` folder -- whether the delete and create land in the
+  same debounce batch or separate ones, as long as they're within
+  `WATCHER_RENAME_PAIRING_WINDOW_SECONDS` (default 30s) of each other. A
+  rename split across a longer gap than that falls back to independent
+  delete+create, as does a combined rename+edit (the renamed note's
+  content also changed in the same operation) -- only exact content-hash
+  matches are detected, not fuzzy/similarity matching. The pending-match
+  state is in-memory only; a backend restart mid-window loses any
+  in-flight pairing.
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
 - **No generated API types.** Frontend `types/note.ts` is hand-kept in
   sync with the backend's pydantic models; an OpenAPI-generated client is
   a reasonable future improvement.
-- **No frontend test framework yet** (no Vitest/RTL); `make test-frontend`
-  currently just runs the production build as a compile-correctness check.
 - **`npm audit` flags a high-severity advisory in `react-router`** (RSC-mode
   CSRF bypass). Not applicable here — this app uses plain client-side
   routing, not React Router's RSC/framework mode. Revisit if that changes.

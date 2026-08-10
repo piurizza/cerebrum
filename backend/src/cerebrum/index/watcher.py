@@ -15,7 +15,7 @@ from watchfiles._rust_notify import (  # noqa: PLC2701  # pylint: disable=no-nam
     WatchfilesRustInternalError,
 )
 
-from cerebrum.index.indexer import apply_watch_batch
+from cerebrum.index.indexer import PendingRenameCache, apply_watch_batch
 from cerebrum.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,7 @@ async def watch_vault(
     vault_root: Path,
     settings: Settings,
     stop_event: asyncio.Event,
+    pending_renames: PendingRenameCache | None = None,
 ) -> None:
     """Watch `vault_root` for `.md` changes and keep the index in sync.
 
@@ -51,7 +52,18 @@ async def watch_vault(
     failure) are caught, logged, and cause this coroutine to return
     rather than raise, so a supervising task can treat a finished watcher
     task as "stopped", not "crashed".
+
+    `pending_renames` should be the SAME instance passed to the periodic
+    backstop rescan (see `main.py`'s lifespan) -- sharing it is what lets
+    a rename detected across separate debounce batches also survive a
+    backstop tick landing between them (R9). When not supplied (e.g. a
+    test exercising this function in isolation), a fresh instance is
+    constructed here; nothing outside this call observes the difference.
     """
+    if pending_renames is None:
+        pending_renames = PendingRenameCache(
+            settings.watcher_rename_pairing_window_seconds
+        )
     # `awatch()` always yields absolute paths regardless of the watch root
     # given to it. `vault_root` defaults to a relative path (see
     # Settings.cerebrum_vault_path), and computing a relative path from an
@@ -79,13 +91,16 @@ async def watch_vault(
                 for _, abs_path in changes
             }
             # `apply_watch_batch` (index/indexer.py) classifies the whole
-            # batch at once: a delete+create pair sharing a content hash is
-            # treated as a same-batch rename (repointing other notes'
+            # batch at once: a delete+create pair sharing a content hash --
+            # in this batch, or an earlier one within pending_renames's
+            # window -- is treated as a rename (repointing other notes'
             # links), everything else is applied as independent
             # deletes/upserts. It contains its own per-path/per-pair
             # errors (transient races included), mirroring the containment
             # this loop used to do itself.
-            await asyncio.to_thread(apply_watch_batch, conn, vault_root, rel_paths)
+            await asyncio.to_thread(
+                apply_watch_batch, conn, vault_root, rel_paths, pending_renames
+            )
     except (OSError, WatchfilesRustInternalError) as exc:
         # OSError also covers FileNotFoundError/PermissionError raised by
         # awatch() itself (vault root removed/inaccessible), not just the

@@ -385,6 +385,38 @@ history.
       remain unscheduled -- paste-from-clipboard covers the common
       screenshot-into-a-note case.
 
+### Daily workflow & automation
+
+Sourced from a landscape scan of Obsidian, Notion, Logseq, Roam, and the
+2026 AI-native wave (Tana, Mem, Reflect) against Cerebrum's existing
+feature set and product identity (self-hosted, plain markdown, note-level
+links -- not block-level, not a team database tool). Ordered by fit +
+how consistently each was cited as high-value across that research.
+
+- [ ] one-click "today's note" -- a dedicated entry point that opens (or
+      creates, from a configurable path/naming pattern) the current day's
+      note. Near-universal across every tool researched (Obsidian's
+      Daily Notes core plugin + Calendar, Logseq's and Roam's
+      journal-first workflow, Reflect's daily-notes-plus-backlinks
+      model). Low complexity, fits the existing vault/file model
+      directly -- no schema change.
+- [ ] note templates -- reusable skeletons (frontmatter + body structure)
+      applied when creating a new note, optionally scoped by folder.
+      Obsidian's Templater is consistently the top-cited "must-have"
+      plugin in the research.
+- [ ] a cross-vault task view -- aggregate open markdown checkboxes
+      (`- [ ]`) across every note into one list, mirroring Obsidian's
+      Tasks/Dataview-query pattern. No storage-format change needed --
+      vault content already uses plain markdown checkboxes; this is
+      purely an index + UI addition.
+- [ ] AI-assisted features -- auto-linking, semantic search, or Q&A over
+      the vault. The clearest 2026 industry differentiator (Tana, Mem,
+      Reflect), but a materially bigger strategic bet than the three
+      above: it introduces LLM/API-key integration and a new class of
+      product decisions (which provider, cost model, data sent off-host)
+      that haven't been made yet -- scope this one with its own
+      dedicated planning pass, not folded into a routine feature plan.
+
 ### Reliability
 
 - [x] notes stay valid plain markdown even if the app breaks (by design)

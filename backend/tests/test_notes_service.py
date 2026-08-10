@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import cerebrum.notes.service as notes_service_module
 from cerebrum.attachments.service import attachment_dir_for_note
 from cerebrum.notes.service import (
     InvalidNotePathError,
@@ -402,7 +403,31 @@ def test_retarget_note_links_write_failure_keeps_already_written_linkers(
     assert "[B](target.md)" in read_note(vault, "linker-b.md").content
 
 
-def test_retarget_note_links_leaves_attachment_dir_untouched(vault: Path) -> None:
+def test_retarget_note_links_relocates_attachment_dir_when_stem_unchanged(
+    vault: Path,
+) -> None:
+    write_note(vault, "a.md", "![](a.attachments/abc123.png)")
+    attachment_dir = attachment_dir_for_note(vault, "a.md")
+    attachment_dir.mkdir(parents=True)
+    (attachment_dir / "abc123.png").write_bytes(b"fake-png-bytes")
+
+    (vault / "folder").mkdir()
+    (vault / "a.md").rename(vault / "folder" / "a.md")
+
+    moved, _ = retarget_note_links(vault, "a.md", "folder/a.md")
+
+    old_dir = attachment_dir_for_note(vault, "a.md")
+    new_dir = attachment_dir_for_note(vault, "folder/a.md")
+    assert not old_dir.exists()
+    assert new_dir.is_dir()
+    assert (new_dir / "abc123.png").read_bytes() == b"fake-png-bytes"
+    # Same stem -- no body-reference rewrite needed.
+    assert "![](a.attachments/abc123.png)" in moved.content
+
+
+def test_retarget_note_links_renaming_stem_relocates_dir_and_rewrites_body(
+    vault: Path,
+) -> None:
     write_note(vault, "idea.md", "![](idea.attachments/abc123.png)")
     attachment_dir = attachment_dir_for_note(vault, "idea.md")
     attachment_dir.mkdir(parents=True)
@@ -412,12 +437,78 @@ def test_retarget_note_links_leaves_attachment_dir_untouched(vault: Path) -> Non
 
     moved, _ = retarget_note_links(vault, "idea.md", "better-idea.md")
 
-    # R6: attachment folders/references are explicitly out of scope here
-    # -- unlike move_note, the folder stays put under its old name and
-    # the note's embedded reference is left as-is.
+    old_dir = attachment_dir_for_note(vault, "idea.md")
+    new_dir = attachment_dir_for_note(vault, "better-idea.md")
+    assert not old_dir.exists()
+    assert new_dir.is_dir()
+    assert (new_dir / "abc123.png").read_bytes() == b"fake-png-bytes"
+    assert "better-idea.attachments/abc123.png" in moved.content
+    assert "](idea.attachments/abc123.png)" not in moved.content
+    assert (
+        "better-idea.attachments/abc123.png"
+        in read_note(vault, "better-idea.md").content
+    )
+
+
+def test_retarget_note_links_without_attachment_dir_does_not_raise_or_create_one(
+    vault: Path,
+) -> None:
+    write_note(vault, "old.md", "content")
+    (vault / "old.md").rename(vault / "new.md")
+
+    retarget_note_links(vault, "old.md", "new.md")
+
+    assert not attachment_dir_for_note(vault, "old.md").exists()
+    assert not attachment_dir_for_note(vault, "new.md").exists()
+
+
+def test_retarget_note_links_unrelated_notes_attachment_dir_untouched(
+    vault: Path,
+) -> None:
+    write_note(vault, "other.md", "![](other.attachments/x.png)")
+    other_dir = attachment_dir_for_note(vault, "other.md")
+    other_dir.mkdir(parents=True)
+    (other_dir / "x.png").write_bytes(b"x")
+
+    write_note(vault, "idea.md", "content")
+    (vault / "idea.md").rename(vault / "renamed.md")
+
+    retarget_note_links(vault, "idea.md", "renamed.md")
+
+    assert other_dir.is_dir()
+    assert "![](other.attachments/x.png)" in read_note(vault, "other.md").content
+
+
+def test_retarget_note_links_attachment_move_failure_leaves_refs_pointing_at_old_stem(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: if move_attachment_dir fails, the note's own body must
+    NOT be rewritten to point at the new stem -- the folder never actually
+    moved, so rewriting the reference would point a working embed at a
+    location that doesn't exist. attachment_moved must gate the rewrite
+    separately from had_attachment_dir (which only reflects "was there
+    something to move")."""
+    write_note(vault, "idea.md", "![](idea.attachments/abc123.png)")
+    attachment_dir = attachment_dir_for_note(vault, "idea.md")
+    attachment_dir.mkdir(parents=True)
+    (attachment_dir / "abc123.png").write_bytes(b"fake-png-bytes")
+    (vault / "idea.md").rename(vault / "better-idea.md")
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("simulated attachment-move failure")
+
+    monkeypatch.setattr(notes_service_module, "move_attachment_dir", boom)
+
+    moved, _ = retarget_note_links(vault, "idea.md", "better-idea.md")
+
+    # Link-repointing still completed (no attachment/link coupling)...
+    # ...but the attachment reference was NOT rewritten, since the
+    # folder never actually moved.
+    assert "idea.attachments/abc123.png" in moved.content
+    assert "better-idea.attachments" not in moved.content
+    # The folder itself is still at its old location, untouched.
     assert attachment_dir.is_dir()
     assert (attachment_dir / "abc123.png").read_bytes() == b"fake-png-bytes"
-    assert not attachment_dir_for_note(vault, "better-idea.md").exists()
     assert "![](idea.attachments/abc123.png)" in moved.content
 
 

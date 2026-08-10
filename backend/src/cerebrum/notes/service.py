@@ -330,21 +330,26 @@ def retarget_note_links(
 ) -> tuple[Note, list[str]]:
     """Repoint links for a note that has already been relocated on disk
     from `old_path` to `new_path` (e.g. an external `mv` detected by the
-    filesystem watcher as a same-batch rename), producing the same
-    link-repointing outcome as `move_note`'s post-relocation steps --
-    without performing the physical file move itself.
+    filesystem watcher as a rename), producing the same link-repointing
+    outcome as `move_note`'s post-relocation steps -- without performing
+    the physical file move itself.
 
     Rewrites the note's own outgoing relative links so they still resolve
     to the same absolute targets (they're relative to its own folder,
     which already changed on disk), and repoints every OTHER note's
     links that targeted `old_path` so they resolve to `new_path` instead.
 
-    Deliberately does NOT touch attachment folders or embedded attachment
-    references -- unlike `move_note`, which relocates the file and so
-    also relocates its attachment folder, an external rename that this
-    function reacts to has already left the attachment folder (if any)
-    exactly where it was, and repointing attachment references is out of
-    scope for this plan.
+    Also relocates the note's attachment folder (`<stem>.attachments/`,
+    sibling to the note file), if any, so it travels with the note --
+    mirroring `move_note`'s own attachment handling. If the rename also
+    changed the note's filename stem, any literal
+    `<old-stem>.attachments/` occurrence in the note's own body (e.g. an
+    embedded `![](old-stem.attachments/abc.png)` reference) is rewritten
+    to `<new-stem>.attachments/`. A failure relocating the attachment
+    folder is logged and does not abort link-repointing -- but in that
+    case the body is left referencing the *old* stem, since the folder
+    never actually moved; rewriting the reference to a location nothing
+    was relocated to would break a previously-working embed.
 
     Returns the (possibly rewritten) note now at `new_path`, and the
     vault-relative paths of any OTHER notes whose link text was
@@ -356,12 +361,35 @@ def retarget_note_links(
         if not destination.is_file():
             raise NoteNotFoundError(new_path)
 
+        had_attachment_dir = attachment_dir_for_note(vault_root, old_path).exists()
+        attachment_moved = False
+        if had_attachment_dir:
+            try:
+                move_attachment_dir(vault_root, old_path, new_path)
+                attachment_moved = True
+            except Exception:  # noqa: BLE001 -- link-repointing must still proceed
+                logger.exception(
+                    "Failed to relocate attachment dir for %s -> %s",
+                    old_path,
+                    new_path,
+                )
+
         raw_content = destination.read_text(encoding="utf-8")
         parsed = parse_note(new_path, raw_content)
 
+        changed = False
+        if attachment_moved:
+            rewritten_body = _rebase_attachment_references(
+                parsed.body, old_path, new_path
+            )
+            if rewritten_body != parsed.body:
+                parsed.body = rewritten_body
+                changed = True
         rebased_body = rebase_links(parsed.body, old_path, new_path)
         if rebased_body != parsed.body:
             parsed.body = rebased_body
+            changed = True
+        if changed:
             parsed.updated = datetime.now(UTC)
             raw_content = render_note(parsed)
             destination.write_text(raw_content, encoding="utf-8")

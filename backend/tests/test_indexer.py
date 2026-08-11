@@ -141,6 +141,97 @@ def test_upsert_note_with_no_checkboxes_persists_no_task_rows(
     assert _task_rows(db, "a.md") == []
 
 
+def test_rebuild_index_force_backfills_tasks_after_schema_version_reset(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Regression test: rebuild_index normally skips a note whose mtime
+    hasn't changed since it was last indexed -- correct on an ordinary
+    startup, but wrong the first time a schema change adds a new kind of
+    derived row (the tasks table): a note that was indexed before that
+    change was never upserted under the new schema, so it never got the
+    new rows, and its unchanged mtime would otherwise hide that gap
+    forever. Simulates an upgrade by resetting PRAGMA user_version back
+    to 0 without touching the note file (so its mtime is genuinely
+    unchanged) and clearing its task rows the way an old database would
+    never have had them."""
+    write_note(vault, "a.md", "- [ ] Existing task\n")
+    rebuild_index(db, vault)  # first pass: fresh db, user_version -> 1
+
+    db.execute("PRAGMA user_version = 0")
+    db.execute("DELETE FROM tasks WHERE source_path = 'a.md'")
+    db.commit()
+    assert _task_rows(db, "a.md") == []
+
+    rebuild_index(db, vault)
+
+    assert [row["text"] for row in _task_rows(db, "a.md")] == ["Existing task"]
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_rebuild_index_skips_version_bump_when_backfill_has_a_failure(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A note that fails during the one-shot backfill pass must not be
+    silently orphaned: its mtime never changes again on its own, so if
+    the version were bumped anyway, the ordinary mtime-skip path would
+    never retry it on any later rescan. Leaving the version un-bumped
+    means the next rebuild_index call retries the whole backfill instead
+    of permanently losing that one note's tasks."""
+    write_note(vault, "a.md", "- [ ] Task A\n")
+    write_note(vault, "b.md", "- [ ] Task B\n")
+    rebuild_index(db, vault)  # user_version -> 1, both notes indexed
+
+    db.execute("PRAGMA user_version = 0")
+    db.execute("DELETE FROM tasks")
+    db.commit()
+
+    original_upsert = indexer.upsert_note
+
+    def failing_upsert(conn: sqlite3.Connection, vault_root: Path, path: str) -> None:
+        if path == "b.md":
+            raise RuntimeError("simulated transient failure")
+        original_upsert(conn, vault_root, path)
+
+    monkeypatch.setattr(indexer, "upsert_note", failing_upsert)
+
+    rebuild_index(db, vault)
+
+    # a.md's backfill succeeded; the version was NOT bumped because b.md
+    # failed -- otherwise b.md's tasks would be lost forever.
+    assert [row["text"] for row in _task_rows(db, "a.md")] == ["Task A"]
+    assert _task_rows(db, "b.md") == []
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 0
+
+    monkeypatch.setattr(indexer, "upsert_note", original_upsert)
+    rebuild_index(db, vault)  # retried on the next pass, now succeeds
+
+    assert [row["text"] for row in _task_rows(db, "b.md")] == ["Task B"]
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_rebuild_index_resumes_mtime_skip_after_schema_backfill(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backfill in the test above must be one-time, not perpetual --
+    once user_version is current, an unchanged note's mtime should skip
+    upsert_note again, same as before the tasks feature existed."""
+    write_note(vault, "a.md", "content")
+    rebuild_index(db, vault)  # user_version -> 1
+
+    calls: list[str] = []
+    original_upsert = indexer.upsert_note
+
+    def spy_upsert(conn: sqlite3.Connection, vault_root: Path, path: str) -> None:
+        calls.append(path)
+        original_upsert(conn, vault_root, path)
+
+    monkeypatch.setattr(indexer, "upsert_note", spy_upsert)
+
+    rebuild_index(db, vault)
+
+    assert not calls
+
+
 def test_broken_link_surfaces_as_ghost_node(
     vault: Path, db: sqlite3.Connection
 ) -> None:

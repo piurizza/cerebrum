@@ -14,7 +14,7 @@ from cerebrum.notes.models import ParsedLink, ParsedNote, ParsedTask
 _LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)\s]+)\)")
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
 _TASK_LINE_PATTERN = re.compile(r"^[ \t]*[-*+] \[([ xX])\] (.*)$")
-_FENCE_PATTERN = re.compile(r"^[ \t]*(?:```|~~~)")
+_FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 
 
 class InvalidNoteContentError(Exception):
@@ -76,14 +76,38 @@ def extract_tasks(body: str) -> list[ParsedTask]:
     fence-tracking state, unlike `extract_links`'s single whole-body
     `finditer`: a plain `re.MULTILINE` pattern has no way to know whether
     the current line is inside a fence.
+
+    Tracks the opening fence's character (backtick or tilde) *and* run
+    length, not just whether one is open, mirroring CommonMark's own
+    fence-matching rule (a fence only closes on a marker of the same
+    character with length >= the opener's). A bare on/off toggle, or one
+    that ignores length, gets this wrong two ways: (1) a body that opens
+    with ``` and later contains a literal ~~~ line as content inside that
+    same block (e.g. documenting fence syntax) would close early and then
+    reopen on the real closing ```, wrongly fencing everything after; (2)
+    a longer fence (e.g. ````` `````) nesting a shorter same-character
+    example fence (```` ``` ````) -- precisely the idiom for documenting
+    "how to write a fenced code block" -- would have its inner markers
+    mistaken for the outer close/reopen, inverting which lines are really
+    fenced.
     """
     tasks: list[ParsedTask] = []
-    in_fence = False
+    fence_char: str | None = None
+    fence_length = 0
     for line_number, line in enumerate(body.splitlines(), start=1):
-        if _FENCE_PATTERN.match(line):
-            in_fence = not in_fence
+        fence_match = _FENCE_PATTERN.match(line)
+        if fence_match:
+            marker = fence_match.group(1)
+            char, length = marker[0], len(marker)
+            if fence_char is None:
+                fence_char, fence_length = char, length
+            elif char == fence_char and length >= fence_length:
+                fence_char, fence_length = None, 0
+            # Any other fence-looking line (different character, or the
+            # same character but a shorter run) doesn't close the open
+            # fence -- it's just content, per CommonMark.
             continue
-        if in_fence:
+        if fence_char is not None:
             continue
         match = _TASK_LINE_PATTERN.match(line)
         if match:

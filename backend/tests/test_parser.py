@@ -193,6 +193,37 @@ def test_extract_tasks_excludes_fenced_code_block_with_tildes() -> None:
     assert [t.text for t in tasks] == ["Real task"]
 
 
+def test_extract_tasks_ignores_a_different_fence_style_as_content_not_a_close() -> None:
+    # Regression: a bare on/off toggle would treat ANY fence-looking line
+    # as a close, so a literal ~~~ line inside a ```-fenced block (e.g.
+    # documenting fence syntax) would close early, then the real closing
+    # ``` would reopen -- leaving every line after that wrongly treated
+    # as fenced and silently dropping real tasks.
+    body = "```\n~~~\n```\n- [ ] Real task"
+    tasks = extract_tasks(body)
+    assert [t.text for t in tasks] == ["Real task"]
+
+
+def test_extract_tasks_requires_matching_fence_length_to_close() -> None:
+    # Regression: nesting a shorter same-character example fence inside a
+    # longer outer fence -- the standard idiom for documenting "how to
+    # write a fenced code block" -- must not let the inner markers be
+    # mistaken for the outer fence's close/reopen. Without length
+    # matching, this inverts the result: the documented example task gets
+    # extracted as real, and the genuinely real task after it gets
+    # dropped.
+    body = (
+        "````\n"
+        "```\n"
+        "- [ ] Documented example, not real\n"
+        "```\n"
+        "````\n"
+        "- [ ] Real task after the demo"
+    )
+    tasks = extract_tasks(body)
+    assert [t.text for t in tasks] == ["Real task after the demo"]
+
+
 def test_extract_tasks_computes_line_numbers_across_headings_and_blanks() -> None:
     body = "# Heading\n\n- [ ] First\n\nSome text.\n\n- [ ] Second"
     tasks = extract_tasks(body)

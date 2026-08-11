@@ -9,6 +9,7 @@ import {
 } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import { getDailyNoteDefaultBody, getTodayNotePath } from "../../lib/dailyNote";
+import { findDuplicateTitles } from "../../lib/duplicateTitles";
 import { stripTemplateIdentityFields } from "../../lib/noteContent";
 import { buildNoteTree, splitNotePath } from "../../lib/noteTree";
 import type { TemplateOption } from "../../lib/templates";
@@ -59,18 +60,12 @@ export function NoteBrowser() {
     return () => window.clearTimeout(handle);
   }, [query]);
 
-  // Titles aren't unique -- two notes in different folders can share a
-  // title. Only show the disambiguating path for titles that actually
-  // collide, so the common case (unique titles) stays uncluttered.
-  const duplicateTitles = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const note of notes) {
-      counts.set(note.title, (counts.get(note.title) ?? 0) + 1);
-    }
-    return new Set(
-      [...counts.entries()].filter(([, count]) => count > 1).map(([title]) => title),
-    );
-  }, [notes]);
+  // Only show the disambiguating path for titles that actually collide,
+  // so the common case (unique titles) stays uncluttered.
+  const duplicateTitles = useMemo(
+    () => findDuplicateTitles(notes, (note) => note.title),
+    [notes],
+  );
 
   const allTags = useMemo(() => {
     const tags = new Set<string>();

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { encodeNotePath, errorMessage, getTasks } from "../api/client";
+import { findDuplicateTitles } from "../lib/duplicateTitles";
 import type { TaskItem } from "../types/note";
 
 interface TaskGroup {
@@ -40,19 +41,12 @@ export function TasksPage() {
     return [...byPath.values()];
   }, [tasks]);
 
-  // Titles aren't unique -- two notes in different folders can share a
-  // title. Only show the disambiguating path for titles that actually
-  // collide, so the common case (unique titles) stays uncluttered.
-  // Mirrors NoteBrowser's identical duplicateTitles pattern.
-  const duplicateTitles = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const group of groups) {
-      counts.set(group.title, (counts.get(group.title) ?? 0) + 1);
-    }
-    return new Set(
-      [...counts.entries()].filter(([, count]) => count > 1).map(([title]) => title),
-    );
-  }, [groups]);
+  // Only show the disambiguating path for titles that actually collide,
+  // so the common case (unique titles) stays uncluttered.
+  const duplicateTitles = useMemo(
+    () => findDuplicateTitles(groups, (group) => group.title),
+    [groups],
+  );
 
   return (
     <div className="tasks-page">

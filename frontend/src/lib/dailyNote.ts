@@ -29,8 +29,9 @@ export function getTodayNotePath(date: Date = new Date()): string {
 
 /** Default body for a newly-created daily note: just a date heading, not
  * an empty file. This is a fixed, single-purpose default for this one
- * feature -- not a reusable template mechanism (see the separate,
- * deferred "note templates" roadmap item). */
+ * feature -- not the general template mechanism (`lib/templates.ts`),
+ * which daily notes deliberately don't go through (see that plan's
+ * Scope Boundaries). */
 export function getDailyNoteDefaultBody(date: Date = new Date()): string {
   return `# ${headingFormatter.format(date)}\n\n`;
 }

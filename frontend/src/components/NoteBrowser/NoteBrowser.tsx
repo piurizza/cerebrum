@@ -26,8 +26,13 @@ export function NoteBrowser() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [todayError, setTodayError] = useState<string | null>(null);
   const [isOpeningToday, setIsOpeningToday] = useState(false);
-  const [pendingCreatePath, setPendingCreatePath] = useState<string | null>(null);
-  const [templateOptions, setTemplateOptions] = useState<TemplateOption[]>([]);
+  // One atom, not two: `path` and `options` are only ever set or cleared
+  // together (there is no state where one is stale while the other is
+  // current), so splitting them invites drift.
+  const [pendingCreate, setPendingCreate] = useState<{
+    path: string;
+    options: TemplateOption[];
+  } | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
@@ -103,6 +108,10 @@ export function NoteBrowser() {
     return notes.some((note) => note.path === path);
   }
 
+  function noteExistsErrorText(path: string): string {
+    return `A note already exists at "${path}".`;
+  }
+
   // If no template is relevant to this folder (R3's skip rule), this is
   // byte-for-byte the pre-templates create flow -- R4's backward-compat
   // floor. Otherwise, hand off to TemplatePickerModal via
@@ -113,13 +122,12 @@ export function NoteBrowser() {
     const options = listTemplateOptions(notes, splitNotePath(path).folder);
     if (hasRelevantTemplate(options)) {
       setIsPickerOpen(false);
-      setTemplateOptions(options);
-      setPendingCreatePath(path);
+      setPendingCreate({ path, options });
       return;
     }
 
     if (noteExistsAt(path)) {
-      setCreateError(`A note already exists at "${path}".`);
+      setCreateError(noteExistsErrorText(path));
       return;
     }
 
@@ -138,17 +146,17 @@ export function NoteBrowser() {
   // `templatePath === null` means "Blank note" -- identical to
   // handleCreate's blank path above. Re-checks noteExistsAt against the
   // pending path here too, since a template selection must not bypass
-  // that guard. On error the modal stays open (pendingCreatePath/
-  // templateOptions untouched) so the user can retry or pick a different
-  // template -- errors surface via TemplatePickerModal's own `error`
-  // prop, never NoteBrowser's top-level `createError` (which would
-  // replace the whole sidebar via the early `return` above).
+  // that guard. On error the modal stays open (pendingCreate untouched)
+  // so the user can retry or pick a different template -- errors
+  // surface via TemplatePickerModal's own `error` prop, never
+  // NoteBrowser's top-level `createError` (which would replace the
+  // whole sidebar via the early `return` above).
   async function handleTemplateConfirm(templatePath: string | null) {
-    if (!pendingCreatePath) return;
-    const path = pendingCreatePath;
+    if (!pendingCreate) return;
+    const { path } = pendingCreate;
 
     if (noteExistsAt(path)) {
-      setTemplateError(`A note already exists at "${path}".`);
+      setTemplateError(noteExistsErrorText(path));
       return;
     }
 
@@ -160,8 +168,7 @@ export function NoteBrowser() {
         : "";
       await putNote(path, content);
       await refreshNotes();
-      setPendingCreatePath(null);
-      setTemplateOptions([]);
+      setPendingCreate(null);
       navigate(`/notes/${encodeNotePath(path)}`);
     } catch (err) {
       setTemplateError(errorMessage(err));
@@ -171,8 +178,7 @@ export function NoteBrowser() {
   }
 
   function handleTemplateCancel() {
-    setPendingCreatePath(null);
-    setTemplateOptions([]);
+    setPendingCreate(null);
     setTemplateError(null);
   }
 
@@ -254,10 +260,10 @@ export function NoteBrowser() {
           onCancel={() => setIsPickerOpen(false)}
         />
       )}
-      {pendingCreatePath && (
+      {pendingCreate && (
         <TemplatePickerModal
           title="Choose a template"
-          options={templateOptions}
+          options={pendingCreate.options}
           pending={isCreatingNote}
           error={templateError}
           onConfirm={handleTemplateConfirm}

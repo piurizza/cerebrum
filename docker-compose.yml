@@ -38,6 +38,7 @@ services:
       # frontend`, not just an env edit.
       args:
         VITE_DAILY_NOTE_FOLDER: ${VITE_DAILY_NOTE_FOLDER:-daily}
+        VITE_TEMPLATES_FOLDER: ${VITE_TEMPLATES_FOLDER:-templates}
     restart: unless-stopped
     ports:
       - "${CEREBRUM_PORT:-8080}:80"

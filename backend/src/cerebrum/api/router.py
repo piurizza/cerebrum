@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from cerebrum.api import admin, attachments, graph, notes, search, tokens
+from cerebrum.api import admin, attachments, graph, notes, search, tasks, tokens
 from cerebrum.api.deps import get_current_identity
 
 # `dependencies=[Depends(get_current_identity)]` makes every route included
@@ -34,3 +34,7 @@ api_router.include_router(admin.router)
 # there's no route-ordering hazard here either -- inclusion order doesn't
 # matter, same as tokens.router/admin.router above.
 api_router.include_router(attachments.router)
+# `/tasks` shares no path prefix with any router above (`/search`,
+# `/notes`, `/graph`, `/tokens`, `/admin`, `/attachments`), so -- like
+# tokens.router/admin.router -- inclusion order doesn't matter here.
+api_router.include_router(tasks.router)

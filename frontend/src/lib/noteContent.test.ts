@@ -6,6 +6,7 @@ import {
   resolveAttachmentTarget,
   resolveLinkTarget,
   stripFrontmatter,
+  stripTemplateIdentityFields,
 } from "./noteContent";
 
 describe("resolveLinkTarget", () => {
@@ -70,6 +71,49 @@ describe("stripFrontmatter", () => {
   it("leaves content unchanged when no frontmatter block is present", () => {
     const raw = "# Body\n\nContent here.";
     expect(stripFrontmatter(raw)).toBe(raw);
+  });
+});
+
+describe("stripTemplateIdentityFields", () => {
+  it("removes title and created lines, preserving other frontmatter and the body", () => {
+    const raw =
+      "---\ntitle: Meeting\ntags: [work]\ncreated: '2026-01-01T00:00:00+00:00'\n---\n# Agenda\n\nItems.";
+    expect(stripTemplateIdentityFields(raw)).toBe(
+      "---\ntags: [work]\n---\n# Agenda\n\nItems.",
+    );
+  });
+
+  it("returns content unchanged when frontmatter has no title/created keys", () => {
+    const raw = "---\ntags: [work]\n---\n# Agenda\n\nItems.";
+    expect(stripTemplateIdentityFields(raw)).toBe(raw);
+  });
+
+  it("returns content unchanged when there is no frontmatter block", () => {
+    const raw = "# Agenda\n\nItems.";
+    expect(stripTemplateIdentityFields(raw)).toBe(raw);
+  });
+
+  it("leaves an empty-but-valid frontmatter block when title/created were the only keys", () => {
+    const raw = "---\ntitle: Meeting\ncreated: '2026-01-01T00:00:00+00:00'\n---\nBody.";
+    expect(stripTemplateIdentityFields(raw)).toBe("---\n---\nBody.");
+  });
+
+  it("strips a single-line quoted value normally", () => {
+    const raw = "---\ntitle: 'Meeting'\ntags: [work]\n---\nBody.";
+    expect(stripTemplateIdentityFields(raw)).toBe("---\ntags: [work]\n---\nBody.");
+  });
+
+  it("leaves a multi-line title untouched instead of corrupting the frontmatter that follows it", () => {
+    // This is PyYAML's actual default rendering for a string containing an
+    // embedded newline (verified against the real backend renderer):
+    // `yaml.dump({"title": "Line one\nLine two"})` produces exactly this
+    // three-physical-line single-quoted scalar. A naive line-level strip
+    // would delete only the first line, leaving " Line two'" and the blank
+    // line orphaned right before `tags:` -- which a real YAML parser
+    // silently folds into the unrelated `tags` list (verified against the
+    // real backend parser). Leaving it untouched is the safe fallback.
+    const raw = "---\ntitle: 'Line one\n\n  Line two'\ntags:\n- work\n---\nBody.";
+    expect(stripTemplateIdentityFields(raw)).toBe(raw);
   });
 });
 

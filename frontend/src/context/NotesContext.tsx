@@ -19,7 +19,12 @@ interface NotesContextValue {
    * fetch settles can't distinguish "no notes yet" from "notes not
    * loaded yet", and would misclassify an existing note as absent. */
   loading: boolean;
-  refreshNotes: () => void;
+  /** Returns the underlying fetch's promise so a caller that needs
+   * `notes` to be genuinely current before proceeding -- e.g. the
+   * "Today" button re-checking whether its own just-created note exists
+   * -- can `await` it. Callers that don't care (the existing
+   * fire-and-forget call sites) can still call it without awaiting. */
+  refreshNotes: () => Promise<void>;
 }
 
 const NotesContext = createContext<NotesContextValue | null>(null);
@@ -29,14 +34,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshNotes = useCallback(() => {
-    listNotes()
-      .then((result) => {
-        setNotes(result);
-        setError(null);
-      })
-      .catch((err: unknown) => setError(errorMessage(err)))
-      .finally(() => setLoading(false));
+  const refreshNotes = useCallback(async () => {
+    try {
+      const result = await listNotes();
+      setNotes(result);
+      setError(null);
+    } catch (err: unknown) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

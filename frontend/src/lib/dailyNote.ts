@@ -6,10 +6,16 @@ const headingFormatter = new Intl.DateTimeFormat(undefined, {
  * time via `VITE_DAILY_NOTE_FOLDER` (same `import.meta.env.VITE_*`
  * pattern as `api/client.ts`'s `VITE_API_BASE_URL`). `||`, not `??`: an
  * explicitly-empty env value (a plausible `.env` typo) must also fall
- * back to the default, not produce a leading-slash path. */
+ * back to the default, not produce a leading-slash path. Strips *both*
+ * leading and trailing slashes, not just trailing: a leading slash (e.g.
+ * `VITE_DAILY_NOTE_FOLDER=/journal`) would otherwise make the computed
+ * path absolute, which the backend's vault-root path join drops the
+ * vault prefix for entirely -- permanently breaking the button until
+ * the env var is fixed and the frontend rebuilt. */
 function dailyNoteFolder(): string {
   const folder = import.meta.env.VITE_DAILY_NOTE_FOLDER?.trim() || "daily";
-  return folder.endsWith("/") ? folder.slice(0, -1) : folder;
+  const trimmed = folder.replace(/^\/+|\/+$/g, "");
+  return trimmed || "daily";
 }
 
 /** Today's daily-note path, e.g. "daily/2026-08-11.md" -- computed from

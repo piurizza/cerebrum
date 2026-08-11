@@ -113,7 +113,12 @@ export function NoteBrowser() {
   // navigate straight to it and never call putNote, so existing content
   // is never touched (R1's "never overwrite" requirement).
   async function handleToday() {
-    const path = getTodayNotePath();
+    // A single shared `now` for both calls below -- computing the path
+    // and the heading from two independent `new Date()` calls could let
+    // a local-midnight rollover between them produce a path and heading
+    // for different days.
+    const now = new Date();
+    const path = getTodayNotePath(now);
 
     if (noteExistsAt(path)) {
       navigate(`/notes/${encodeNotePath(path)}`);
@@ -123,11 +128,14 @@ export function NoteBrowser() {
     setTodayError(null);
     setIsOpeningToday(true);
     try {
-      await putNote(path, getDailyNoteDefaultBody());
-      // Not optional: without this, the in-memory `notes` list never
-      // learns the new note exists, so a second "Today" click later in
-      // the same session would re-run this branch and overwrite it.
-      refreshNotes();
+      await putNote(path, getDailyNoteDefaultBody(now));
+      // Awaited, not fire-and-forget: the button re-enables in `finally`
+      // below right after this resolves, and the sidebar never unmounts
+      // on navigate (it's outside <Routes>) -- without awaiting, a
+      // re-click landing in the gap between "button re-enabled" and
+      // "notes list actually reflects the new note" would re-run this
+      // branch and overwrite whatever the user just started typing.
+      await refreshNotes();
       navigate(`/notes/${encodeNotePath(path)}`);
     } catch (err) {
       setTodayError(errorMessage(err));

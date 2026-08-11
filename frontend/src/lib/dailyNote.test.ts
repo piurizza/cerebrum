@@ -34,6 +34,14 @@ describe("getTodayNotePath", () => {
     expect(getTodayNotePath(new Date(2026, 7, 11))).toBe("journal/2026-08-11.md");
   });
 
+  it("trims a leading slash too, not just a trailing one", () => {
+    // Regression guard: a leading slash alone (e.g. VITE_DAILY_NOTE_FOLDER=
+    // "/journal") used to survive untrimmed, producing an absolute-looking
+    // path the backend's vault-root join would reject outright.
+    vi.stubEnv("VITE_DAILY_NOTE_FOLDER", "/journal/");
+    expect(getTodayNotePath(new Date(2026, 7, 11))).toBe("journal/2026-08-11.md");
+  });
+
   it("computes the local calendar date, not the UTC one, at a local/UTC day boundary", () => {
     // KTD2 regression guard: pinning TZ is load-bearing, not optional --
     // CI runs ubuntu-latest with no TZ set, which defaults to UTC, where

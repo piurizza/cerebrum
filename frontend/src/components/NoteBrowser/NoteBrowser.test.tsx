@@ -41,7 +41,7 @@ const mockUseNotes =
       notes: NoteMeta[];
       error: string | null;
       loading: boolean;
-      refreshNotes: () => void;
+      refreshNotes: () => Promise<void>;
     }
   >();
 vi.mock("../../context/NotesContext", () => ({
@@ -50,7 +50,7 @@ vi.mock("../../context/NotesContext", () => ({
 
 import { NoteBrowser } from "./NoteBrowser";
 
-const refreshNotes = vi.fn();
+const refreshNotes = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 function setNotesState(notes: NoteMeta[], overrides: { loading?: boolean } = {}) {
   mockUseNotes.mockReturnValue({
@@ -75,7 +75,10 @@ describe("NoteBrowser Today button", () => {
   beforeEach(() => {
     mockNavigate.mockReset();
     mockPutNote.mockReset();
-    refreshNotes.mockReset();
+    // mockClear, not mockReset: keeps the module-scope
+    // .mockResolvedValue(undefined) in place across tests, only
+    // clearing call history.
+    refreshNotes.mockClear();
   });
 
   it("creates today's note and navigates when it does not exist yet", async () => {
@@ -148,5 +151,10 @@ describe("NoteBrowser Today button", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("network error");
     expect(mockNavigate).not.toHaveBeenCalled();
+    // Proves the `finally` block's isOpeningToday reset actually runs on
+    // the error path too, not just on success -- otherwise the button
+    // would stay disabled forever after any failure, with no way to
+    // retry.
+    expect(screen.getByRole("button", { name: "Today" })).toBeEnabled();
   });
 });

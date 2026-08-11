@@ -6,6 +6,7 @@ import {
   resolveAttachmentTarget,
   resolveLinkTarget,
   stripFrontmatter,
+  stripTemplateIdentityFields,
 } from "./noteContent";
 
 describe("resolveLinkTarget", () => {
@@ -70,6 +71,31 @@ describe("stripFrontmatter", () => {
   it("leaves content unchanged when no frontmatter block is present", () => {
     const raw = "# Body\n\nContent here.";
     expect(stripFrontmatter(raw)).toBe(raw);
+  });
+});
+
+describe("stripTemplateIdentityFields", () => {
+  it("removes title and created lines, preserving other frontmatter and the body", () => {
+    const raw =
+      "---\ntitle: Meeting\ntags: [work]\ncreated: '2026-01-01T00:00:00+00:00'\n---\n# Agenda\n\nItems.";
+    expect(stripTemplateIdentityFields(raw)).toBe(
+      "---\ntags: [work]\n---\n# Agenda\n\nItems.",
+    );
+  });
+
+  it("returns content unchanged when frontmatter has no title/created keys", () => {
+    const raw = "---\ntags: [work]\n---\n# Agenda\n\nItems.";
+    expect(stripTemplateIdentityFields(raw)).toBe(raw);
+  });
+
+  it("returns content unchanged when there is no frontmatter block", () => {
+    const raw = "# Agenda\n\nItems.";
+    expect(stripTemplateIdentityFields(raw)).toBe(raw);
+  });
+
+  it("leaves an empty-but-valid frontmatter block when title/created were the only keys", () => {
+    const raw = "---\ntitle: Meeting\ncreated: '2026-01-01T00:00:00+00:00'\n---\nBody.";
+    expect(stripTemplateIdentityFields(raw)).toBe("---\n---\nBody.");
   });
 });
 

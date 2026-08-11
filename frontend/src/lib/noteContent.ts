@@ -72,6 +72,30 @@ export function stripFrontmatter(rawContent: string): string {
   return rawContent.replace(FRONTMATTER_PATTERN, "");
 }
 
+const IDENTITY_FIELD_LINE = /^(title|created):.*\r?\n?/gm;
+
+/** Remove the `title` and `created` frontmatter keys from a note's raw
+ * content, leaving everything else (body, other frontmatter such as
+ * `tags`) unchanged. Used when applying a note template: the backend's
+ * `write_note` only stamps a fresh `created` when the field is absent,
+ * and `render_note` always emits an explicit `title`/`created` once
+ * either has been set once -- which every template will have, since
+ * templates are authored the same way as any note. Without this
+ * stripping, a note created from a template would silently inherit the
+ * *template's* creation date and literal title instead of getting its
+ * own. Both keys are always flat, top-level scalars in this codebase's
+ * frontmatter (never nested), so a line-level removal within the
+ * frontmatter block is sufficient -- no YAML parser needed. */
+export function stripTemplateIdentityFields(rawContent: string): string {
+  const match = rawContent.match(FRONTMATTER_PATTERN);
+  if (!match) return rawContent;
+
+  const frontmatter = match[0];
+  const body = rawContent.slice(frontmatter.length);
+  const strippedFrontmatter = frontmatter.replace(IDENTITY_FIELD_LINE, "");
+  return strippedFrontmatter + body;
+}
+
 /**
  * Compute the relative link text to write in `sourcePath` so it resolves
  * to `targetPath` under the link-resolution rule (relative to the linking

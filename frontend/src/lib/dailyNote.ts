@@ -1,21 +1,17 @@
+import { normalizeFolderEnvVar } from "./envFolder";
+
 const headingFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "full",
 });
 
 /** The vault-relative folder daily notes live in, configurable at build
  * time via `VITE_DAILY_NOTE_FOLDER` (same `import.meta.env.VITE_*`
- * pattern as `api/client.ts`'s `VITE_API_BASE_URL`). `||`, not `??`: an
- * explicitly-empty env value (a plausible `.env` typo) must also fall
- * back to the default, not produce a leading-slash path. Strips *both*
- * leading and trailing slashes, not just trailing: a leading slash (e.g.
- * `VITE_DAILY_NOTE_FOLDER=/journal`) would otherwise make the computed
- * path absolute, which the backend's vault-root path join drops the
- * vault prefix for entirely -- permanently breaking the button until
- * the env var is fixed and the frontend rebuilt. */
+ * pattern as `api/client.ts`'s `VITE_API_BASE_URL`). Normalization
+ * (fallback + slash-trim) is shared with `templates.ts`'s
+ * `VITE_TEMPLATES_FOLDER` via `normalizeFolderEnvVar` -- see that
+ * function's doc comment for why the trim matters. */
 function dailyNoteFolder(): string {
-  const folder = import.meta.env.VITE_DAILY_NOTE_FOLDER?.trim() || "daily";
-  const trimmed = folder.replace(/^\/+|\/+$/g, "");
-  return trimmed || "daily";
+  return normalizeFolderEnvVar(import.meta.env.VITE_DAILY_NOTE_FOLDER, "daily");
 }
 
 /** Today's daily-note path, e.g. "daily/2026-08-11.md" -- computed from

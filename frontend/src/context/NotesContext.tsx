@@ -12,6 +12,13 @@ import type { NoteMeta } from "../types/note";
 interface NotesContextValue {
   notes: NoteMeta[];
   error: string | null;
+  /** True until the initial `listNotes()` fetch settles (success or
+   * failure). Consumers that decide "does this note already exist?"
+   * from `notes` -- like the sidebar's "Today" button -- must gate on
+   * this: `notes` starts as `[]`, so a decision made before the first
+   * fetch settles can't distinguish "no notes yet" from "notes not
+   * loaded yet", and would misclassify an existing note as absent. */
+  loading: boolean;
   refreshNotes: () => void;
 }
 
@@ -20,6 +27,7 @@ const NotesContext = createContext<NotesContextValue | null>(null);
 export function NotesProvider({ children }: { children: ReactNode }) {
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const refreshNotes = useCallback(() => {
     listNotes()
@@ -27,7 +35,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setNotes(result);
         setError(null);
       })
-      .catch((err: unknown) => setError(errorMessage(err)));
+      .catch((err: unknown) => setError(errorMessage(err)))
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -35,7 +44,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [refreshNotes]);
 
   return (
-    <NotesContext.Provider value={{ notes, error, refreshNotes }}>
+    <NotesContext.Provider value={{ notes, error, loading, refreshNotes }}>
       {children}
     </NotesContext.Provider>
   );

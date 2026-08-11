@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { encodeNotePath, errorMessage, putNote, searchNotes } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
+import { getDailyNoteDefaultBody, getTodayNotePath } from "../../lib/dailyNote";
 import { buildNoteTree } from "../../lib/noteTree";
 import type { NoteMeta } from "../../types/note";
 import { FolderPickerModal } from "../FolderPicker/FolderPickerModal";
@@ -10,9 +11,11 @@ import { NoteTreeList } from "./NoteTreeList";
 const SEARCH_DEBOUNCE_MS = 250;
 
 export function NoteBrowser() {
-  const { notes, error, refreshNotes } = useNotes();
+  const { notes, error, loading, refreshNotes } = useNotes();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [todayError, setTodayError] = useState<string | null>(null);
+  const [isOpeningToday, setIsOpeningToday] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<NoteMeta[] | null>(null);
@@ -82,10 +85,14 @@ export function NoteBrowser() {
     });
   }
 
+  function noteExistsAt(path: string): boolean {
+    return notes.some((note) => note.path === path);
+  }
+
   async function handleCreate(path: string) {
     setCreateError(null);
 
-    if (notes.some((note) => note.path === path)) {
+    if (noteExistsAt(path)) {
       setCreateError(`A note already exists at "${path}".`);
       return;
     }
@@ -102,6 +109,41 @@ export function NoteBrowser() {
     navigate(`/notes/${encodeNotePath(path)}`);
   }
 
+  // Unlike handleCreate, an existing path is success here, not an error:
+  // navigate straight to it and never call putNote, so existing content
+  // is never touched (R1's "never overwrite" requirement).
+  async function handleToday() {
+    // A single shared `now` for both calls below -- computing the path
+    // and the heading from two independent `new Date()` calls could let
+    // a local-midnight rollover between them produce a path and heading
+    // for different days.
+    const now = new Date();
+    const path = getTodayNotePath(now);
+
+    if (noteExistsAt(path)) {
+      navigate(`/notes/${encodeNotePath(path)}`);
+      return;
+    }
+
+    setTodayError(null);
+    setIsOpeningToday(true);
+    try {
+      await putNote(path, getDailyNoteDefaultBody(now));
+      // Awaited, not fire-and-forget: the button re-enables in `finally`
+      // below right after this resolves, and the sidebar never unmounts
+      // on navigate (it's outside <Routes>) -- without awaiting, a
+      // re-click landing in the gap between "button re-enabled" and
+      // "notes list actually reflects the new note" would re-run this
+      // branch and overwrite whatever the user just started typing.
+      await refreshNotes();
+      navigate(`/notes/${encodeNotePath(path)}`);
+    } catch (err) {
+      setTodayError(errorMessage(err));
+    } finally {
+      setIsOpeningToday(false);
+    }
+  }
+
   if (error) {
     return (
       <p className="error-text" role="alert">
@@ -112,6 +154,19 @@ export function NoteBrowser() {
 
   return (
     <nav aria-label="Notes" className="note-browser">
+      <button
+        type="button"
+        className="btn btn-block"
+        onClick={handleToday}
+        disabled={loading || isOpeningToday}
+      >
+        Today
+      </button>
+      {todayError && (
+        <p className="error-text" role="alert">
+          {todayError}
+        </p>
+      )}
       <button
         type="button"
         className="btn btn-block"

@@ -154,6 +154,7 @@ def upsert_note(
 
         conn.execute("DELETE FROM links WHERE source_path = ?", (path,))
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
+        conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
         conn.executemany(
             "INSERT INTO links (source_path, target_path, link_text) VALUES (?, ?, ?)",
             [(path, link.target_path, link.link_text) for link in links],
@@ -162,6 +163,10 @@ def upsert_note(
             "INSERT INTO notes_fts (path, title, body) VALUES (?, ?, ?)",
             (path, parsed.title, parsed.body),
         )
+        conn.executemany(
+            "INSERT INTO tasks (source_path, line, checked, text) VALUES (?, ?, ?, ?)",
+            [(path, task.line, task.checked, task.text) for task in parsed.tasks],
+        )
 
 
 def remove_note(conn: sqlite3.Connection, path: str) -> None:
@@ -169,6 +174,7 @@ def remove_note(conn: sqlite3.Connection, path: str) -> None:
         conn.execute("DELETE FROM notes WHERE path = ?", (path,))
         conn.execute("DELETE FROM links WHERE source_path = ?", (path,))
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
+        conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
 
 
 def rebuild_index(

@@ -80,6 +80,67 @@ def test_remove_note_drops_its_outgoing_links(
     assert {note.path for note in list_notes(db)} == {"b.md"}
 
 
+def _task_rows(db: sqlite3.Connection, path: str) -> list[sqlite3.Row]:
+    return db.execute(
+        "SELECT line, checked, text FROM tasks WHERE source_path = ? ORDER BY line",
+        (path,),
+    ).fetchall()
+
+
+def test_upsert_note_persists_open_and_closed_tasks(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "a.md", "- [ ] Open one\n- [x] Closed one\n- [ ] Open two\n")
+
+    upsert_note(db, vault, "a.md")
+
+    rows = _task_rows(db, "a.md")
+    assert [(row["checked"], row["text"]) for row in rows] == [
+        (0, "Open one"),
+        (1, "Closed one"),
+        (0, "Open two"),
+    ]
+
+
+def test_upsert_note_replaces_stale_task_rows_on_reupsert(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "a.md", "- [ ] First\n- [ ] Second\n")
+    upsert_note(db, vault, "a.md")
+
+    # Remove "Second", add "Third", and check off "First" -- the old rows
+    # must not linger alongside the new ones.
+    write_note(vault, "a.md", "- [x] First\n- [ ] Third\n")
+    upsert_note(db, vault, "a.md")
+
+    rows = _task_rows(db, "a.md")
+    assert [(row["checked"], row["text"]) for row in rows] == [
+        (1, "First"),
+        (0, "Third"),
+    ]
+
+
+def test_remove_note_drops_its_task_rows(vault: Path, db: sqlite3.Connection) -> None:
+    write_note(vault, "a.md", "- [ ] A task\n")
+    upsert_note(db, vault, "a.md")
+
+    # Regression proof for the source_path-not-path fix: this must not
+    # raise sqlite3.OperationalError, and must actually delete the rows.
+    remove_note(db, "a.md")
+
+    assert _task_rows(db, "a.md") == []
+
+
+def test_upsert_note_with_no_checkboxes_persists_no_task_rows(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "a.md", "Just prose, no checkboxes here.\n")
+
+    upsert_note(db, vault, "a.md")
+
+    assert _task_rows(db, "a.md") == []
+
+
 def test_broken_link_surfaces_as_ghost_node(
     vault: Path, db: sqlite3.Connection
 ) -> None:

@@ -24,3 +24,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     body,
     tokenize='porter'
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+    source_path TEXT NOT NULL,
+    line        INTEGER NOT NULL,
+    checked     INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    PRIMARY KEY (source_path, line)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source_path);

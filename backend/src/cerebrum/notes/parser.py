@@ -9,10 +9,12 @@ from pathlib import PurePosixPath
 import frontmatter
 import yaml
 
-from cerebrum.notes.models import ParsedLink, ParsedNote
+from cerebrum.notes.models import ParsedLink, ParsedNote, ParsedTask
 
 _LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)\s]+)\)")
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
+_TASK_LINE_PATTERN = re.compile(r"^[ \t]*[-*+] \[([ xX])\] (.*)$")
+_FENCE_PATTERN = re.compile(r"^[ \t]*(?:```|~~~)")
 
 
 class InvalidNoteContentError(Exception):
@@ -64,6 +66,35 @@ def extract_links(source_path: str, body: str) -> list[ParsedLink]:
         if resolved is not None:
             links.append(ParsedLink(target_path=resolved, link_text=link_text or None))
     return links
+
+
+def extract_tasks(body: str) -> list[ParsedTask]:
+    """Extract every open/closed markdown checkbox line from `body`,
+    skipping any that fall inside a fenced (```/~~~) code block -- a note
+    can legitimately document checkbox syntax as an example, and that
+    example text is not a real task. This needs a per-line scan with
+    fence-tracking state, unlike `extract_links`'s single whole-body
+    `finditer`: a plain `re.MULTILINE` pattern has no way to know whether
+    the current line is inside a fence.
+    """
+    tasks: list[ParsedTask] = []
+    in_fence = False
+    for line_number, line in enumerate(body.splitlines(), start=1):
+        if _FENCE_PATTERN.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = _TASK_LINE_PATTERN.match(line)
+        if match:
+            tasks.append(
+                ParsedTask(
+                    line=line_number,
+                    checked=match.group(1).lower() == "x",
+                    text=match.group(2).rstrip(),
+                )
+            )
+    return tasks
 
 
 def _rewrite_link_targets(body: str, resolver: Callable[[str], str | None]) -> str:
@@ -167,6 +198,7 @@ def parse_note(path: str, raw_content: str) -> ParsedNote:
         updated=_parse_datetime(metadata.get("updated")),
         body=post.content,
         links=extract_links(path, post.content),
+        tasks=extract_tasks(post.content),
     )
 
 

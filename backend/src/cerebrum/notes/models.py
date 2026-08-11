@@ -22,6 +22,12 @@ class ParsedLink(BaseModel):
     link_text: str | None
 
 
+class ParsedTask(BaseModel):
+    line: int
+    checked: bool
+    text: str
+
+
 class ParsedNote(BaseModel):
     title: str
     tags: list[str]
@@ -29,3 +35,4 @@ class ParsedNote(BaseModel):
     updated: datetime | None
     body: str
     links: list[ParsedLink]
+    tasks: list[ParsedTask]

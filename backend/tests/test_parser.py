@@ -5,6 +5,7 @@ import pytest
 from cerebrum.notes.parser import (
     InvalidNoteContentError,
     extract_links,
+    extract_tasks,
     parse_note,
     rebase_links,
     render_note,
@@ -152,3 +153,66 @@ def test_extract_links_ignores_image_references() -> None:
     # a graph link -- `resolve_link_target` only follows `.md`-suffixed
     # targets, so image markdown is inert for link-extraction purposes.
     assert not extract_links("note.md", "![alt](img.png)")
+
+
+def test_extract_tasks_extracts_unchecked_task() -> None:
+    tasks = extract_tasks("- [ ] Buy milk")
+    assert len(tasks) == 1
+    assert tasks[0].line == 1
+    assert tasks[0].checked is False
+    assert tasks[0].text == "Buy milk"
+
+
+def test_extract_tasks_extracts_checked_task_either_case() -> None:
+    tasks = extract_tasks("- [x] Done\n- [X] Also done")
+    assert [t.checked for t in tasks] == [True, True]
+
+
+def test_extract_tasks_accepts_dash_star_and_plus_bullets() -> None:
+    tasks = extract_tasks("- [ ] a\n* [ ] b\n+ [ ] c")
+    assert [t.text for t in tasks] == ["a", "b", "c"]
+
+
+def test_extract_tasks_ignores_plain_list_items() -> None:
+    assert not extract_tasks("- Buy milk")
+
+
+def test_extract_tasks_ignores_checkbox_syntax_mid_sentence() -> None:
+    assert not extract_tasks("See [ ] for details")
+
+
+def test_extract_tasks_excludes_fenced_code_block_with_backticks() -> None:
+    body = "- [ ] Real task\n```\n- [ ] Example in docs\n```\n- [ ] Another real task"
+    tasks = extract_tasks(body)
+    assert [t.text for t in tasks] == ["Real task", "Another real task"]
+
+
+def test_extract_tasks_excludes_fenced_code_block_with_tildes() -> None:
+    body = "~~~\n- [ ] Example\n~~~\n- [ ] Real task"
+    tasks = extract_tasks(body)
+    assert [t.text for t in tasks] == ["Real task"]
+
+
+def test_extract_tasks_computes_line_numbers_across_headings_and_blanks() -> None:
+    body = "# Heading\n\n- [ ] First\n\nSome text.\n\n- [ ] Second"
+    tasks = extract_tasks(body)
+    assert [(t.line, t.text) for t in tasks] == [(3, "First"), (7, "Second")]
+
+
+def test_extract_tasks_extracts_indented_subtask() -> None:
+    tasks = extract_tasks("- [ ] Parent\n  - [ ] Child")
+    assert [t.text for t in tasks] == ["Parent", "Child"]
+
+
+def test_parse_note_extracts_tasks_end_to_end() -> None:
+    raw = (
+        "---\ntitle: Todo\n---\n"
+        "- [ ] Open task\n"
+        "```\n- [ ] Example, not a task\n```\n"
+        "- [x] Closed task\n"
+    )
+    parsed = parse_note("todo.md", raw)
+    assert [(t.checked, t.text) for t in parsed.tasks] == [
+        (False, "Open task"),
+        (True, "Closed task"),
+    ]

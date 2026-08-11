@@ -10,6 +10,7 @@ import type {
   GraphResponse,
   Note,
   NoteMeta,
+  TaskItem,
 } from "../types/note";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -280,6 +281,10 @@ export function moveNote(path: string, newPath: string, title?: string): Promise
 
 export function getGraph(): Promise<GraphResponse> {
   return request<GraphResponse>("/graph");
+}
+
+export function getTasks(): Promise<TaskItem[]> {
+  return request<TaskItem[]>("/tasks");
 }
 
 export function getBacklinks(path: string): Promise<NoteMeta[]> {

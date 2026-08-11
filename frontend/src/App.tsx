@@ -16,6 +16,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { NoteViewPage } from "./pages/NoteViewPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { TasksPage } from "./pages/TasksPage";
 
 /** Gates its children behind `isAuthenticated`, redirecting to `/login`
  * otherwise -- the idiomatic react-router-dom v7 pattern for a protected
@@ -57,6 +58,12 @@ function AppShell() {
             Graph
           </NavLink>
           <NavLink
+            to="/tasks"
+            className={({ isActive }) => (isActive ? "is-active" : undefined)}
+          >
+            Tasks
+          </NavLink>
+          <NavLink
             to="/settings"
             className={({ isActive }) => (isActive ? "is-active" : undefined)}
           >
@@ -80,6 +87,7 @@ function AppShell() {
           />
           <Route path="/notes/*" element={<NoteViewPage />} />
           <Route path="/graph" element={<GraphViewPage />} />
+          <Route path="/tasks" element={<TasksPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>

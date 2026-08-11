@@ -85,10 +85,14 @@ export function NoteBrowser() {
     });
   }
 
+  function noteExistsAt(path: string): boolean {
+    return notes.some((note) => note.path === path);
+  }
+
   async function handleCreate(path: string) {
     setCreateError(null);
 
-    if (notes.some((note) => note.path === path)) {
+    if (noteExistsAt(path)) {
       setCreateError(`A note already exists at "${path}".`);
       return;
     }
@@ -111,7 +115,7 @@ export function NoteBrowser() {
   async function handleToday() {
     const path = getTodayNotePath();
 
-    if (notes.some((note) => note.path === path)) {
+    if (noteExistsAt(path)) {
       navigate(`/notes/${encodeNotePath(path)}`);
       return;
     }

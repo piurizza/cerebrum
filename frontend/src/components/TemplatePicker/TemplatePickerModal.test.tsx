@@ -99,6 +99,21 @@ describe("TemplatePickerModal", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
   });
 
+  it("does not call onCancel via backdrop click or Escape while pending", async () => {
+    // Regression guard: confirming starts an uncancellable
+    // fetch-then-write-then-navigate chain, so a "successful" dismiss
+    // mid-flight must not be possible via any path -- otherwise the note
+    // still gets created and the app still navigates once the chain
+    // resolves, despite the user having explicitly backed out.
+    const user = userEvent.setup();
+    const { onCancel } = renderModal({ pending: true });
+
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
+    await user.keyboard("{Escape}");
+
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
   it("renders the passed error text", () => {
     renderModal({ error: "network error" });
 

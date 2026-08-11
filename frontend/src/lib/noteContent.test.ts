@@ -97,6 +97,24 @@ describe("stripTemplateIdentityFields", () => {
     const raw = "---\ntitle: Meeting\ncreated: '2026-01-01T00:00:00+00:00'\n---\nBody.";
     expect(stripTemplateIdentityFields(raw)).toBe("---\n---\nBody.");
   });
+
+  it("strips a single-line quoted value normally", () => {
+    const raw = "---\ntitle: 'Meeting'\ntags: [work]\n---\nBody.";
+    expect(stripTemplateIdentityFields(raw)).toBe("---\ntags: [work]\n---\nBody.");
+  });
+
+  it("leaves a multi-line title untouched instead of corrupting the frontmatter that follows it", () => {
+    // This is PyYAML's actual default rendering for a string containing an
+    // embedded newline (verified against the real backend renderer):
+    // `yaml.dump({"title": "Line one\nLine two"})` produces exactly this
+    // three-physical-line single-quoted scalar. A naive line-level strip
+    // would delete only the first line, leaving " Line two'" and the blank
+    // line orphaned right before `tags:` -- which a real YAML parser
+    // silently folds into the unrelated `tags` list (verified against the
+    // real backend parser). Leaving it untouched is the safe fallback.
+    const raw = "---\ntitle: 'Line one\n\n  Line two'\ntags:\n- work\n---\nBody.";
+    expect(stripTemplateIdentityFields(raw)).toBe(raw);
+  });
 });
 
 describe("relativeLinkPath", () => {

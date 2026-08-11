@@ -112,10 +112,31 @@ export function NoteBrowser() {
     return `A note already exists at "${path}".`;
   }
 
+  // Shared by both create paths below: write, refresh the notes list,
+  // signal success (close whichever modal is open), then navigate. Always
+  // awaits refreshNotes() before navigating -- the sidebar never unmounts
+  // on navigate (it's outside <Routes>), so an unawaited refresh leaves a
+  // window where the in-memory notes list is still stale, the same race
+  // the "Today" button (handleToday, below) already awaits refreshNotes()
+  // to close. `onSuccess` runs before navigate, matching the existing
+  // per-flow modal-close timing (isPickerOpen / pendingCreate), and never
+  // runs on failure -- the caller's `catch` is what keeps a modal open so
+  // its error prop stays visible.
+  async function writeNoteAndNavigate(
+    path: string,
+    content: string,
+    onSuccess: () => void,
+  ): Promise<void> {
+    await putNote(path, content);
+    await refreshNotes();
+    onSuccess();
+    navigate(`/notes/${encodeNotePath(path)}`);
+  }
+
   // If no template is relevant to this folder (R3's skip rule), this is
-  // byte-for-byte the pre-templates create flow -- R4's backward-compat
-  // floor. Otherwise, hand off to TemplatePickerModal via
-  // handleTemplateConfirm instead of writing here.
+  // the pre-templates create flow -- R4's backward-compat floor.
+  // Otherwise, hand off to TemplatePickerModal via handleTemplateConfirm
+  // instead of writing here.
   async function handleCreate(path: string) {
     setCreateError(null);
 
@@ -132,15 +153,10 @@ export function NoteBrowser() {
     }
 
     try {
-      await putNote(path, "");
+      await writeNoteAndNavigate(path, "", () => setIsPickerOpen(false));
     } catch (err) {
       setCreateError(errorMessage(err));
-      return;
     }
-
-    setIsPickerOpen(false);
-    refreshNotes();
-    navigate(`/notes/${encodeNotePath(path)}`);
   }
 
   // `templatePath === null` means "Blank note" -- identical to
@@ -166,10 +182,7 @@ export function NoteBrowser() {
       const content = templatePath
         ? stripTemplateIdentityFields((await getNote(templatePath)).content)
         : "";
-      await putNote(path, content);
-      await refreshNotes();
-      setPendingCreate(null);
-      navigate(`/notes/${encodeNotePath(path)}`);
+      await writeNoteAndNavigate(path, content, () => setPendingCreate(null));
     } catch (err) {
       setTemplateError(errorMessage(err));
     } finally {
@@ -247,6 +260,12 @@ export function NoteBrowser() {
           setCreateError(null);
           setIsPickerOpen(true);
         }}
+        // Same reasoning as the Today button above: `notes` starts `[]`
+        // before the initial fetch settles, so opening this before then
+        // would make handleCreate's listTemplateOptions() check run
+        // against an empty list and silently skip the template picker
+        // even when a relevant template genuinely exists.
+        disabled={loading}
       >
         + New note
       </button>

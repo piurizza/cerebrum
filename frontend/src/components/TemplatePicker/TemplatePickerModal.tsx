@@ -27,8 +27,13 @@ function optionLabel(option: TemplateOption): string {
  * grouped by tier. Opened by `NoteBrowser` only when at least one relevant
  * template exists for the target folder -- see `hasRelevantTemplate` in
  * `lib/templates.ts`. Mirrors `FolderPickerModal`'s modal structure and
- * `ConfirmDialog`'s `busy`/`error` prop conventions (this codebase's one
- * established modal pattern) rather than inventing a new one. */
+ * `ConfirmDialog`'s `pending`/`error` prop conventions (this codebase's
+ * one established modal pattern) rather than inventing a new one --
+ * except every dismiss path (Cancel, backdrop, Escape) disables while
+ * `pending`, not just the buttons: confirming here starts an
+ * uncancellable fetch-then-write-then-navigate chain, so a dismiss that
+ * "succeeded" while it was still running would let the note get created
+ * and the app navigate away anyway once it resolved. */
 export function TemplatePickerModal({
   title,
   options,
@@ -44,15 +49,19 @@ export function TemplatePickerModal({
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       // Gated on isTopmost, same reasoning as FolderPickerModal/ConfirmDialog.
-      // Not gated on `pending` -- ConfirmDialog's established convention
-      // (see its "does NOT disable the backdrop... when busy" test) only
-      // disables the visible Confirm/Cancel *buttons* while busy; Escape
-      // and the backdrop stay live, matched here for consistency.
-      if (event.key === "Escape" && isTopmost) onCancel();
+      // Also gated on `pending` -- unlike ConfirmDialog's confirm actions
+      // (a single DELETE-style call), confirming here kicks off a
+      // fetch-then-write-then-navigate chain with nothing to cancel it;
+      // letting Escape dismiss mid-flight would let the user "cancel" while
+      // the note still gets created and the app still navigates out from
+      // under them once the chain resolves. Disabling every dismiss path
+      // during `pending` (matching the Confirm/Cancel buttons) closes that
+      // off entirely instead of adding a cancellation-token mechanism.
+      if (event.key === "Escape" && isTopmost && !pending) onCancel();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel, isTopmost]);
+  }, [onCancel, isTopmost, pending]);
 
   function handleConfirm() {
     onConfirm(selected === BLANK_VALUE ? null : selected);
@@ -64,7 +73,7 @@ export function TemplatePickerModal({
         type="button"
         className="modal-backdrop"
         aria-label="Close dialog"
-        onClick={onCancel}
+        onClick={pending ? undefined : onCancel}
       />
       <div
         ref={modalRef}

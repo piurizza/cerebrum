@@ -182,6 +182,18 @@ describe("NoteBrowser + New note / templates", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
   }
 
+  it("disables + New note while the initial notes fetch is still loading", () => {
+    // Regression guard: opening the picker before `notes` has loaded
+    // would make handleCreate's template-relevance check run against an
+    // empty list and silently skip the picker even when a relevant
+    // template genuinely exists once loading finishes.
+    setNotesState([], { loading: true });
+
+    renderBrowser();
+
+    expect(screen.getByRole("button", { name: "+ New note" })).toBeDisabled();
+  });
+
   it("creates a blank note exactly as before when the vault has zero templates", async () => {
     const user = userEvent.setup();
     setNotesState([makeNoteMeta("other.md")]);
@@ -317,6 +329,11 @@ describe("NoteBrowser + New note / templates", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("network error");
     expect(mockNavigate).not.toHaveBeenCalled();
+    // Proves the finally block's isCreatingNote reset runs on the error
+    // path too, not just on success -- otherwise Create note would stay
+    // disabled forever after any failure, with no way to retry (mirrors
+    // the equivalent isOpeningToday assertion in the Today-button tests).
+    expect(screen.getByRole("button", { name: "Create note" })).toBeEnabled();
     // Still the picker, not a full-sidebar replacement: the sidebar's
     // other chrome (search input) is still present alongside the alert.
     expect(screen.getByPlaceholderText("Search notes...")).toBeInTheDocument();

@@ -72,7 +72,27 @@ export function stripFrontmatter(rawContent: string): string {
   return rawContent.replace(FRONTMATTER_PATTERN, "");
 }
 
-const IDENTITY_FIELD_LINE = /^(title|created):.*\r?\n?/gm;
+const IDENTITY_FIELD_LINE = /^(?:title|created):.*\r?\n?/gm;
+
+/** True when a matched `title:`/`created:` line's value is genuinely
+ * confined to that one line -- safe to delete outright. A value that
+ * opens a quote it doesn't close on the same line is PyYAML's actual
+ * default rendering for a string containing an embedded newline (e.g.
+ * `yaml.dump({"title": "Line one\nLine two"})` produces `title: 'Line
+ * one\n\n  Line two'` across three physical lines, verified directly
+ * against the backend's renderer) -- reachable via a raw API/MCP write
+ * or hand-editing a template file outside the app, not just this app's
+ * own (single-line) title editor. Deleting only the first line in that
+ * case would leave the continuation lines orphaned in the frontmatter
+ * block, which a real YAML parser can then silently fold into a
+ * *different*, unrelated key (verified against the backend's parser --
+ * the orphaned lines got absorbed into the neighboring `tags` list). */
+function isSingleLineValue(line: string): boolean {
+  const value = line.replace(/^[a-z]+:\s*/i, "").trimEnd();
+  if (value.startsWith("'")) return /^'(?:[^']|'')*'$/.test(value);
+  if (value.startsWith('"')) return /^"(?:[^"\\]|\\.)*"$/.test(value);
+  return true;
+}
 
 /** Remove the `title` and `created` frontmatter keys from a note's raw
  * content, leaving everything else (body, other frontmatter such as
@@ -83,16 +103,20 @@ const IDENTITY_FIELD_LINE = /^(title|created):.*\r?\n?/gm;
  * templates are authored the same way as any note. Without this
  * stripping, a note created from a template would silently inherit the
  * *template's* creation date and literal title instead of getting its
- * own. Both keys are always flat, top-level scalars in this codebase's
- * frontmatter (never nested), so a line-level removal within the
- * frontmatter block is sufficient -- no YAML parser needed. */
+ * own. A key whose value spills onto further lines is left untouched
+ * instead (see `isSingleLineValue`) -- inheriting a stale title/date in
+ * that rare case is a strict improvement over corrupting a neighboring
+ * field, and it's the same outcome a fully-verbatim copy would have had
+ * before this stripping existed at all. */
 export function stripTemplateIdentityFields(rawContent: string): string {
   const match = rawContent.match(FRONTMATTER_PATTERN);
   if (!match) return rawContent;
 
   const frontmatter = match[0];
   const body = rawContent.slice(frontmatter.length);
-  const strippedFrontmatter = frontmatter.replace(IDENTITY_FIELD_LINE, "");
+  const strippedFrontmatter = frontmatter.replace(IDENTITY_FIELD_LINE, (line) =>
+    isSingleLineValue(line) ? "" : line,
+  );
   return strippedFrontmatter + body;
 }
 

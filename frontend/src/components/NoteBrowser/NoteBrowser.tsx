@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { encodeNotePath, errorMessage, putNote, searchNotes } from "../../api/client";
+import {
+  encodeNotePath,
+  errorMessage,
+  getNote,
+  putNote,
+  searchNotes,
+} from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import { getDailyNoteDefaultBody, getTodayNotePath } from "../../lib/dailyNote";
-import { buildNoteTree } from "../../lib/noteTree";
+import { stripTemplateIdentityFields } from "../../lib/noteContent";
+import { buildNoteTree, splitNotePath } from "../../lib/noteTree";
+import type { TemplateOption } from "../../lib/templates";
+import { hasRelevantTemplate, listTemplateOptions } from "../../lib/templates";
 import type { NoteMeta } from "../../types/note";
 import { FolderPickerModal } from "../FolderPicker/FolderPickerModal";
+import { TemplatePickerModal } from "../TemplatePicker/TemplatePickerModal";
 import { NoteTreeList } from "./NoteTreeList";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -16,6 +26,10 @@ export function NoteBrowser() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [todayError, setTodayError] = useState<string | null>(null);
   const [isOpeningToday, setIsOpeningToday] = useState(false);
+  const [pendingCreatePath, setPendingCreatePath] = useState<string | null>(null);
+  const [templateOptions, setTemplateOptions] = useState<TemplateOption[]>([]);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<NoteMeta[] | null>(null);
@@ -89,8 +103,20 @@ export function NoteBrowser() {
     return notes.some((note) => note.path === path);
   }
 
+  // If no template is relevant to this folder (R3's skip rule), this is
+  // byte-for-byte the pre-templates create flow -- R4's backward-compat
+  // floor. Otherwise, hand off to TemplatePickerModal via
+  // handleTemplateConfirm instead of writing here.
   async function handleCreate(path: string) {
     setCreateError(null);
+
+    const options = listTemplateOptions(notes, splitNotePath(path).folder);
+    if (hasRelevantTemplate(options)) {
+      setIsPickerOpen(false);
+      setTemplateOptions(options);
+      setPendingCreatePath(path);
+      return;
+    }
 
     if (noteExistsAt(path)) {
       setCreateError(`A note already exists at "${path}".`);
@@ -107,6 +133,47 @@ export function NoteBrowser() {
     setIsPickerOpen(false);
     refreshNotes();
     navigate(`/notes/${encodeNotePath(path)}`);
+  }
+
+  // `templatePath === null` means "Blank note" -- identical to
+  // handleCreate's blank path above. Re-checks noteExistsAt against the
+  // pending path here too, since a template selection must not bypass
+  // that guard. On error the modal stays open (pendingCreatePath/
+  // templateOptions untouched) so the user can retry or pick a different
+  // template -- errors surface via TemplatePickerModal's own `error`
+  // prop, never NoteBrowser's top-level `createError` (which would
+  // replace the whole sidebar via the early `return` above).
+  async function handleTemplateConfirm(templatePath: string | null) {
+    if (!pendingCreatePath) return;
+    const path = pendingCreatePath;
+
+    if (noteExistsAt(path)) {
+      setTemplateError(`A note already exists at "${path}".`);
+      return;
+    }
+
+    setTemplateError(null);
+    setIsCreatingNote(true);
+    try {
+      const content = templatePath
+        ? stripTemplateIdentityFields((await getNote(templatePath)).content)
+        : "";
+      await putNote(path, content);
+      await refreshNotes();
+      setPendingCreatePath(null);
+      setTemplateOptions([]);
+      navigate(`/notes/${encodeNotePath(path)}`);
+    } catch (err) {
+      setTemplateError(errorMessage(err));
+    } finally {
+      setIsCreatingNote(false);
+    }
+  }
+
+  function handleTemplateCancel() {
+    setPendingCreatePath(null);
+    setTemplateOptions([]);
+    setTemplateError(null);
   }
 
   // Unlike handleCreate, an existing path is success here, not an error:
@@ -185,6 +252,16 @@ export function NoteBrowser() {
           error={createError}
           onConfirm={handleCreate}
           onCancel={() => setIsPickerOpen(false)}
+        />
+      )}
+      {pendingCreatePath && (
+        <TemplatePickerModal
+          title="Choose a template"
+          options={templateOptions}
+          pending={isCreatingNote}
+          error={templateError}
+          onConfirm={handleTemplateConfirm}
+          onCancel={handleTemplateCancel}
         />
       )}
       <input

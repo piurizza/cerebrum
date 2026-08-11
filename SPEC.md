@@ -234,6 +234,7 @@ API calls.
 | `CEREBRUM_PORT` | compose | `8080` | host port for the frontend |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 | `VITE_DAILY_NOTE_FOLDER` | frontend | `daily` | vault-relative folder the "Today" button creates daily notes in. Build-time only -- baked into the frontend image at `npm run build`; changing it on a deployed instance needs `docker compose build/up frontend`, not just an env edit |
+| `VITE_TEMPLATES_FOLDER` | frontend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Build-time only, same rebuild caveat as `VITE_DAILY_NOTE_FOLDER` above. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |
 
 ## 9. Feature roadmap (user stories)
 
@@ -405,10 +406,24 @@ how consistently each was cited as high-value across that research.
       day, never the server's or UTC -- a self-hosted server can run in a
       different timezone than the browser opening it, so using the
       server's clock could silently pick the wrong day near midnight.
-- [ ] note templates -- reusable skeletons (frontmatter + body structure)
-      applied when creating a new note, optionally scoped by folder.
-      Obsidian's Templater is consistently the top-cited "must-have"
-      plugin in the research.
+- [x] note templates -- a template is an ordinary note under a
+      configurable vault folder (default `templates`, `VITE_TEMPLATES_FOLDER`
+      -- see [Environment variables](#environment-variables); build-time
+      only, same as `VITE_DAILY_NOTE_FOLDER`). A template directly under
+      that folder is *global* (offered for any new note); one in a
+      subfolder is *scoped* to that subfolder's name and is prioritized
+      for a matching target folder, but never hidden for others. The
+      "+ New note" flow only shows a template picker when a relevant
+      template exists -- with none, note creation is unchanged. Picking a
+      template copies its body and frontmatter into the new note, except
+      `title`/`created`, which are stripped so the new note gets its own
+      instead of inheriting the template's. No `{{placeholder}}`/variable
+      substitution (e.g. `{{date}}`) -- content is copied as stored.
+      **Known trade-off:** template notes are ordinary vault notes with no
+      exclusion mechanism, so they currently appear like any other note in
+      search, tags, the sidebar tree, the Graph view, Backlinks, and MCP
+      tools. Obsidian's Templater is consistently the top-cited
+      "must-have" plugin in the research this item is sourced from.
 - [ ] a cross-vault task view -- aggregate open markdown checkboxes
       (`- [ ]`) across every note into one list, mirroring Obsidian's
       Tasks/Dataview-query pattern. No storage-format change needed --

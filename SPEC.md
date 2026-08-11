@@ -233,6 +233,7 @@ API calls.
 | `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
 | `CEREBRUM_PORT` | compose | `8080` | host port for the frontend |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
+| `VITE_DAILY_NOTE_FOLDER` | frontend | `daily` | vault-relative folder the "Today" button creates daily notes in. Build-time only -- baked into the frontend image at `npm run build`; changing it on a deployed instance needs `docker compose build/up frontend`, not just an env edit |
 
 ## 9. Feature roadmap (user stories)
 
@@ -393,13 +394,17 @@ feature set and product identity (self-hosted, plain markdown, note-level
 links -- not block-level, not a team database tool). Ordered by fit +
 how consistently each was cited as high-value across that research.
 
-- [ ] one-click "today's note" -- a dedicated entry point that opens (or
-      creates, from a configurable path/naming pattern) the current day's
-      note. Near-universal across every tool researched (Obsidian's
-      Daily Notes core plugin + Calendar, Logseq's and Roam's
-      journal-first workflow, Reflect's daily-notes-plus-backlinks
-      model). Low complexity, fits the existing vault/file model
-      directly -- no schema change.
+- [x] one-click "today's note" -- a "Today" button in the sidebar (before
+      "+ New note") opens today's note, creating it with a
+      `# <full date>` heading if it doesn't exist yet -- never overwrites
+      an existing one. Path is `<folder>/<YYYY-MM-DD>.md`; `<folder>`
+      defaults to `daily` and is configurable via `VITE_DAILY_NOTE_FOLDER`
+      (build-time only -- see [Environment variables](#environment-variables);
+      changing it on a deployed instance needs a frontend rebuild, not a
+      runtime edit). The date is always the *browser's* local calendar
+      day, never the server's or UTC -- a self-hosted server can run in a
+      different timezone than the browser opening it, so using the
+      server's clock could silently pick the wrong day near midnight.
 - [ ] note templates -- reusable skeletons (frontmatter + body structure)
       applied when creating a new note, optionally scoped by folder.
       Obsidian's Templater is consistently the top-cited "must-have"

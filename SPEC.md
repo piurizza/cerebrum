@@ -447,8 +447,27 @@ how consistently each was cited as high-value across that research.
       Reflect), but a materially bigger strategic bet than the three
       above: it introduces LLM/API-key integration and a new class of
       product decisions (which provider, cost model, data sent off-host)
-      that haven't been made yet -- scope this one with its own
-      dedicated planning pass, not folded into a routine feature plan.
+      that haven't been made yet. **Deliberately deferred** (2026-08-12
+      dedicated planning pass): the motivation was competitive/
+      future-proofing, not a concrete failure of the existing lexical
+      search (FTS5 prefix-AND + bm25, see [API surface](#5-api-surface)),
+      and the dev vault is 33 notes -- a scale where keyword search over
+      titles/bodies essentially never loses a note in the noise. Every
+      path also carries a real, non-speculative cost: cloud embeddings
+      mean ongoing $ and the first precedent of vault content leaving the
+      host (a real departure from cerebrum's self-hosted framing,
+      [Known gaps](#10-known-gaps--future-work)'s "server-centralized by
+      design" note); a local embedding model means a heavier backend
+      container and materially worse ranking quality; a swappable
+      interface means building and maintaining both for a feature nothing
+      is currently asking for. Revisit when either holds: the vault
+      grows to a scale where keyword mismatch plausibly loses notes in
+      practice (rough order of magnitude: hundreds of notes, not tens),
+      or a concrete lexical-search miss is actually hit. At that point,
+      auto-linking, semantic search, and Q&A should be scoped as three
+      separate items, not one -- Q&A is a consumer of semantic search
+      (retrieve-then-answer), and auto-linking is a second, independent
+      consumer; none of the three is a subset of another.
 
 ### Reliability
 

@@ -17,6 +17,15 @@ from cerebrum.notes.service import iter_note_paths, retarget_note_links
 
 logger = logging.getLogger(__name__)
 
+# Bumped whenever a schema change means an unchanged-mtime note can no
+# longer be trusted to already have every derived row it should -- the
+# `tasks` table is the first case (see rebuild_index's user_version
+# check below). SQLite's PRAGMA user_version is a single integer stored
+# in the database file header for exactly this purpose; a database that
+# predates this constant (including a brand-new one, which starts at 0)
+# reads back 0 and gets one forced full rescan.
+_SCHEMA_BACKFILL_VERSION = 1
+
 
 @dataclass
 class _PendingDeletion:
@@ -154,6 +163,7 @@ def upsert_note(
 
         conn.execute("DELETE FROM links WHERE source_path = ?", (path,))
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
+        conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
         conn.executemany(
             "INSERT INTO links (source_path, target_path, link_text) VALUES (?, ?, ?)",
             [(path, link.target_path, link.link_text) for link in links],
@@ -162,6 +172,10 @@ def upsert_note(
             "INSERT INTO notes_fts (path, title, body) VALUES (?, ?, ?)",
             (path, parsed.title, parsed.body),
         )
+        conn.executemany(
+            "INSERT INTO tasks (source_path, line, checked, text) VALUES (?, ?, ?, ?)",
+            [(path, task.line, task.checked, task.text) for task in parsed.tasks],
+        )
 
 
 def remove_note(conn: sqlite3.Connection, path: str) -> None:
@@ -169,6 +183,7 @@ def remove_note(conn: sqlite3.Connection, path: str) -> None:
         conn.execute("DELETE FROM notes WHERE path = ?", (path,))
         conn.execute("DELETE FROM links WHERE source_path = ?", (path,))
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
+        conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
 
 
 def rebuild_index(
@@ -209,7 +224,26 @@ def rebuild_index(
 
     with write_lock:
         existing_rows = conn.execute("SELECT path, mtime FROM notes").fetchall()
+        schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
     existing_mtimes = {row["path"]: row["mtime"] for row in existing_rows}
+
+    # A database at a version older than _SCHEMA_BACKFILL_VERSION may be
+    # missing rows a newer schema derives (the `tasks` table is the first
+    # case) for any note whose mtime hasn't changed since it was last
+    # indexed -- normally the signal that a note's derived rows are
+    # already current, but not true across a schema change that adds a
+    # new kind of derived row. Force every note through upsert_note once
+    # to backfill, then bump the version so this is a one-time cost.
+    needs_schema_backfill = schema_version < _SCHEMA_BACKFILL_VERSION
+    # A note that raises during the backfill pass below must not be
+    # treated as backfilled -- without this, bumping the version
+    # unconditionally would permanently hide the gap: the note's mtime
+    # never changes again on its own, so it would never be retried by
+    # the ordinary mtime-skip path on any future rescan either. Left
+    # False (and the version bump skipped) whenever ANY note fails
+    # during a backfill pass, so the next rebuild_index call retries the
+    # whole backfill rather than silently orphaning that one note.
+    backfill_had_failures = False
 
     for path in existing_mtimes:
         if path not in current_paths:
@@ -221,7 +255,7 @@ def rebuild_index(
     for path in current_paths:
         try:
             mtime = (vault_root / path).stat().st_mtime
-            if existing_mtimes.get(path) == mtime:
+            if not needs_schema_backfill and existing_mtimes.get(path) == mtime:
                 continue
             if (
                 pending_renames is not None
@@ -242,6 +276,12 @@ def rebuild_index(
             upsert_note(conn, vault_root, path)
         except Exception:  # noqa: BLE001 -- one bad note must not abort the rescan
             logger.exception("Failed to index note %s; skipping", path)
+            if needs_schema_backfill:
+                backfill_had_failures = True
+
+    if needs_schema_backfill and not backfill_had_failures:
+        with write_lock:
+            conn.execute(f"PRAGMA user_version = {_SCHEMA_BACKFILL_VERSION}")
 
 
 def _match_unambiguous_pairs(

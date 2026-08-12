@@ -34,3 +34,8 @@ export type AttachmentUploadResult = components["schemas"]["AttachmentUploadResp
 export type _PinAttachmentUploadResult = Expect<
   EqualKeys<AttachmentUploadResult, "path">
 >;
+
+export type TaskItem = components["schemas"]["TaskItem"];
+export type _PinTaskItem = Expect<
+  EqualKeys<TaskItem, "path" | "title" | "line" | "text">
+>;

@@ -106,6 +106,15 @@ CREATE INDEX idx_links_source ON links(source_path);
 CREATE VIRTUAL TABLE notes_fts USING fts5(
     path UNINDEXED, title, body, tokenize='porter'
 );
+
+CREATE TABLE tasks (
+    source_path TEXT NOT NULL,
+    line        INTEGER NOT NULL,
+    checked     INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    PRIMARY KEY (source_path, line)
+);
+CREATE INDEX idx_tasks_source ON tasks(source_path);
 ```
 
 - `target_path` has **no foreign key** — broken links are valid data,
@@ -136,6 +145,7 @@ All endpoints under `/api`.
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 | GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |
+| GET | `/api/tasks` | Every open (unchecked) markdown checkbox across the vault, joined with its note's title, ordered by note path then line; read-only |
 
 `{path:path}` uses FastAPI's path converter since relative vault paths
 contain `/`. Clients must URL-encode path segments appropriately — this is
@@ -424,11 +434,14 @@ how consistently each was cited as high-value across that research.
       search, tags, the sidebar tree, the Graph view, Backlinks, and MCP
       tools. Obsidian's Templater is consistently the top-cited
       "must-have" plugin in the research this item is sourced from.
-- [ ] a cross-vault task view -- aggregate open markdown checkboxes
-      (`- [ ]`) across every note into one list, mirroring Obsidian's
-      Tasks/Dataview-query pattern. No storage-format change needed --
-      vault content already uses plain markdown checkboxes; this is
-      purely an index + UI addition.
+- [x] a cross-vault task view -- the `/tasks` page aggregates every open
+      markdown checkbox (`- [ ]`/`* [ ]`/`+ [ ]`) across the vault into
+      one list, grouped by note, mirroring Obsidian's Tasks/Dataview-
+      query pattern. Extraction skips checkbox-shaped text inside a
+      fenced code block (documentation/example content, not a real
+      task). Read-only: clicking a task or its note's heading opens the
+      note as a whole, not the exact line -- no toggle-from-the-list, no
+      line-jump (see [Known gaps](#10-known-gaps--future-work)).
 - [ ] AI-assisted features -- auto-linking, semantic search, or Q&A over
       the vault. The clearest 2026 industry differentiator (Tana, Mem,
       Reflect), but a materially bigger strategic bet than the three
@@ -481,3 +494,15 @@ how consistently each was cited as high-value across that research.
 - **`npm audit` flags a high-severity advisory in `react-router`** (RSC-mode
   CSRF bypass). Not applicable here — this app uses plain client-side
   routing, not React Router's RSC/framework mode. Revisit if that changes.
+- **The cross-vault task view (`/tasks`) is deliberately narrow.** No
+  toggle-from-the-list (checking a task off still requires editing its
+  note), no jump-to-the-exact-line (clicking opens the whole note), no
+  hierarchical/nested sub-task grouping by indentation, no filtering or
+  sorting by tag/folder/due date (no due-date syntax exists in this
+  product yet), and no "recently completed" view (checked tasks are
+  captured in the index for a future pass, but nothing surfaces them
+  today). Template notes (see above) commonly document example checkbox
+  syntax, which appears in `/tasks` indistinguishably from a real task
+  unless it's fenced as a code block — the same appears-everywhere
+  trade-off already noted for templates, extended here rather than
+  given its own exclusion mechanism.

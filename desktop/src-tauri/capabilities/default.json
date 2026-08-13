@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the bootstrap window. No `remote` origin grant: the user-configured server URL must never be allowlisted for Tauri IPC access -- see docs/plans/2026-08-12-001-feat-desktop-app-plan.md KTD9.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "store:default",
+    "http:default",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "http://*" }, { "url": "https://*" }]
+    }
+  ]
+}

@@ -1,4 +1,7 @@
-import { defineConfig } from "vite";
+// `defineConfig` comes from "vitest/config", not "vite" -- see frontend's
+// vite.config.ts for why (Vite's plain UserConfig type has no `test`
+// property, which would fail `tsc` the moment a `test` block is added).
+import { defineConfig } from "vitest/config";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -25,5 +28,13 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+  },
+  test: {
+    // Most tests here are pure logic (store/health/validation) and don't
+    // need jsdom -- they opt out with a `// @vitest-environment node`
+    // docblock, mirroring frontend's convention. main.test.ts renders into
+    // a real DOM, so it needs jsdom as the file-level default.
+    environment: "jsdom",
+    globals: false,
   },
 }));

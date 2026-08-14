@@ -103,6 +103,119 @@ describe("first launch (F1)", () => {
     expect(mockSetStoredServerUrl).toHaveBeenCalledWith("http://localhost:8080/");
     expect(mockCheckHealth).toHaveBeenCalledWith("http://localhost:8080/");
   });
+
+  // Security regression: a rejected submission re-renders the form with
+  // the raw, unvalidated input as `prefill`. That value must never be
+  // interpolated into an HTML attribute string (the input's `value="..."`
+  // used to be built that way) -- a value like `" onmouseover="x` would
+  // close the attribute early and inject a new one. Setting it via the
+  // DOM property instead means it round-trips as plain data regardless of
+  // content, and no second attribute ever appears on the element.
+  it("does not let a rejected submission's raw input break out of the input's HTML attributes", async () => {
+    mockGetStoredServerUrl.mockResolvedValue(null);
+    initApp(container);
+    await flush();
+
+    fillAndSubmit(container, '" onmouseover="alert(1)');
+    await flush();
+
+    const input = container.querySelector<HTMLInputElement>("#url-input");
+    expect(input?.value).toBe('" onmouseover="alert(1)');
+    expect(input?.getAttribute("onmouseover")).toBeNull();
+    // Only the four attributes the template itself declares -- nothing
+    // injected by the submitted value.
+    expect([...(input?.attributes ?? [])].map((a) => a.name).sort()).toEqual([
+      "autocomplete",
+      "id",
+      "placeholder",
+      "type",
+    ]);
+  });
+
+  // Reliability: without a .catch() here, a rejected read leaves `#app`
+  // exactly as it started -- an empty <main>, permanently, since nothing
+  // else ever calls render().
+  it("falls back to the form with an error when reading the stored URL fails", async () => {
+    mockGetStoredServerUrl.mockRejectedValue(new Error("disk full"));
+    initApp(container);
+    await flush();
+
+    const input = container.querySelector<HTMLInputElement>("#url-input");
+    expect(input).not.toBeNull();
+    expect(container.querySelector(".error")?.textContent).toContain("disk full");
+  });
+
+  it("falls back to the form with an error when saving the URL fails", async () => {
+    mockGetStoredServerUrl.mockResolvedValue(null);
+    mockSetStoredServerUrl.mockRejectedValue(new Error("permission denied"));
+    initApp(container);
+    await flush();
+
+    fillAndSubmit(container, "http://localhost:8080");
+    await flush();
+
+    expect(container.querySelector(".error")?.textContent).toContain(
+      "permission denied",
+    );
+    expect(mockCheckHealth).not.toHaveBeenCalled();
+    // The URL survives the failure so the user isn't forced to retype it.
+    const input = container.querySelector<HTMLInputElement>("#url-input");
+    expect(input?.value).toBe("http://localhost:8080/");
+  });
+
+  // julik-frontend-races finding: without a synchronous state transition
+  // on submit, the form (and its submit button) stays live during the
+  // async store write, so a second submit before the first resolves would
+  // start a second, concurrent health-check flow.
+  it("ignores a second submit while the first is still in flight", async () => {
+    mockGetStoredServerUrl.mockResolvedValue(null);
+    let resolveSetStored: () => void = () => {};
+    mockSetStoredServerUrl.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveSetStored = resolve;
+      }),
+    );
+    mockCheckHealth.mockResolvedValue({ ok: true });
+    initApp(container);
+    await flush();
+
+    fillAndSubmit(container, "http://localhost:8080");
+    await flush();
+    // The form (and its submit button) is gone the instant the first
+    // submit is accepted -- there is nothing left to submit a second time.
+    expect(container.querySelector("#url-form")).toBeNull();
+
+    resolveSetStored();
+    await flush();
+
+    expect(mockSetStoredServerUrl).toHaveBeenCalledTimes(1);
+    expect(mockCheckHealth).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("bootstrap entry point", () => {
+  // main.ts registers its DOMContentLoaded listener once, at module-load
+  // time (it's already imported statically at the top of this file) --
+  // these tests fire that same listener directly via `window`, matching
+  // exactly where it's registered (`window.addEventListener`), rather
+  // than relying on whether DOMContentLoaded bubbles from document to
+  // window the same way in jsdom as it does in a real webview.
+  it("mounts into #app on DOMContentLoaded", async () => {
+    document.body.innerHTML = '<main id="app"></main>';
+    mockGetStoredServerUrl.mockResolvedValue(null);
+
+    window.dispatchEvent(new Event("DOMContentLoaded"));
+    await flush();
+
+    const app = document.querySelector("#app");
+    expect(app?.querySelector("#url-form")).not.toBeNull();
+  });
+
+  it("does not throw when #app is missing from the document", () => {
+    document.body.innerHTML = "";
+
+    expect(() => window.dispatchEvent(new Event("DOMContentLoaded"))).not.toThrow();
+  });
 });
 
 describe("health-check in-flight state", () => {

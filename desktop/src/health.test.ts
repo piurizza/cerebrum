@@ -50,4 +50,27 @@ describe("checkHealth", () => {
 
     expect(result.ok).toBe(false);
   });
+
+  it("falls back to a generic reason when the rejection isn't an Error", async () => {
+    mockFetch.mockRejectedValue("a plain string, not an Error instance");
+
+    const result = await checkHealth("http://localhost:8080");
+
+    expect(result).toEqual({ ok: false, reason: "Unknown error" });
+  });
+
+  // A leading "/" in `new URL("/api/health", base)` resolves as an
+  // absolute path, discarding any existing path on the base -- this would
+  // silently drop a reverse-proxy subpath and report a healthy server as
+  // unreachable.
+  it("preserves a subpath on the configured server URL", async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+
+    await checkHealth("https://example.com/cerebrum");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://example.com/cerebrum/api/health",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
 });

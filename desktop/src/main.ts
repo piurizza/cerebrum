@@ -16,6 +16,10 @@ function escapeHtml(value: string): string {
   return div.innerHTML;
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : "unknown error";
+}
+
 // Testable navigation seam: tests substitute this instead of touching the
 // real (jsdom-unfriendly) window.location.
 export const navigation = {
@@ -30,13 +34,21 @@ export function initApp(container: HTMLElement): void {
   function render(): void {
     if (state.kind === "form") {
       const s = state;
+      // `prefill` is not always trusted, validated content -- a rejected
+      // submission re-renders the form with the raw, unvalidated input the
+      // user typed. Setting it via the DOM property below (not an
+      // interpolated `value="..."` HTML attribute) means it's never parsed
+      // as markup, so it can't break out of the attribute regardless of
+      // what characters it contains -- unlike escapeHtml(), which only
+      // escapes for text-node context and does not escape `"` (security
+      // finding: an unescaped `"` in an attribute value lets a rejected
+      // "URL" like `" onmouseover="...` inject a new attribute).
       container.innerHTML = `
         <form id="url-form">
           <label for="url-input">Server URL</label>
           <input
             id="url-input"
             type="text"
-            value="${escapeHtml(s.prefill)}"
             placeholder="http://localhost:8080"
             autocomplete="off"
           />
@@ -46,6 +58,9 @@ export function initApp(container: HTMLElement): void {
       `;
       const form = container.querySelector<HTMLFormElement>("#url-form");
       const input = container.querySelector<HTMLInputElement>("#url-input");
+      if (input) {
+        input.value = s.prefill;
+      }
       form?.addEventListener("submit", (event) => {
         event.preventDefault();
         handleSubmit(input?.value ?? "");
@@ -107,16 +122,47 @@ export function initApp(container: HTMLElement): void {
       render();
       return;
     }
-    setStoredServerUrl(validation.url).then(() => runHealthCheck(validation.url));
+    // Transition out of the form synchronously, before the async store
+    // write starts. The submit button would otherwise stay live during
+    // that write, so a second click/Enter before it resolves could start
+    // a second, concurrent health-check flow racing the first (julik
+    // review finding) -- the retry button already avoids this because
+    // runHealthCheck's own first line is synchronous.
+    state = { kind: "checking", url: validation.url };
+    render();
+    setStoredServerUrl(validation.url)
+      .then(() => runHealthCheck(validation.url))
+      .catch((err) => {
+        state = {
+          kind: "form",
+          prefill: validation.url,
+          error: `Couldn't save the server URL (${errorMessage(err)}). Try again.`,
+        };
+        render();
+      });
   }
 
-  getStoredServerUrl().then((stored) => {
-    if (stored) {
-      runHealthCheck(stored);
-    } else {
+  getStoredServerUrl()
+    .then((stored) => {
+      if (stored) {
+        runHealthCheck(stored);
+      } else {
+        render();
+      }
+    })
+    .catch((err) => {
+      // Without this, a rejected read leaves `container` exactly as it
+      // was at launch -- an empty <main id="app">, permanently blank,
+      // since nothing else ever calls render() (reliability/correctness
+      // finding). Falling back to the form lets the user just re-enter
+      // the URL instead of being stuck.
+      state = {
+        kind: "form",
+        prefill: "",
+        error: `Couldn't read the saved server URL (${errorMessage(err)}). Enter it again.`,
+      };
       render();
-    }
-  });
+    });
 }
 
 window.addEventListener("DOMContentLoaded", () => {

@@ -9,8 +9,20 @@ const HEALTH_CHECK_TIMEOUT_MS = 5000;
 
 export type HealthCheckResult = { ok: true } | { ok: false; reason: string };
 
+// A leading "/" in the second argument to `new URL()` resolves as an
+// absolute path against the base's origin, discarding any existing path
+// on `serverUrl` -- e.g. `new URL("/api/health", "https://host/cerebrum/")`
+// resolves to "https://host/api/health", silently dropping "/cerebrum/".
+// That breaks a server reverse-proxied under a subpath (reports
+// "unreachable" even when healthy). Using a relative reference against a
+// guaranteed-trailing-slash base preserves the existing path instead.
+function healthCheckUrl(serverUrl: string): string {
+  const base = serverUrl.endsWith("/") ? serverUrl : `${serverUrl}/`;
+  return new URL("api/health", base).toString();
+}
+
 export async function checkHealth(serverUrl: string): Promise<HealthCheckResult> {
-  const healthUrl = new URL("/api/health", serverUrl).toString();
+  const healthUrl = healthCheckUrl(serverUrl);
   try {
     const response = await fetch(healthUrl, {
       method: "GET",

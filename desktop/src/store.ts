@@ -12,7 +12,15 @@ let storePromise: Promise<Store> | null = null;
 
 function getStore(): Promise<Store> {
   if (!storePromise) {
-    storePromise = load(STORE_FILE);
+    storePromise = load(STORE_FILE).catch((err: unknown) => {
+      // Don't cache a failed open -- a transient failure (e.g. the
+      // settings directory not existing yet on first run) would
+      // otherwise permanently disable persistence until the app
+      // restarts, since every later call would keep awaiting this same
+      // rejected promise (reliability finding).
+      storePromise = null;
+      throw err;
+    });
   }
   return storePromise;
 }

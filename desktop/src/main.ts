@@ -1,7 +1,12 @@
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { checkHealth } from "./health";
-import { getStoredServerUrl, setStoredServerUrl } from "./store";
+import {
+  getHasConnectedSuccessfully,
+  getStoredServerUrl,
+  setHasConnectedSuccessfully,
+  setStoredServerUrl,
+} from "./store";
 import { validateServerUrl } from "./validation";
 
 // The bootstrap window ships chromeless and pinned to a small size (see
@@ -130,9 +135,30 @@ export function initApp(container: HTMLElement): void {
     render();
     const result = await checkHealth(url);
     if (result.ok) {
+      // Record that this URL has connected successfully at least once, so
+      // a later failed health-check for it can navigate through to the
+      // offline snapshot instead of hard-blocking on the error screen
+      // (R4/KTD5). Best-effort and idempotent, same as expandToAppWindow
+      // below -- a stuck write here shouldn't strand the user, and it's
+      // fine to re-set this on every success rather than only the first.
+      await setHasConnectedSuccessfully().catch(() => {});
       // Best-effort: a stuck permission or platform quirk here shouldn't
       // strand the user on the bootstrap screen forever -- fall through to
       // navigation either way, just possibly still chromeless.
+      await expandToAppWindow().catch(() => {});
+      navigation.navigateTo(url);
+      return;
+    }
+    // A URL that has connected successfully before still navigates through
+    // on a failed health-check -- the cached frontend can serve the vault
+    // as it stood at the last successful sync (R4). The hard error/retry
+    // screen is reserved for a URL that has never connected: first-time
+    // setup, a typo'd URL, a server that's never been reachable -- there
+    // is nothing to show offline for those.
+    const hasConnectedSuccessfully = await getHasConnectedSuccessfully().catch(
+      () => false,
+    );
+    if (hasConnectedSuccessfully) {
       await expandToAppWindow().catch(() => {});
       navigation.navigateTo(url);
       return;

@@ -2,9 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGetStoredServerUrl = vi.fn();
 const mockSetStoredServerUrl = vi.fn();
+const mockGetHasConnectedSuccessfully = vi.fn();
+const mockSetHasConnectedSuccessfully = vi.fn();
 vi.mock("./store", () => ({
   getStoredServerUrl: (...args: unknown[]) => mockGetStoredServerUrl(...args),
   setStoredServerUrl: (...args: unknown[]) => mockSetStoredServerUrl(...args),
+  getHasConnectedSuccessfully: (...args: unknown[]) =>
+    mockGetHasConnectedSuccessfully(...args),
+  setHasConnectedSuccessfully: (...args: unknown[]) =>
+    mockSetHasConnectedSuccessfully(...args),
 }));
 
 const mockCheckHealth = vi.fn();
@@ -56,6 +62,8 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   navigateSpy = vi.spyOn(navigation, "navigateTo").mockImplementation(() => {});
+  mockGetHasConnectedSuccessfully.mockResolvedValue(false);
+  mockSetHasConnectedSuccessfully.mockResolvedValue(undefined);
   mockSetDecorations.mockResolvedValue(undefined);
   mockSetResizable.mockResolvedValue(undefined);
   mockSetSize.mockResolvedValue(undefined);
@@ -362,5 +370,119 @@ describe("reconnect after failure (F2)", () => {
 
     expect(navigateSpy).not.toHaveBeenCalled();
     expect(container.querySelector("#error-message")?.textContent).toContain("503");
+  });
+});
+
+describe("offline snapshot navigation on failed health-check (R4/KTD5)", () => {
+  it("marks the URL as having connected successfully on a successful health-check", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container);
+    await flush();
+
+    expect(mockSetHasConnectedSuccessfully).toHaveBeenCalled();
+    expect(navigateSpy).toHaveBeenCalledWith("http://localhost:8080/");
+  });
+
+  // Reliability, mirroring expandToAppWindow's best-effort handling: a
+  // stuck write here must not strand the user on the bootstrap screen.
+  it("still navigates on success when persisting hasConnectedSuccessfully fails", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: true });
+    mockSetHasConnectedSuccessfully.mockRejectedValue(new Error("disk full"));
+
+    initApp(container);
+    await flush();
+
+    expect(navigateSpy).toHaveBeenCalledWith("http://localhost:8080/");
+  });
+
+  it("navigates through instead of showing the error screen when a previously-connected URL's health-check fails", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: false, reason: "network error" });
+    mockGetHasConnectedSuccessfully.mockResolvedValue(true);
+
+    initApp(container);
+    await flush();
+
+    expect(container.querySelector("#error-message")).toBeNull();
+    expect(navigateSpy).toHaveBeenCalledWith("http://localhost:8080/");
+  });
+
+  it("still restores window chrome when navigating through on a failed health-check", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: false, reason: "network error" });
+    mockGetHasConnectedSuccessfully.mockResolvedValue(true);
+
+    initApp(container);
+    await flush();
+
+    expect(mockSetDecorations).toHaveBeenCalledWith(true);
+    expect(navigateSpy).toHaveBeenCalledWith("http://localhost:8080/");
+  });
+
+  // Regression test for today's unchanged behavior: a URL that has never
+  // connected successfully still hits the hard error/retry screen on
+  // failure -- there is nothing to show offline for it. (mockGetHasConnectedSuccessfully
+  // defaults to false in beforeEach, matching a URL that's never connected.)
+  it("still shows the error screen when a URL that has never connected successfully fails", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: false, reason: "network error" });
+
+    initApp(container);
+    await flush();
+
+    expect(mockGetHasConnectedSuccessfully).toHaveBeenCalled();
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(container.querySelector("#error-message")).not.toBeNull();
+  });
+
+  // Safe fallback: if reading the flag itself fails, don't guess -- treat
+  // it the same as "never connected" rather than risk showing a broken
+  // app for a URL we have no evidence ever worked.
+  it("falls back to the error screen when reading hasConnectedSuccessfully fails", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: false, reason: "network error" });
+    mockGetHasConnectedSuccessfully.mockRejectedValue(new Error("disk full"));
+
+    initApp(container);
+    await flush();
+
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(container.querySelector("#error-message")).not.toBeNull();
+  });
+
+  // The "Change server URL" flow must not let a brand-new URL inherit the
+  // previous URL's success state. main.ts re-queries the store for
+  // whichever URL it's currently health-checking rather than caching a
+  // result across URLs, and every URL-changing path routes through
+  // setStoredServerUrl -- the choke point store.test.ts confirms resets
+  // the flag. This test exercises that whole path end to end with
+  // realistic (post-reset) mock values: URL A has connected before and
+  // navigates through on failure, but the freshly entered URL B has not,
+  // so B's failure still lands on the error screen.
+  it("does not carry a previous URL's success state onto a newly entered URL", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: false, reason: "network error" });
+    mockGetHasConnectedSuccessfully.mockResolvedValue(false);
+    initApp(container);
+    await flush();
+    // URL A has never connected -- ordinary error screen, with a working
+    // "Change server URL" control to drive the rest of the scenario.
+    expect(container.querySelector("#error-message")).not.toBeNull();
+
+    mockSetStoredServerUrl.mockResolvedValue(undefined);
+    container.querySelector<HTMLButtonElement>("#change-url-button")?.click();
+    fillAndSubmit(container, "http://other-host:9090");
+    await flush();
+
+    expect(mockSetStoredServerUrl).toHaveBeenCalledWith("http://other-host:9090/");
+    // B has never connected either (post-reset state) -- still the error
+    // screen, not a navigate-through, even though A had connected before.
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(container.querySelector("#error-message")?.textContent).toContain(
+      "other-host:9090",
+    );
   });
 });

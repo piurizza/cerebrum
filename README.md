@@ -53,6 +53,19 @@ above, not a separate volume. Anyone already backing up the vault is
 already backing up accounts/sessions/tokens; no separate backup step is
 needed as long as `auth.sqlite3` stays under that mount.
 
+The frontend also serves HTTPS on `https://localhost:8443` (override via
+`CEREBRUM_HTTPS_PORT`), using a self-signed cert nginx generates on first
+start. Offline mode (see [SPEC.md](SPEC.md#7-tech-stack)) needs this --
+a service worker only registers in a secure context, which plain HTTP
+only satisfies for `localhost`, not a LAN IP. To use offline mode from a
+phone or another device on your network: set `CEREBRUM_TLS_SAN` in your
+`.env` to your LAN IP (e.g. `IP:192.168.1.14`) before first start, then
+visit the `https://` URL on that device once and accept the one-time
+"not trusted" browser warning -- expected for a self-signed cert,
+click through it ("Advanced" / "Proceed anyway", wording varies by
+browser). Plain HTTP on `CEREBRUM_PORT` keeps working unchanged for
+everything except offline mode.
+
 ## Run desktop app
 
     cd desktop && npm run tauri dev

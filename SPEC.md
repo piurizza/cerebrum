@@ -244,6 +244,15 @@ API calls.
   (`${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault`), not stored in an
   anonymous Docker volume, so notes persist on the host filesystem
   independent of the containers — consistent with "no vendor lock-in."
+- `frontend` also serves HTTPS (`CEREBRUM_HTTPS_PORT`, default `8443`),
+  self-signed, generated on first start by `frontend/docker-entrypoint.sh`
+  and persisted in a `cerebrum_tls_certs` volume. Required for offline
+  mode (§9 Access) — a service worker only registers in a secure context,
+  which plain HTTP satisfies only for `localhost`, not a LAN IP. Plain
+  HTTP keeps serving unchanged alongside it; HTTPS is opt-in by using the
+  `https://` URL. Not currently used to flip `AUTH_COOKIE_SECURE` on by
+  default — that stays an operator choice, since enabling it would break
+  the plain-HTTP path (the cookie stops being sent over `http://`).
 
 ### Environment variables
 
@@ -267,7 +276,9 @@ API calls.
 | `WATCHFILES_FORCE_POLLING` | backend | *(unset)* | force polling instead of native filesystem events; opt in on bind-mount/network filesystems (Docker Desktop on macOS/Windows, NFS) |
 | `MAX_ATTACHMENT_SIZE_BYTES` | backend | `10000000` | max size (bytes) of a single pasted image upload |
 | `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
-| `CEREBRUM_PORT` | compose | `8080` | host port for the frontend |
+| `CEREBRUM_PORT` | compose | `8080` | host port for the frontend (HTTP) |
+| `CEREBRUM_HTTPS_PORT` | compose | `8443` | host port for the frontend's self-signed HTTPS listener; required for offline mode |
+| `CEREBRUM_TLS_SAN` | compose | *(unset)* | extra Subject Alternative Names for the self-signed cert, comma-separated (e.g. `IP:192.168.1.14`) — set to your LAN IP/hostname to use offline mode from another device |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 | `VITE_DAILY_NOTE_FOLDER` | frontend | `daily` | vault-relative folder the "Today" button creates daily notes in. Build-time only -- baked into the frontend image at `npm run build`; changing it on a deployed instance needs `docker compose build/up frontend`, not just an env edit |
 | `VITE_TEMPLATES_FOLDER` | frontend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Build-time only, same rebuild caveat as `VITE_DAILY_NOTE_FOLDER` above. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |

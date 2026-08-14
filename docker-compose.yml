@@ -40,8 +40,23 @@ services:
         VITE_DAILY_NOTE_FOLDER: ${VITE_DAILY_NOTE_FOLDER:-daily}
         VITE_TEMPLATES_FOLDER: ${VITE_TEMPLATES_FOLDER:-templates}
     restart: unless-stopped
+    environment:
+      # Extra Subject Alternative Names for the self-signed HTTPS cert
+      # (KD4/U1) -- e.g. "IP:192.168.1.14" for LAN/phone access. Left for
+      # the operator to set explicitly, matching WATCHFILES_FORCE_POLLING
+      # above: not something to auto-detect and guess at.
+      CEREBRUM_TLS_SAN: ${CEREBRUM_TLS_SAN:-}
     ports:
       - "${CEREBRUM_PORT:-8080}:80"
+      - "${CEREBRUM_HTTPS_PORT:-8443}:443"
+    volumes:
+      # Persists the self-signed cert across restarts -- without this it
+      # would regenerate (and need re-trusting in the browser) on every
+      # `docker compose up`.
+      - cerebrum_tls_certs:/etc/nginx/certs
     depends_on:
       backend:
         condition: service_healthy
+
+volumes:
+  cerebrum_tls_certs:

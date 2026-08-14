@@ -51,6 +51,27 @@ export function setOnRefreshFailure(callback: (() => void) | null): void {
   onRefreshFailure = callback;
 }
 
+// Lets `OfflineContext` learn when a live request genuinely fails at the
+// network layer (`fetch()` itself never got a response), vs. succeeding
+// (even with a non-2xx status -- that still proves the network reached the
+// server). `navigator.onLine` only reliably reports the OS's network-
+// interface state, not whether *this* configured server is reachable --
+// verified live against the real desktop app: a docker container going
+// down while the host machine's wifi stays up leaves `navigator.onLine`
+// `true` the whole time, so a banner driven by it alone never appears even
+// though the user is silently viewing a stale cached snapshot (exactly the
+// scenario R5 exists to surface). Plain module-level callbacks, mirroring
+// `onRefreshFailure` above: one consumer, no need for an event system.
+let onNetworkFailure: (() => void) | null = null;
+let onNetworkRecovery: (() => void) | null = null;
+
+export function setOnNetworkStatusChange(
+  callbacks: { onFailure: () => void; onRecovery: () => void } | null,
+): void {
+  onNetworkFailure = callbacks?.onFailure ?? null;
+  onNetworkRecovery = callbacks?.onRecovery ?? null;
+}
+
 // The two endpoints that must never trigger a refresh-and-retry on 401:
 // `/auth/login` (a failed login is a real 401 the caller needs to see, not
 // something a token refresh could ever fix) and `/auth/refresh` itself
@@ -68,14 +89,24 @@ async function fetchWithToken(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  return fetch(`${API_BASE}/api${path}`, {
-    ...init,
-    headers,
-    // Needed so the httpOnly refresh-token cookie is sent to
-    // `/api/auth/refresh` -- harmless on every other request since they
-    // don't read cookies at all.
-    credentials: "include",
-  });
+  try {
+    const response = await fetch(`${API_BASE}/api${path}`, {
+      ...init,
+      headers,
+      // Needed so the httpOnly refresh-token cookie is sent to
+      // `/api/auth/refresh` -- harmless on every other request since they
+      // don't read cookies at all.
+      credentials: "include",
+    });
+    // A response -- any response, including a non-2xx one -- proves the
+    // network layer actually reached the server. Only fetch() itself
+    // throwing (below) means it didn't.
+    onNetworkRecovery?.();
+    return response;
+  } catch (err) {
+    onNetworkFailure?.();
+    throw err;
+  }
 }
 
 // Thrown instead of a plain `Error` on any non-2xx response, so callers
@@ -219,8 +250,12 @@ async function refreshSession(): Promise<string> {
       // fetch() itself rejected -- no HTTP response was ever received.
       // Never a real server verdict, regardless of the underlying cause.
       lastRefreshFailureWasNetworkError = true;
+      onNetworkFailure?.();
       throw err;
     }
+    // A response -- any response -- proves the network layer reached the
+    // server, same reasoning as fetchWithToken() above.
+    onNetworkRecovery?.();
     if (!response.ok) {
       // A response came back and the server said no -- an explicit
       // rejection, not a network failure.

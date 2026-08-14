@@ -24,13 +24,20 @@ registerSW({ immediate: true });
 // out-of-scope for this feature): this covers both a fresh desktop-app
 // launch and a browser reload, which is every point this app "loads".
 // Fire-and-forget -- `syncVault()` never throws (see its own docstring)
-// and must not delay the initial render below. Gated on `navigator.onLine`
-// since there's no point racing a sync against a connection that's
-// already known to be down; `syncVault()`'s own per-note failures handle
-// the rarer case of going offline *during* the sync.
-if (navigator.onLine) {
-  void syncVault();
-}
+// and must not delay the initial render below.
+//
+// Deliberately UNCONDITIONAL, not gated on `navigator.onLine` -- an
+// earlier version checked it here as a "why race a sync we already know
+// is doomed" optimization, but `navigator.onLine` is read at module-load
+// time, before the very first paint, and real WebKitGTK testing (the
+// Tauri desktop app) showed it can still report stale/inaccurate state
+// this early -- silently skipping the sync for the entire session even
+// though the app is genuinely online a moment later, with nothing to
+// retry it. `syncVault()`'s own `listNotes()` failure handling already
+// covers the case where this call turns out to be genuinely offline --
+// a fast, harmless failed fetch, not a real cost worth an early-exit
+// optimization that can silently disable the feature.
+void syncVault();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

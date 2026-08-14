@@ -4,6 +4,26 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LAST_SYNCED_AT_KEY } from "../offline/sync";
+
+// Captured directly rather than through a full client.ts mock -- this
+// context's only dependency on the module is registering for this one
+// callback pair, and capturing them lets tests invoke exactly what a real
+// network failure/recovery would trigger.
+let capturedNetworkCallbacks: {
+  onFailure: () => void;
+  onRecovery: () => void;
+} | null = null;
+const mockSetOnNetworkStatusChange = vi.fn(
+  (callbacks: { onFailure: () => void; onRecovery: () => void } | null) => {
+    capturedNetworkCallbacks = callbacks;
+  },
+);
+vi.mock("../api/client", () => ({
+  setOnNetworkStatusChange: (
+    callbacks: { onFailure: () => void; onRecovery: () => void } | null,
+  ) => mockSetOnNetworkStatusChange(callbacks),
+}));
+
 import { OfflineProvider, useOffline } from "./OfflineContext";
 
 function setNavigatorOnLine(value: boolean) {
@@ -34,6 +54,8 @@ function renderProvider() {
 beforeEach(() => {
   window.localStorage.clear();
   setNavigatorOnLine(true);
+  mockSetOnNetworkStatusChange.mockClear();
+  capturedNetworkCallbacks = null;
 });
 
 afterEach(() => {
@@ -131,6 +153,52 @@ describe("OfflineProvider", () => {
     expect(screen.getByTestId("lastSyncedAt")).toHaveTextContent(
       "2026-08-14T09:00:00.000Z",
     );
+  });
+
+  it("flips isOffline to true when a real request fails at the network layer, even though navigator.onLine stays true", () => {
+    // The scenario this closes: the device's own network interface is up
+    // (navigator.onLine never goes false) but the configured server
+    // itself is unreachable -- verified live against the real desktop
+    // app (a docker container going down while the host's wifi stayed
+    // up). A flag driven by navigator.onLine alone would miss this
+    // entirely.
+    renderProvider();
+    expect(screen.getByTestId("isOffline")).toHaveTextContent("false");
+
+    act(() => {
+      capturedNetworkCallbacks?.onFailure();
+    });
+
+    expect(screen.getByTestId("isOffline")).toHaveTextContent("true");
+    expect(navigator.onLine).toBe(true);
+  });
+
+  it("flips isOffline back to false when a real request recovers", () => {
+    renderProvider();
+    act(() => {
+      capturedNetworkCallbacks?.onFailure();
+    });
+    expect(screen.getByTestId("isOffline")).toHaveTextContent("true");
+
+    act(() => {
+      capturedNetworkCallbacks?.onRecovery();
+    });
+
+    expect(screen.getByTestId("isOffline")).toHaveTextContent("false");
+  });
+
+  it("registers and unregisters its network-status callback across mount/unmount", () => {
+    const { unmount } = renderProvider();
+    expect(mockSetOnNetworkStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onFailure: expect.any(Function),
+        onRecovery: expect.any(Function),
+      }),
+    );
+
+    unmount();
+
+    expect(mockSetOnNetworkStatusChange).toHaveBeenLastCalledWith(null);
   });
 
   it("removes its online/offline listeners on unmount", () => {

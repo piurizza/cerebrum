@@ -12,6 +12,23 @@ vi.mock("./health", () => ({
   checkHealth: (...args: unknown[]) => mockCheckHealth(...args),
 }));
 
+const mockSetDecorations = vi.fn();
+const mockSetResizable = vi.fn();
+const mockSetSize = vi.fn();
+const mockCenter = vi.fn();
+const mockGetCurrentWindow = vi.fn();
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: (...args: unknown[]) => mockGetCurrentWindow(...args),
+}));
+vi.mock("@tauri-apps/api/dpi", () => ({
+  LogicalSize: class {
+    constructor(
+      public width: number,
+      public height: number,
+    ) {}
+  },
+}));
+
 import { initApp, navigation } from "./main";
 
 function flush(): Promise<void> {
@@ -39,6 +56,16 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   navigateSpy = vi.spyOn(navigation, "navigateTo").mockImplementation(() => {});
+  mockSetDecorations.mockResolvedValue(undefined);
+  mockSetResizable.mockResolvedValue(undefined);
+  mockSetSize.mockResolvedValue(undefined);
+  mockCenter.mockResolvedValue(undefined);
+  mockGetCurrentWindow.mockReturnValue({
+    setDecorations: mockSetDecorations,
+    setResizable: mockSetResizable,
+    setSize: mockSetSize,
+    center: mockCenter,
+  });
 });
 
 describe("first launch (F1)", () => {
@@ -246,6 +273,40 @@ describe("first-launch success (F1)", () => {
   it("navigates to the configured URL when the health-check succeeds", async () => {
     mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
     mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container);
+    await flush();
+
+    expect(navigateSpy).toHaveBeenCalledWith("http://localhost:8080/");
+  });
+
+  // The bootstrap window ships chromeless and pinned to a tiny size for the
+  // URL-entry/error screen -- without expanding it back to a normal,
+  // decorated, resizable window first, the real app (a full note-taking
+  // UI) would render inside that tiny shell with no way to close, resize,
+  // or maximize it.
+  it("restores window chrome before navigating to the real app", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container);
+    await flush();
+
+    expect(mockSetDecorations).toHaveBeenCalledWith(true);
+    expect(mockSetResizable).toHaveBeenCalledWith(true);
+    expect(mockSetSize).toHaveBeenCalled();
+    expect(mockCenter).toHaveBeenCalled();
+    expect(navigateSpy).toHaveBeenCalledWith("http://localhost:8080/");
+  });
+
+  // Reliability: a window-chrome mutation failing (e.g. a denied
+  // permission, an unsupported platform) must not strand the user on the
+  // bootstrap screen -- navigation should still happen, just possibly
+  // still chromeless.
+  it("still navigates when restoring window chrome fails", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://localhost:8080/");
+    mockCheckHealth.mockResolvedValue({ ok: true });
+    mockSetDecorations.mockRejectedValue(new Error("not supported"));
 
     initApp(container);
     await flush();

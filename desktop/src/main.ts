@@ -1,6 +1,28 @@
+import { LogicalSize } from "@tauri-apps/api/dpi";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { checkHealth } from "./health";
 import { getStoredServerUrl, setStoredServerUrl } from "./store";
 import { validateServerUrl } from "./validation";
+
+// The bootstrap window ships chromeless and pinned to a small size (see
+// tauri.conf.json) so the URL-entry/error screen reads as a compact native
+// dialog. But that's the *bootstrap* window's shape, not the real app's --
+// once a health-check succeeds we're about to navigate this same window
+// into the full note-taking UI, which needs an actual title bar (close/
+// minimize/maximize -- there is no other way to close the app once
+// decorations are off) and room to resize. Restore normal window chrome
+// right before navigating so the transition lands on a properly-sized,
+// controllable window instead of the full app rendering inside the tiny
+// undecorated bootstrap shell.
+const APP_WINDOW_SIZE = new LogicalSize(1280, 800);
+
+async function expandToAppWindow(): Promise<void> {
+  const win = getCurrentWindow();
+  await win.setDecorations(true);
+  await win.setResizable(true);
+  await win.setSize(APP_WINDOW_SIZE);
+  await win.center();
+}
 
 // The bootstrap screen's state machine (see the mermaid diagram in
 // docs/plans/2026-08-12-001-feat-desktop-app-plan.md's Planning Contract):
@@ -108,6 +130,10 @@ export function initApp(container: HTMLElement): void {
     render();
     const result = await checkHealth(url);
     if (result.ok) {
+      // Best-effort: a stuck permission or platform quirk here shouldn't
+      // strand the user on the bootstrap screen forever -- fall through to
+      // navigation either way, just possibly still chromeless.
+      await expandToAppWindow().catch(() => {});
       navigation.navigateTo(url);
       return;
     }

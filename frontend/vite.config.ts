@@ -30,6 +30,57 @@ export default defineConfig({
         // Covers the built JS/CSS/HTML plus any bundled font/image assets;
         // `dist` is Vite's build output root at the time workbox scans it.
         globPatterns: ["**/*.{js,css,html,svg,woff,woff2,ttf,eot}"],
+        // Full-vault offline snapshot (R1): every note-list/note-content/
+        // graph GET response the app makes -- both the ones `sync.ts`'s
+        // proactive full-vault sync fires on a successful load and the
+        // ordinary ones normal navigation triggers -- gets cached here as
+        // a side effect of succeeding, so a later connection loss can
+        // serve the whole last-synced vault, not just app-shell assets.
+        //
+        // `NetworkFirst`, not `CacheFirst` or `StaleWhileRevalidate`: a
+        // live connection must always win when one is available (viewing
+        // a note online should never show a stale cached copy over a
+        // fresh one), and the cache is a fallback strictly for when the
+        // network fails.
+        //
+        // `networkTimeoutSeconds: 4` (KTD4) matters specifically for the
+        // "hanging, not refusing" case -- a dropped wifi connection or a
+        // firewall that silently swallows packets doesn't fail fast the
+        // way a refused connection does, and Workbox's `NetworkFirst`
+        // waits indefinitely for the network by default. Without this,
+        // that scenario would leave the offline UI (U4) stalled with no
+        // signal for an unbounded time instead of falling back to the
+        // cached snapshot within a few seconds.
+        //
+        // Matched with a function, not a plain `RegExp`/string `urlPattern`,
+        // because `VITE_API_BASE_URL` can point the app at a different
+        // origin than the one serving the built assets (e.g. the desktop
+        // app) -- matching on `url.pathname` alone works regardless of
+        // origin, whereas a `RegExp` tested against the full URL would
+        // silently stop matching the moment the origin isn't the SW's own.
+        runtimeCaching: [
+          {
+            // Covers both `listNotes()` (`GET /api/notes`) and
+            // `getNote(path)` (`GET /api/notes/<path>`, `path` possibly
+            // containing further encoded `/`s for nested folders).
+            urlPattern: ({ url, request }) =>
+              request.method === "GET" && /^\/api\/notes(\/.*)?$/.test(url.pathname),
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "api-notes",
+              networkTimeoutSeconds: 4,
+            },
+          },
+          {
+            urlPattern: ({ url, request }) =>
+              request.method === "GET" && url.pathname === "/api/graph",
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "api-graph",
+              networkTimeoutSeconds: 4,
+            },
+          },
+        ],
       },
     }),
   ],

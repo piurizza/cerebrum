@@ -1,14 +1,14 @@
-.PHONY: install install-backend install-frontend \
-        lint lint-backend lint-frontend \
-        format format-backend format-frontend \
-        type-check test test-backend test-frontend \
+.PHONY: install install-backend install-frontend install-desktop \
+        lint lint-backend lint-frontend lint-desktop \
+        format format-backend format-frontend format-desktop \
+        type-check test test-backend test-frontend test-desktop \
         check clean up down logs \
-        generate-api-types check-api-types
+        generate-api-types check-api-types build-desktop
 
 UV ?= uv
 NPM ?= npm
 
-install: install-backend install-frontend
+install: install-backend install-frontend install-desktop
 
 install-backend:
 	cd backend && $(UV) sync --all-groups
@@ -19,7 +19,11 @@ install-frontend:
 	cd frontend && $(NPM) install
 	cp -n frontend/.env.example frontend/.env
 
-lint: lint-backend lint-frontend
+install-desktop:
+	cd desktop && $(NPM) install
+	cp -n desktop/.env.example desktop/.env
+
+lint: lint-backend lint-frontend lint-desktop
 
 lint-backend:
 	cd backend && $(UV) run ruff check src tests && $(UV) run pylint src tests
@@ -27,7 +31,10 @@ lint-backend:
 lint-frontend:
 	cd frontend && $(NPM) run check
 
-format: format-backend format-frontend
+lint-desktop:
+	cd desktop && $(NPM) run check
+
+format: format-backend format-frontend format-desktop
 
 format-backend:
 	cd backend && $(UV) run ruff format src tests && $(UV) run ruff check --fix src tests
@@ -35,11 +42,18 @@ format-backend:
 format-frontend:
 	cd frontend && $(NPM) run format
 
+format-desktop:
+	cd desktop && $(NPM) run format
+
+# Not split into -backend/-frontend/-desktop variants, unlike the other
+# umbrella targets above -- this predates the desktop app and there's no
+# need to retrofit the split just to add one more `cd && run` line.
 type-check:
 	cd backend && $(UV) run mypy
 	cd frontend && $(NPM) run type-check
+	cd desktop && $(NPM) run type-check
 
-test: test-backend test-frontend
+test: test-backend test-frontend test-desktop
 
 test-backend:
 	cd backend && $(UV) run pytest
@@ -48,7 +62,17 @@ test-frontend:
 	cd frontend && $(NPM) run test:run
 	cd frontend && $(NPM) run build
 
+test-desktop:
+	cd desktop && $(NPM) run test:run
+
 check: lint type-check test
+
+# Not part of `check` -- a Tauri build needs system deps (WebKitGTK) that
+# CI doesn't install yet (KTD7 in the desktop-app plan), and produces a
+# real .deb, not just a compile check. Run manually when verifying
+# packaging.
+build-desktop:
+	cd desktop && $(NPM) run tauri build
 
 # Regenerates frontend/src/api/generated/schema.ts from the backend's
 # current OpenAPI schema. The intermediate schema JSON (/openapi.json,
@@ -69,6 +93,7 @@ clean:
 	rm -rf backend/.mypy_cache backend/.pytest_cache backend/.ruff_cache backend/dist backend/build backend/*.egg-info
 	find backend/src backend/tests -type d -name __pycache__ -prune -exec rm -rf {} +
 	rm -rf frontend/dist frontend/node_modules/.vite
+	rm -rf desktop/dist desktop/node_modules/.vite desktop/src-tauri/target
 
 up:
 	docker compose up --build

@@ -1,0 +1,30 @@
+[package]
+# "cerebrum", not "desktop" -- this becomes the installed binary name
+# (/usr/bin/cerebrum), and "desktop" would be a needlessly generic name
+# to occupy in a user's PATH.
+name = "cerebrum"
+version = "0.1.0"
+description = "Native desktop client for Cerebrum -- a self-hosted second brain"
+authors = ["Cerebrum"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "cerebrum_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# >=2.10.3 fixes CVE-2026-42184 (origin confusion) -- see docs/plans/2026-08-12-001-feat-desktop-app-plan.md KTD5.
+tauri = { version = ">=2.10.3, <3", features = [] }
+tauri-plugin-store = "2"
+tauri-plugin-http = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+

@@ -7,7 +7,7 @@ import { validateServerUrl } from "./validation";
 // NoURL/form -> Checking -> Navigated (one-way exit) or Error -> Checking.
 type ScreenState =
   | { kind: "form"; prefill: string; error: string | null }
-  | { kind: "checking"; url: string; retry: boolean }
+  | { kind: "checking"; url: string }
   | { kind: "error"; url: string; reason: string };
 
 function escapeHtml(value: string): string {
@@ -75,7 +75,7 @@ export function initApp(container: HTMLElement): void {
     `;
     container
       .querySelector<HTMLButtonElement>("#retry-button")
-      ?.addEventListener("click", () => runHealthCheck(s.url, true));
+      ?.addEventListener("click", () => runHealthCheck(s.url));
     container
       .querySelector<HTMLButtonElement>("#change-url-button")
       ?.addEventListener("click", () => {
@@ -88,8 +88,8 @@ export function initApp(container: HTMLElement): void {
     container.querySelector<HTMLElement>("#error-message")?.focus();
   }
 
-  async function runHealthCheck(url: string, retry: boolean): Promise<void> {
-    state = { kind: "checking", url, retry };
+  async function runHealthCheck(url: string): Promise<void> {
+    state = { kind: "checking", url };
     render();
     const result = await checkHealth(url);
     if (result.ok) {
@@ -107,14 +107,12 @@ export function initApp(container: HTMLElement): void {
       render();
       return;
     }
-    setStoredServerUrl(validation.url).then(() =>
-      runHealthCheck(validation.url, false),
-    );
+    setStoredServerUrl(validation.url).then(() => runHealthCheck(validation.url));
   }
 
   getStoredServerUrl().then((stored) => {
     if (stored) {
-      runHealthCheck(stored, false);
+      runHealthCheck(stored);
     } else {
       render();
     }

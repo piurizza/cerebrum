@@ -13,6 +13,7 @@ making architectural changes.
 
 - `backend/` — FastAPI + SQLite index, serves the notes API (Python, `uv`)
 - `frontend/` — React + Vite + TypeScript web client (markdown editor + graph view)
+- `desktop/` — Tauri v2 native client, Linux (points at a running backend/frontend deployment; see [Run desktop app](#run-desktop-app))
 - `vault/` — default local dev directory for `.md` notes (gitignored)
 
 ## Setup
@@ -51,6 +52,20 @@ database (`auth.sqlite3`), stored alongside the search index under
 above, not a separate volume. Anyone already backing up the vault is
 already backing up accounts/sessions/tokens; no separate backup step is
 needed as long as `auth.sqlite3` stays under that mount.
+
+## Run desktop app
+
+    cd desktop && npm run tauri dev
+
+Native window (Linux only for now), no browser tab. On first launch it
+asks for a server URL — point it at any running cerebrum deployment
+(Docker or `make up` locally). No separate backend or account: it's a
+thin client for a server that's already running, not a second copy of
+the app. See [SPEC.md](SPEC.md#7-tech-stack) for why.
+
+To build a `.deb`: `make build-desktop` (needs `webkit2gtk4.1-devel` and
+`librsvg2-devel` system packages on the build machine — not installed by
+`make install-desktop`, since they're OS packages, not npm ones).
 
 ## MCP server
 

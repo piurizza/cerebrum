@@ -206,6 +206,32 @@ API calls.
 - A thin `fetch`-based API client; no data-fetching library yet (see
   Known Gaps).
 
+### Desktop — Tauri v2, Linux
+
+- **Tauri v2** over Electron — a native webview instead of a bundled
+  Chromium, fitting a client that ships and does little on its own.
+- The window navigates its webview directly to a configured cerebrum
+  server URL — no bundled copy of the frontend, no bundled backend, so
+  the existing cookie-based login works completely unchanged and the
+  app requires zero backend changes. A minimal native bootstrap screen
+  (URL entry, health-check, retry) is the only thing actually bundled;
+  it's Tauri app plumbing, not a second copy of the notes UI.
+- The health-check (`GET /api/health`) goes through **Tauri's HTTP
+  plugin** (`@tauri-apps/plugin-http`), not browser `fetch()` — the
+  plugin's request runs from the Rust side and isn't subject to the
+  webview's CORS policy, unlike a JS-side fetch to an arbitrary
+  cross-origin server. This keeps the "zero backend-touch" property:
+  the configured server's `CORS_ORIGINS` setting never needs to include
+  the desktop app's origin.
+- The configured server URL persists via **`tauri-plugin-store`**
+  (idiomatic Tauri v2 mechanism for one small setting) and the
+  capability file grants no `remote` origin access to that
+  user-configured URL — it's arbitrary input, not a trusted origin, so
+  it never gets native Tauri IPC access.
+- Packaging targets `.deb` only for now; no installer signing,
+  auto-update, or macOS/Windows builds (personal-use scope). See
+  [Feature roadmap](#9-feature-roadmap-user-stories).
+
 ## 8. Deployment
 
 - `backend/Dockerfile`: `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`
@@ -245,6 +271,7 @@ API calls.
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 | `VITE_DAILY_NOTE_FOLDER` | frontend | `daily` | vault-relative folder the "Today" button creates daily notes in. Build-time only -- baked into the frontend image at `npm run build`; changing it on a deployed instance needs `docker compose build/up frontend`, not just an env edit |
 | `VITE_TEMPLATES_FOLDER` | frontend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Build-time only, same rebuild caveat as `VITE_DAILY_NOTE_FOLDER` above. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |
+| `VITE_DEFAULT_SERVER_URL` | desktop | `http://localhost:8080` | dev-convenience default pre-filled on first launch of the desktop app; the app always lets the user view/change the configured URL afterward, so this is not a hard-coded target |
 
 ## 9. Feature roadmap (user stories)
 
@@ -373,6 +400,13 @@ history.
 - [x] lockout after repeated failed logins (atomic, race-safe counter),
       with timing-attack-resistant rejection (dummy Argon2 hash paid
       even on the locked-out/unknown-user paths).
+- [x] a native desktop app (Linux, `desktop/`) as an alternative to a
+      browser tab -- a Tauri v2 window pointed at a configured server URL,
+      not a second deployment. Reuses the existing self-hosted server and
+      cookie login unchanged; see [§7 Tech stack](#7-tech-stack) for the
+      CORS/capability decisions this required. Personal use only for now:
+      no installer signing, auto-update, or macOS/Windows builds (see
+      [Known gaps](#10-known-gaps--future-work)).
 
 ### Editing experience
 
@@ -525,3 +559,16 @@ how consistently each was cited as high-value across that research.
   unless it's fenced as a code block — the same appears-everywhere
   trade-off already noted for templates, extended here rather than
   given its own exclusion mechanism.
+- **The desktop app (`desktop/`) is Linux-only, personal-use scope.** No
+  installer signing, auto-update, or macOS/Windows builds; no
+  distribution channel (app store, package repo, formal release
+  pipeline); no CI job building the `.deb` (a Tauri Linux build needs
+  system packages -- `libwebkit2gtk-4.1-dev` and related -- with no
+  existing precedent in this repo's CI). `make build-desktop` run
+  locally is the only build path for now. A navigation-failure gap is
+  also accepted: the health-check and the subsequent navigation are two
+  separate steps, so a server that drops in the narrow window between
+  them can still strand the user on WebKitGTK's raw error page with no
+  in-app retry -- Tauri v2 has no native page-load-failure event to
+  detect this, and it wasn't judged likely enough to warrant a Rust-side
+  navigation-failure handler for v1.

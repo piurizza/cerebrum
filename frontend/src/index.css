@@ -915,6 +915,19 @@ a {
   font-size: 0.9rem;
 }
 
+/* R5: always-visible while offline, distinct from `.error-text` -- this
+   isn't a failure state, it's an expected mode the user needs to notice
+   at a glance without it reading as alarming. */
+.offline-banner {
+  color: var(--text);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
 /* Auth pages (login/register) */
 
 .auth-page {

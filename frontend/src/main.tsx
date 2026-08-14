@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import { router } from "./App.tsx";
 import { AuthProvider } from "./context/AuthContext";
+import { OfflineProvider } from "./context/OfflineContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import "./index.css";
 import { syncVault } from "./offline/sync";
@@ -39,9 +40,11 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <StrictMode>
     <ThemeProvider>
-      <AuthProvider>
-        <RouterProvider router={router} />
-      </AuthProvider>
+      <OfflineProvider>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </OfflineProvider>
     </ThemeProvider>
   </StrictMode>,
 );

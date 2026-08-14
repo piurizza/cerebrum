@@ -186,18 +186,48 @@ const REFRESH_TIMEOUT_MS = 10_000;
 // exported: every caller, in-tab or cross-tab, must go through the
 // `navigator.locks`-guarded `refreshAccessToken()` below, never this raw
 // fetch directly -- see that function's docstring for why.
+// Set by refreshSession() below, distinguishing a network-layer failure
+// (the fetch itself never got a response back -- DNS failure, connection
+// refused, this call's own timeout aborting it) from an explicit HTTP
+// rejection (a response DID come back, e.g. a 401 -- the server was
+// reached and said no). AuthContext's offline-restore fallback (KTD0)
+// needs exactly this distinction: a network failure with a previously
+// synced snapshot is offline continuity; an explicit rejection must still
+// log the user out even when a snapshot exists, or a genuinely revoked
+// session would never actually get logged out while a stale snapshot sits
+// in localStorage. Module-scoped rather than thrown/returned from
+// refreshSession() to avoid changing that function's or performRefresh()'s
+// external contract for their other callers.
+let lastRefreshFailureWasNetworkError = false;
+
+export function refreshFailureWasNetworkError(): boolean {
+  return lastRefreshFailureWasNetworkError;
+}
+
 async function refreshSession(): Promise<string> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+  let response: Response;
   try {
-    const response = await fetch(`${API_BASE}/api/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-      signal: controller.signal,
-    });
+    try {
+      response = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+        signal: controller.signal,
+      });
+    } catch (err) {
+      // fetch() itself rejected -- no HTTP response was ever received.
+      // Never a real server verdict, regardless of the underlying cause.
+      lastRefreshFailureWasNetworkError = true;
+      throw err;
+    }
     if (!response.ok) {
+      // A response came back and the server said no -- an explicit
+      // rejection, not a network failure.
+      lastRefreshFailureWasNetworkError = false;
       throw new Error(`POST /auth/refresh failed: ${response.status}`);
     }
+    lastRefreshFailureWasNetworkError = false;
     const data = (await response.json()) as LoginResponse;
     return data.access_token;
   } finally {

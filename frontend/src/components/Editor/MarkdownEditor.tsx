@@ -11,9 +11,20 @@ interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
   currentPath: string;
+  /** Freezes the editor in place (no keystrokes accepted) without
+   * unmounting it or touching `value` -- used when a live offline
+   * transition happens mid-edit (KTD6), so an in-progress unsaved draft
+   * stays visible and copyable instead of being discarded or navigated
+   * away from. Defaults to `false`. */
+  readOnly?: boolean;
 }
 
-export function MarkdownEditor({ value, onChange, currentPath }: MarkdownEditorProps) {
+export function MarkdownEditor({
+  value,
+  onChange,
+  currentPath,
+  readOnly = false,
+}: MarkdownEditorProps) {
   const { theme } = useTheme();
   const { notes } = useNotes();
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -40,6 +51,7 @@ export function MarkdownEditor({ value, onChange, currentPath }: MarkdownEditorP
         onChange={onChange}
         height="100%"
         theme={theme}
+        readOnly={readOnly}
       />
     </>
   );

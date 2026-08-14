@@ -6,6 +6,7 @@ import { UnsavedChangesDialog } from "../components/ConfirmDialog/UnsavedChanges
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
 import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
 import { NotePathHeader } from "../components/Editor/NotePathHeader";
+import { useOffline } from "../context/OfflineContext";
 import { useTheme } from "../context/ThemeContext";
 import { useZenMode } from "../context/ZenModeContext";
 import { stripFrontmatter } from "../lib/noteContent";
@@ -32,12 +33,23 @@ export function NoteViewPage() {
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<ViewMode>("preview");
   const [blockerError, setBlockerError] = useState<string | null>(null);
+  // Holds the raw fetch failure, not a pre-formatted message -- whether to
+  // show the offline-specific copy or the raw error text is decided at
+  // render time from the *current* `isOffline`, not baked in when the
+  // catch fires. That also keeps `isOffline` out of this effect's own
+  // dependency list below, which matters: this effect should only re-run
+  // when `path` changes (a new note being opened), not every time
+  // connectivity flips mid-fetch -- refetching on every online/offline
+  // toggle would fight the in-flight request.
+  const [loadError, setLoadError] = useState<unknown>(null);
   const { isZen, toggleZen } = useZenMode();
   const { theme, toggleTheme } = useTheme();
+  const { isOffline } = useOffline();
 
   useEffect(() => {
     if (!path) return;
     setLoading(true);
+    setLoadError(null);
     setMode("preview");
     getNote(path)
       .then((note) => {
@@ -46,6 +58,13 @@ export function NoteViewPage() {
         setTitle(note.title);
         setCreated(note.created);
         setUpdated(note.updated);
+      })
+      .catch((err) => {
+        // No prior `.catch()` existed here -- a cache-miss offline (or
+        // any other fetch failure) rejected silently, leaving `loading`
+        // false but content/title/etc. at their previous stale values
+        // (or blank on first load). Surface it explicitly instead.
+        setLoadError(err);
       })
       .finally(() => setLoading(false));
   }, [path]);
@@ -114,7 +133,7 @@ export function NoteViewPage() {
         (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
       if (!isSaveShortcut) return;
       event.preventDefault();
-      if (saving) return;
+      if (saving || isOffline) return;
       // Route through the dialog's own Save handler while it's blocking
       // navigation, so blocker.proceed()/the dialog's error state stay in
       // sync -- the plain handleSave() never calls blocker.proceed(), so
@@ -129,7 +148,7 @@ export function NoteViewPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [path, saving, handleSave, blocker.state, handleBlockedSave]);
+  }, [path, saving, isOffline, handleSave, blocker.state, handleBlockedSave]);
 
   if (!path) {
     return (
@@ -139,6 +158,14 @@ export function NoteViewPage() {
 
   if (loading) {
     return <p className="loading-indicator">Loading...</p>;
+  }
+
+  if (loadError) {
+    return (
+      <p className="error-text" role="alert">
+        {isOffline ? "This note isn't available offline." : errorMessage(loadError)}
+      </p>
+    );
   }
 
   return (
@@ -168,6 +195,7 @@ export function NoteViewPage() {
             }
           }}
           onDeleted={() => navigate("/")}
+          isOffline={isOffline}
           actions={
             <>
               <button
@@ -191,7 +219,12 @@ export function NoteViewPage() {
         />
 
         {mode === "edit" ? (
-          <MarkdownEditor value={content} onChange={setContent} currentPath={path} />
+          <MarkdownEditor
+            value={content}
+            onChange={setContent}
+            currentPath={path}
+            readOnly={isOffline}
+          />
         ) : (
           <MarkdownPreview body={stripFrontmatter(content)} currentPath={path} />
         )}
@@ -211,7 +244,7 @@ export function NoteViewPage() {
                 type="button"
                 className="btn btn-primary"
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || isOffline}
               >
                 {saving ? "Saving..." : "Save"}
               </button>
@@ -221,6 +254,7 @@ export function NoteViewPage() {
               type="button"
               className="btn btn-edit"
               onClick={() => setMode("edit")}
+              disabled={isOffline}
             >
               Edit
             </button>

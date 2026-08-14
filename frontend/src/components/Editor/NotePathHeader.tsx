@@ -12,6 +12,12 @@ interface NotePathHeaderProps {
   updated: string | null;
   onRenamed: (updated: Note) => void;
   onDeleted: () => void;
+  /** Disables Rename/Delete while serving cached/offline content (R3) --
+   * both are write paths a cache can't safely satisfy. Only the default
+   * render branch's entry points are gated; a user already mid-rename or
+   * mid-delete-confirm when connectivity drops is an edge case this
+   * doesn't need to solve. Defaults to `false`. */
+  isOffline?: boolean;
   /** Rendered at the far right of the chrome row (Zen/theme toggles), after
    * a spacer that pushes it away from the de-emphasized path/action
    * cluster -- matches the confirmed visual probe's single combined chrome
@@ -30,6 +36,7 @@ export function NotePathHeader({
   onRenamed,
   onDeleted,
   actions,
+  isOffline = false,
 }: NotePathHeaderProps) {
   const { notes, refreshNotes } = useNotes();
   const [copied, setCopied] = useState(false);
@@ -203,13 +210,19 @@ export function NotePathHeader({
           <button type="button" className="btn btn-sm" onClick={handleCopy}>
             {copied ? "Copied!" : "Copy path"}
           </button>
-          <button type="button" className="btn btn-sm" onClick={startRename}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={startRename}
+            disabled={isOffline}
+          >
             Rename
           </button>
           <button
             type="button"
             className="btn btn-sm btn-danger-outline"
             onClick={() => setIsConfirmingDelete(true)}
+            disabled={isOffline}
           >
             Delete
           </button>

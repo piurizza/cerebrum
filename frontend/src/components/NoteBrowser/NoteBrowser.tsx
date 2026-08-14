@@ -8,6 +8,7 @@ import {
   searchNotes,
 } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
+import { useOffline } from "../../context/OfflineContext";
 import { getDailyNoteDefaultBody, getTodayNotePath } from "../../lib/dailyNote";
 import { findDuplicateTitles } from "../../lib/duplicateTitles";
 import { stripTemplateIdentityFields } from "../../lib/noteContent";
@@ -23,6 +24,7 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 export function NoteBrowser() {
   const { notes, error, loading, refreshNotes } = useNotes();
+  const { isOffline } = useOffline();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [todayError, setTodayError] = useState<string | null>(null);
@@ -239,7 +241,7 @@ export function NoteBrowser() {
         type="button"
         className="btn btn-block"
         onClick={handleToday}
-        disabled={loading || isOpeningToday}
+        disabled={loading || isOpeningToday || isOffline}
       >
         Today
       </button>
@@ -260,7 +262,7 @@ export function NoteBrowser() {
         // would make handleCreate's listTemplateOptions() check run
         // against an empty list and silently skip the template picker
         // even when a relevant template genuinely exists.
-        disabled={loading}
+        disabled={loading || isOffline}
       >
         + New note
       </button>

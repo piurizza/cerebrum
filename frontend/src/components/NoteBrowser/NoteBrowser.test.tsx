@@ -50,6 +50,12 @@ vi.mock("../../context/NotesContext", () => ({
   useNotes: () => mockUseNotes(),
 }));
 
+const mockUseOffline =
+  vi.fn<() => { isOffline: boolean; lastSyncedAt: string | null }>();
+vi.mock("../../context/OfflineContext", () => ({
+  useOffline: () => mockUseOffline(),
+}));
+
 import { NoteBrowser } from "./NoteBrowser";
 
 const refreshNotes = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
@@ -72,6 +78,14 @@ function renderBrowser() {
     </MemoryRouter>,
   );
 }
+
+// Applies to every describe block below: none of them are exercising
+// offline behavior, so default to "online" and let the individual test
+// that cares override it.
+beforeEach(() => {
+  mockUseOffline.mockReset();
+  mockUseOffline.mockReturnValue({ isOffline: false, lastSyncedAt: null });
+});
 
 describe("NoteBrowser Today button", () => {
   beforeEach(() => {

@@ -13,7 +13,7 @@ import {
   setAccessToken,
   setOnRefreshFailure,
 } from "../api/client";
-import { LAST_SYNCED_AT_KEY } from "../offline/sync";
+import { readLastSyncedAt } from "../offline/sync";
 
 // This context deliberately does NOT track `isAdmin`, and only tracks
 // `username` when a login form directly supplied it for this session.
@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     function hasSyncedSnapshot(): boolean {
-      return localStorage.getItem(LAST_SYNCED_AT_KEY) !== null;
+      return readLastSyncedAt() !== null;
     }
 
     if (!navigator.onLine && hasSyncedSnapshot()) {

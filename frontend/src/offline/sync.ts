@@ -74,6 +74,21 @@ function persistLastSyncedAt(): void {
   }
 }
 
+/** The single reader for `LAST_SYNCED_AT_KEY`, owned by this module
+ * alongside the writer above -- `AuthContext` (KTD0's offline-restore
+ * check) and `OfflineContext` both need this exact value and both must
+ * survive the same storage-denied conditions the write side already
+ * defends against, so there's one guarded implementation instead of two
+ * call sites independently reimplementing (and risking drifting on) the
+ * same try/catch. */
+export function readLastSyncedAt(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_SYNCED_AT_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /** Runs `worker` over `items` with at most `limit` calls in flight at
  * once, by having `limit` "lanes" each pull the next item off a shared
  * index as soon as they finish their current one -- simpler than a

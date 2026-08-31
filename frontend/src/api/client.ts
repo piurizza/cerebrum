@@ -254,15 +254,15 @@ async function refreshSession(): Promise<string> {
       throw err;
     }
     // A response -- any response -- proves the network layer reached the
-    // server, same reasoning as fetchWithToken() above.
+    // server, same reasoning as fetchWithToken() above. True for both the
+    // ok and not-ok branches below, so set once here rather than in each.
     onNetworkRecovery?.();
+    lastRefreshFailureWasNetworkError = false;
     if (!response.ok) {
       // A response came back and the server said no -- an explicit
       // rejection, not a network failure.
-      lastRefreshFailureWasNetworkError = false;
       throw new Error(`POST /auth/refresh failed: ${response.status}`);
     }
-    lastRefreshFailureWasNetworkError = false;
     const data = (await response.json()) as LoginResponse;
     return data.access_token;
   } finally {

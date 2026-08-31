@@ -31,14 +31,8 @@ vi.mock("../api/client", () => ({
 }));
 
 import { LAST_SYNCED_AT_KEY } from "../offline/sync";
+import { setNavigatorOnLine } from "../test/factories";
 import { AuthProvider, useAuth } from "./AuthContext";
-
-function setNavigatorOnLine(value: boolean) {
-  Object.defineProperty(window.navigator, "onLine", {
-    configurable: true,
-    value,
-  });
-}
 
 // Renders the context's live values as text/data attributes so tests can
 // assert on post-update state via RTL queries, and exposes login/logout as

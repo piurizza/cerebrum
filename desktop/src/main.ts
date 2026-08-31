@@ -130,6 +130,17 @@ export function initApp(container: HTMLElement): void {
     container.querySelector<HTMLElement>("#error-message")?.focus();
   }
 
+  // Shared tail for both paths that end up inside the real app: a plain
+  // successful health-check, and the R4/KTD5 navigate-through-on-failure
+  // path below. `extra`, when given, is awaited alongside the window-chrome
+  // expansion rather than before it -- both are independent, best-effort,
+  // fire-and-forget-tolerant operations, so there's no reason to make the
+  // navigation wait for them sequentially.
+  async function proceedIntoApp(url: string, extra?: Promise<unknown>): Promise<void> {
+    await Promise.allSettled([extra ?? Promise.resolve(), expandToAppWindow()]);
+    navigation.navigateTo(url);
+  }
+
   async function runHealthCheck(url: string): Promise<void> {
     state = { kind: "checking", url };
     render();
@@ -138,15 +149,12 @@ export function initApp(container: HTMLElement): void {
       // Record that this URL has connected successfully at least once, so
       // a later failed health-check for it can navigate through to the
       // offline snapshot instead of hard-blocking on the error screen
-      // (R4/KTD5). Best-effort and idempotent, same as expandToAppWindow
-      // below -- a stuck write here shouldn't strand the user, and it's
-      // fine to re-set this on every success rather than only the first.
-      await setHasConnectedSuccessfully().catch(() => {});
-      // Best-effort: a stuck permission or platform quirk here shouldn't
-      // strand the user on the bootstrap screen forever -- fall through to
-      // navigation either way, just possibly still chromeless.
-      await expandToAppWindow().catch(() => {});
-      navigation.navigateTo(url);
+      // (R4/KTD5). Fine to re-set this on every success rather than only
+      // the first.
+      await proceedIntoApp(
+        url,
+        setHasConnectedSuccessfully().catch(() => {}),
+      );
       return;
     }
     // A URL that has connected successfully before still navigates through
@@ -159,8 +167,7 @@ export function initApp(container: HTMLElement): void {
       () => false,
     );
     if (hasConnectedSuccessfully) {
-      await expandToAppWindow().catch(() => {});
-      navigation.navigateTo(url);
+      await proceedIntoApp(url);
       return;
     }
     state = { kind: "error", url, reason: result.reason };

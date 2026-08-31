@@ -4,6 +4,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LAST_SYNCED_AT_KEY } from "../offline/sync";
+import { setNavigatorOnLine } from "../test/factories";
 
 // Captured directly rather than through a full client.ts mock -- this
 // context's only dependency on the module is registering for this one
@@ -25,13 +26,6 @@ vi.mock("../api/client", () => ({
 }));
 
 import { OfflineProvider, useOffline } from "./OfflineContext";
-
-function setNavigatorOnLine(value: boolean) {
-  Object.defineProperty(window.navigator, "onLine", {
-    configurable: true,
-    value,
-  });
-}
 
 function Consumer() {
   const { isOffline, lastSyncedAt } = useOffline();

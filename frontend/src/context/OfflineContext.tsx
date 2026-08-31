@@ -1,6 +1,13 @@
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { setOnNetworkStatusChange } from "../api/client";
-import { LAST_SYNCED_AT_KEY } from "../offline/sync";
+import { readLastSyncedAt } from "../offline/sync";
 
 interface OfflineContextValue {
   /** True when either the browser reports no network interface at all
@@ -26,25 +33,25 @@ interface OfflineContextValue {
 
 const OfflineContext = createContext<OfflineContextValue | null>(null);
 
-function readLastSyncedAt(): string | null {
-  try {
-    return window.localStorage.getItem(LAST_SYNCED_AT_KEY);
-  } catch {
-    // Same defensive stance as sync.ts's own localStorage write --
-    // storage can throw (Safari's "Block all cookies", sandboxed
-    // iframes). Treat that as "no known sync" rather than crash.
-    return null;
-  }
-}
-
 export function OfflineProvider({ children }: { children: ReactNode }) {
   const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() =>
     readLastSyncedAt(),
   );
+  // `handleOnline`/`handleOffline` also run as `onNetworkStatusChange`
+  // callbacks (below), which fire on *every* API call this app makes, not
+  // just genuine connectivity transitions -- most of those calls succeed
+  // while already online. Without this guard, each one would still pay
+  // for a `localStorage.getItem` (`readLastSyncedAt`) purely to reconfirm
+  // "still online". A ref, not `isOffline` itself, because these closures
+  // are created once in the effect below and need the current value at
+  // call time, not the value from whichever render created them.
+  const isOfflineRef = useRef(isOffline);
+  isOfflineRef.current = isOffline;
 
   useEffect(() => {
     function handleOnline() {
+      if (!isOfflineRef.current) return;
       setIsOffline(false);
       // A sync may have completed while this tab was backgrounded/offline
       // (another tab, or this tab's own main.tsx sync firing again on a
@@ -53,6 +60,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       setLastSyncedAt(readLastSyncedAt());
     }
     function handleOffline() {
+      if (isOfflineRef.current) return;
       setIsOffline(true);
       // A sync can complete during this session after the mount-time seed
       // above (main.tsx fires syncVault() on load, in parallel with this

@@ -282,7 +282,7 @@ API calls.
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 | `VITE_DAILY_NOTE_FOLDER` | frontend | `daily` | vault-relative folder the "Today" button creates daily notes in. Build-time only -- baked into the frontend image at `npm run build`; changing it on a deployed instance needs `docker compose build/up frontend`, not just an env edit |
 | `VITE_TEMPLATES_FOLDER` | frontend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Build-time only, same rebuild caveat as `VITE_DAILY_NOTE_FOLDER` above. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |
-| `VITE_DEFAULT_SERVER_URL` | desktop | `http://localhost:8080` | dev-convenience default pre-filled on first launch of the desktop app; the app always lets the user view/change the configured URL afterward, so this is not a hard-coded target |
+| `VITE_DEFAULT_SERVER_URL` | desktop | `http://localhost:8080` | server URL the desktop app auto-connects to on first launch (or after its store is cleared) -- most deployments have exactly one server, so this skips the first manual URL entry; the user can always view/change the configured URL afterward via "Change server URL", so this is not a hard-coded target |
 
 ## 9. Feature roadmap (user stories)
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGetStoredServerUrl = vi.fn();
 const mockSetStoredServerUrl = vi.fn();
@@ -58,6 +58,12 @@ let navigateSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The real desktop/.env sets this for actual builds -- stubbed empty
+  // here so every existing "no URL known yet" test keeps meaning that
+  // literally, not "no URL known yet, but a default happens to be
+  // configured". The auto-connect describe block below stubs its own
+  // value per test instead of relying on this default.
+  vi.stubEnv("VITE_DEFAULT_SERVER_URL", "");
   document.body.innerHTML = "";
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -74,6 +80,10 @@ beforeEach(() => {
     setSize: mockSetSize,
     center: mockCenter,
   });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("first launch (F1)", () => {
@@ -225,6 +235,62 @@ describe("first launch (F1)", () => {
 
     expect(mockSetStoredServerUrl).toHaveBeenCalledTimes(1);
     expect(mockCheckHealth).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("auto-connect to a configured default (VITE_DEFAULT_SERVER_URL)", () => {
+  it("connects automatically with no stored URL when a default is configured", async () => {
+    vi.stubEnv("VITE_DEFAULT_SERVER_URL", "http://localhost:8080");
+    mockGetStoredServerUrl.mockResolvedValue(null);
+    mockSetStoredServerUrl.mockResolvedValue(undefined);
+    mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container);
+    await flush();
+
+    // Went straight through checking -> navigate, same as if the user had
+    // typed and submitted this URL themselves -- no form ever shown.
+    expect(mockSetStoredServerUrl).toHaveBeenCalledWith("http://localhost:8080/");
+    expect(mockCheckHealth).toHaveBeenCalledWith("http://localhost:8080/");
+    expect(navigateSpy).toHaveBeenCalledWith("http://localhost:8080/");
+  });
+
+  it("still renders the empty form when no default is configured (regression: no default should not auto-submit anything)", async () => {
+    vi.stubEnv("VITE_DEFAULT_SERVER_URL", "");
+    mockGetStoredServerUrl.mockResolvedValue(null);
+
+    initApp(container);
+    await flush();
+
+    expect(container.querySelector("#url-form")).not.toBeNull();
+    expect(mockCheckHealth).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-connect when a URL is already stored, even if a default is also configured", async () => {
+    // The default is a first-launch convenience, not a standing override of
+    // whatever the user (or a previous auto-connect) already saved.
+    vi.stubEnv("VITE_DEFAULT_SERVER_URL", "http://localhost:8080");
+    mockGetStoredServerUrl.mockResolvedValue("https://example.com/");
+    mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container);
+    await flush();
+
+    expect(mockCheckHealth).toHaveBeenCalledWith("https://example.com/");
+    expect(mockCheckHealth).not.toHaveBeenCalledWith("http://localhost:8080/");
+    expect(mockSetStoredServerUrl).not.toHaveBeenCalled();
+  });
+
+  it("falls through to the ordinary validation-error form when the configured default is malformed", async () => {
+    vi.stubEnv("VITE_DEFAULT_SERVER_URL", "not-a-url");
+    mockGetStoredServerUrl.mockResolvedValue(null);
+
+    initApp(container);
+    await flush();
+
+    expect(container.querySelector(".error")).not.toBeNull();
+    expect(mockSetStoredServerUrl).not.toHaveBeenCalled();
+    expect(mockCheckHealth).not.toHaveBeenCalled();
   });
 });
 

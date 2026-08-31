@@ -198,6 +198,19 @@ export function initApp(container: HTMLElement): void {
     .then((stored) => {
       if (stored) {
         runHealthCheck(stored);
+        return;
+      }
+      // First launch (or a store that's been cleared): auto-connect to the
+      // build-time default when one is configured (VITE_DEFAULT_SERVER_URL,
+      // see .env.example), instead of making every install type in a URL
+      // it's overwhelmingly likely to already know -- most deployments
+      // point at exactly one server. Reuses handleSubmit rather than a
+      // separate first-launch path: an invalid or unreachable default
+      // falls through to the exact same validation-error/retry screens a
+      // manually typed URL would hit, not a special case to keep in sync.
+      const defaultUrl = import.meta.env.VITE_DEFAULT_SERVER_URL;
+      if (defaultUrl) {
+        handleSubmit(defaultUrl);
       } else {
         render();
       }

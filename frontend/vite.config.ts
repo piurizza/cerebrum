@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 // `defineConfig` comes from "vitest/config", not "vite" -- it re-exports
 // Vite's own defineConfig merged with Vitest's `test` typing. Vite's plain
 // `UserConfig` type has no `test` property, so importing from "vite" here
@@ -9,7 +10,80 @@ import { defineConfig } from "vitest/config";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // App-shell precaching: when the configured server is unreachable, the
+    // webview's request for the frontend's own HTML/JS/CSS would otherwise
+    // fail outright and no app code would ever run to serve a fallback.
+    // A service worker is the only thing that can intercept that request
+    // and answer from the Cache API instead. Only the shell is precached
+    // here -- API responses (the vault's actual content) are a later unit.
+    VitePWA({
+      registerType: "autoUpdate",
+      injectRegister: false,
+      // This unit only needs app-shell precaching (see workbox config
+      // below), not full PWA installability -- skip generating/injecting
+      // a web manifest so we don't ship placeholder app metadata
+      // ("frontend", default theme color) nobody asked for.
+      manifest: false,
+      workbox: {
+        // Covers the built JS/CSS/HTML plus any bundled font/image assets;
+        // `dist` is Vite's build output root at the time workbox scans it.
+        globPatterns: ["**/*.{js,css,html,svg,woff,woff2,ttf,eot}"],
+        // Full-vault offline snapshot (R1): every note-list/note-content/
+        // graph GET response the app makes -- both the ones `sync.ts`'s
+        // proactive full-vault sync fires on a successful load and the
+        // ordinary ones normal navigation triggers -- gets cached here as
+        // a side effect of succeeding, so a later connection loss can
+        // serve the whole last-synced vault, not just app-shell assets.
+        //
+        // `NetworkFirst`, not `CacheFirst` or `StaleWhileRevalidate`: a
+        // live connection must always win when one is available (viewing
+        // a note online should never show a stale cached copy over a
+        // fresh one), and the cache is a fallback strictly for when the
+        // network fails.
+        //
+        // `networkTimeoutSeconds: 4` (KTD4) matters specifically for the
+        // "hanging, not refusing" case -- a dropped wifi connection or a
+        // firewall that silently swallows packets doesn't fail fast the
+        // way a refused connection does, and Workbox's `NetworkFirst`
+        // waits indefinitely for the network by default. Without this,
+        // that scenario would leave the offline UI (U4) stalled with no
+        // signal for an unbounded time instead of falling back to the
+        // cached snapshot within a few seconds.
+        //
+        // Matched with a function, not a plain `RegExp`/string `urlPattern`,
+        // because `VITE_API_BASE_URL` can point the app at a different
+        // origin than the one serving the built assets (e.g. the desktop
+        // app) -- matching on `url.pathname` alone works regardless of
+        // origin, whereas a `RegExp` tested against the full URL would
+        // silently stop matching the moment the origin isn't the SW's own.
+        runtimeCaching: [
+          {
+            // Covers both `listNotes()` (`GET /api/notes`) and
+            // `getNote(path)` (`GET /api/notes/<path>`, `path` possibly
+            // containing further encoded `/`s for nested folders).
+            urlPattern: ({ url, request }) =>
+              request.method === "GET" && /^\/api\/notes(\/.*)?$/.test(url.pathname),
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "api-notes",
+              networkTimeoutSeconds: 4,
+            },
+          },
+          {
+            urlPattern: ({ url, request }) =>
+              request.method === "GET" && url.pathname === "/api/graph",
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "api-graph",
+              networkTimeoutSeconds: 4,
+            },
+          },
+        ],
+      },
+    }),
+  ],
   server: {
     proxy: {
       "/api": {

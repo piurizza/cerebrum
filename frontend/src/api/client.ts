@@ -51,6 +51,27 @@ export function setOnRefreshFailure(callback: (() => void) | null): void {
   onRefreshFailure = callback;
 }
 
+// Lets `OfflineContext` learn when a live request genuinely fails at the
+// network layer (`fetch()` itself never got a response), vs. succeeding
+// (even with a non-2xx status -- that still proves the network reached the
+// server). `navigator.onLine` only reliably reports the OS's network-
+// interface state, not whether *this* configured server is reachable --
+// verified live against the real desktop app: a docker container going
+// down while the host machine's wifi stays up leaves `navigator.onLine`
+// `true` the whole time, so a banner driven by it alone never appears even
+// though the user is silently viewing a stale cached snapshot (exactly the
+// scenario R5 exists to surface). Plain module-level callbacks, mirroring
+// `onRefreshFailure` above: one consumer, no need for an event system.
+let onNetworkFailure: (() => void) | null = null;
+let onNetworkRecovery: (() => void) | null = null;
+
+export function setOnNetworkStatusChange(
+  callbacks: { onFailure: () => void; onRecovery: () => void } | null,
+): void {
+  onNetworkFailure = callbacks?.onFailure ?? null;
+  onNetworkRecovery = callbacks?.onRecovery ?? null;
+}
+
 // The two endpoints that must never trigger a refresh-and-retry on 401:
 // `/auth/login` (a failed login is a real 401 the caller needs to see, not
 // something a token refresh could ever fix) and `/auth/refresh` itself
@@ -58,6 +79,19 @@ export function setOnRefreshFailure(callback: (() => void) | null): void {
 function isAuthBootstrapPath(path: string): boolean {
   return path === "/auth/login" || path === "/auth/refresh";
 }
+
+// How long a single request through fetchWithToken() gets before it's
+// treated as failed. Every other authenticated call (notes CRUD, tasks,
+// search, uploads, admin) funnels through here, so without this a silently
+// hanging connection (dropped wifi, a firewall swallowing packets --
+// "hanging, not refusing", the same case vite.config.ts's
+// networkTimeoutSeconds exists for) would leave fetch() never resolving:
+// no error, no onNetworkFailure signal, and the calling UI (e.g. a save
+// button) stuck indefinitely. Longer than refreshSession()'s
+// REFRESH_TIMEOUT_MS since this path also carries attachment uploads,
+// which can legitimately take longer than a bare auth POST (review finding
+// #5, 2026-08-31 code review).
+const FETCH_TIMEOUT_MS = 15_000;
 
 async function fetchWithToken(
   path: string,
@@ -68,14 +102,33 @@ async function fetchWithToken(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  return fetch(`${API_BASE}/api${path}`, {
-    ...init,
-    headers,
-    // Needed so the httpOnly refresh-token cookie is sent to
-    // `/api/auth/refresh` -- harmless on every other request since they
-    // don't read cookies at all.
-    credentials: "include",
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  // No caller currently passes its own `signal`, but respect one if it ever
+  // does -- abort our own controller when theirs fires, rather than
+  // silently overwriting it with ours below.
+  init?.signal?.addEventListener("abort", () => controller.abort());
+  try {
+    const response = await fetch(`${API_BASE}/api${path}`, {
+      ...init,
+      headers,
+      // Needed so the httpOnly refresh-token cookie is sent to
+      // `/api/auth/refresh` -- harmless on every other request since they
+      // don't read cookies at all.
+      credentials: "include",
+      signal: controller.signal,
+    });
+    // A response -- any response, including a non-2xx one -- proves the
+    // network layer actually reached the server. Only fetch() itself
+    // throwing (below) means it didn't.
+    onNetworkRecovery?.();
+    return response;
+  } catch (err) {
+    onNetworkFailure?.();
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 // Thrown instead of a plain `Error` on any non-2xx response, so callers
@@ -186,16 +239,66 @@ const REFRESH_TIMEOUT_MS = 10_000;
 // exported: every caller, in-tab or cross-tab, must go through the
 // `navigator.locks`-guarded `refreshAccessToken()` below, never this raw
 // fetch directly -- see that function's docstring for why.
+// Set by refreshSession() below, distinguishing a network-layer failure
+// (the fetch itself never got a response back -- DNS failure, connection
+// refused, this call's own timeout aborting it) from an explicit HTTP
+// rejection (a response DID come back, e.g. a 401 -- the server was
+// reached and said no). AuthContext's offline-restore fallback (KTD0)
+// needs exactly this distinction: a network failure with a previously
+// synced snapshot is offline continuity; an explicit rejection must still
+// log the user out even when a snapshot exists, or a genuinely revoked
+// session would never actually get logged out while a stale snapshot sits
+// in localStorage. Module-scoped rather than thrown/returned from
+// refreshSession() to avoid changing that function's or performRefresh()'s
+// external contract for their other callers.
+let lastRefreshFailureWasNetworkError = false;
+
+export function refreshFailureWasNetworkError(): boolean {
+  return lastRefreshFailureWasNetworkError;
+}
+
 async function refreshSession(): Promise<string> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+  let response: Response;
   try {
-    const response = await fetch(`${API_BASE}/api/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-      signal: controller.signal,
-    });
+    try {
+      response = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+        signal: controller.signal,
+      });
+    } catch (err) {
+      // fetch() itself rejected -- no HTTP response was ever received.
+      // Never a real server verdict, regardless of the underlying cause.
+      // But NOT every rejection here means "genuinely offline": this same
+      // catch also fires when our own AbortController above aborts fetch()
+      // after REFRESH_TIMEOUT_MS -- a reachable-but-slow-or-blocked server
+      // (a captive network device, or an adversary on the same LAN who can
+      // merely delay/drop this one request for 10s) looks identical to a
+      // dead network here unless distinguished. Since
+      // `lastRefreshFailureWasNetworkError` gates KTD0's offline-restore
+      // concession -- an unverified session being treated as authenticated
+      // -- only a genuine network-layer failure (DNS, connection refused,
+      // no route) may set it; our own timeout firing must not (review
+      // finding #4, 2026-08-31 code review). `AbortError` is the standard
+      // DOM exception name fetch() throws when its AbortSignal fires.
+      // Still surfaced via onNetworkFailure -- a hang is real degradation
+      // worth reflecting in the UI-facing offline banner -- just not
+      // trusted for the auth decision.
+      const isOwnTimeout = err instanceof DOMException && err.name === "AbortError";
+      lastRefreshFailureWasNetworkError = !isOwnTimeout;
+      onNetworkFailure?.();
+      throw err;
+    }
+    // A response -- any response -- proves the network layer reached the
+    // server, same reasoning as fetchWithToken() above. True for both the
+    // ok and not-ok branches below, so set once here rather than in each.
+    onNetworkRecovery?.();
+    lastRefreshFailureWasNetworkError = false;
     if (!response.ok) {
+      // A response came back and the server said no -- an explicit
+      // rejection, not a network failure.
       throw new Error(`POST /auth/refresh failed: ${response.status}`);
     }
     const data = (await response.json()) as LoginResponse;

@@ -9,9 +9,11 @@ import {
 import {
   login as loginRequest,
   refreshAccessToken,
+  refreshFailureWasNetworkError,
   setAccessToken,
   setOnRefreshFailure,
 } from "../api/client";
+import { readLastSyncedAt } from "../offline/sync";
 
 // This context deliberately does NOT track `isAdmin`, and only tracks
 // `username` when a login form directly supplied it for this session.
@@ -35,6 +37,17 @@ import {
 // based on whether that call succeeds or 403s, which can't drift out of
 // sync with the server's actual authorization state the way a
 // client-cached boolean could.
+//
+// One deliberate exception to "asserts with confidence" (KTD0): when a
+// refresh attempt fails at the network layer (no response ever came back
+// -- not an explicit rejection from a reachable server) *and* a previous
+// `syncVault()` run has left a last-synced-at marker in `localStorage`,
+// the mount-time restore below treats the session as authenticated
+// without a real server verdict. This is an offline-continuity
+// concession, not a weakening of auth -- an explicit rejection (a
+// response that says no) is never overridden by this, only a genuine
+// network-layer failure is, and the next attempt that actually reaches
+// the server goes through the completely unmodified refresh flow.
 interface AuthContextValue {
   isAuthenticated: boolean;
   username: string | null;
@@ -64,11 +77,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // the loser looks identical to token theft and the reuse-detection
     // response revokes the whole family, including the winner's
     // freshly-rotated token -- force-logging out every tab.
+    // KTD0: offline-aware restore. A previously synced vault existing in
+    // `localStorage` is evidence a session was valid as of that sync, so
+    // a *network-layer* refresh failure (see `refreshFailureWasNetworkError`
+    // in client.ts -- the fetch itself never got a response, as opposed to
+    // an explicit rejection from a server that was actually reached) is
+    // treated as offline continuity rather than a logout.
+    //
+    // Deliberately NOT gated on `navigator.onLine` for that decision:
+    // `navigator.onLine` only reliably reports `false` for a genuinely
+    // absent network interface (airplane mode). It stays `true` the
+    // moment *any* network is up, even one that can't reach this specific
+    // self-hosted server -- coffee-shop wifi, a different LAN, mobile
+    // data with no route home. That's the overwhelmingly common way this
+    // app actually goes "offline" from the user's perspective, and a
+    // `navigator.onLine`-gated check would silently fail to cover it,
+    // logging the user out instead of restoring the offline snapshot.
+    // `navigator.onLine` is still useful as a pure UX shortcut below --
+    // skip the doomed network attempt outright when we're sure there's no
+    // network at all -- but the actual accept/reject decision after a
+    // real attempt is made rests on what that attempt discovered, not on
+    // the browser's optimistic guess.
+    //
+    // This never bypasses a *reachable* server's actual verdict: an
+    // explicit rejection (a response came back and said no) still logs
+    // the user out even with a snapshot present -- only a network-layer
+    // failure falls back to offline-valid. The moment the network
+    // genuinely reaches the server again, the very next mount or
+    // 401-retry runs the unmodified refresh flow and would correctly log
+    // out an actually-invalid session.
     let cancelled = false;
+
+    function hasSyncedSnapshot(): boolean {
+      return readLastSyncedAt() !== null;
+    }
+
+    if (!navigator.onLine && hasSyncedSnapshot()) {
+      // Skip the network attempt entirely -- it would just hang until
+      // refreshSession()'s 10s timeout with navigator.onLine already
+      // known false, staring at "Loading..." for a call known to fail.
+      setIsAuthenticated(true);
+      setLoading(false);
+      return;
+    }
+
     refreshAccessToken()
       .then((token) => {
         if (cancelled) return;
-        setIsAuthenticated(token !== null);
+        if (token !== null) {
+          setIsAuthenticated(true);
+        } else if (refreshFailureWasNetworkError() && hasSyncedSnapshot()) {
+          setIsAuthenticated(true);
+        } else {
+          setIsAuthenticated(false);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

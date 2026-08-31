@@ -52,6 +52,49 @@ describe("setStoredServerUrl", () => {
     expect(mockStore.set).toHaveBeenCalledWith("serverUrl", "http://localhost:8080/");
     expect(mockStore.save).toHaveBeenCalled();
   });
+
+  // KTD5: a URL change must reset "has connected successfully" so a
+  // brand-new, never-tried URL can't inherit the previous URL's flag and
+  // skip straight to navigating through on failure.
+  it("resets hasConnectedSuccessfully as a side effect of changing the URL", async () => {
+    const { setStoredServerUrl } = await import("./store");
+
+    await setStoredServerUrl("http://localhost:8080/");
+
+    expect(mockStore.set).toHaveBeenCalledWith("hasConnectedSuccessfully", false);
+  });
+});
+
+describe("getHasConnectedSuccessfully", () => {
+  it("returns true when the current URL has connected successfully before", async () => {
+    const { getHasConnectedSuccessfully } = await import("./store");
+    mockStore.get.mockResolvedValue(true);
+
+    const result = await getHasConnectedSuccessfully();
+
+    expect(result).toBe(true);
+    expect(mockStore.get).toHaveBeenCalledWith("hasConnectedSuccessfully");
+  });
+
+  it("returns false when nothing is stored yet", async () => {
+    const { getHasConnectedSuccessfully } = await import("./store");
+    mockStore.get.mockResolvedValue(undefined);
+
+    const result = await getHasConnectedSuccessfully();
+
+    expect(result).toBe(false);
+  });
+});
+
+describe("setHasConnectedSuccessfully", () => {
+  it("persists true and flushes the store to disk", async () => {
+    const { setHasConnectedSuccessfully } = await import("./store");
+
+    await setHasConnectedSuccessfully();
+
+    expect(mockStore.set).toHaveBeenCalledWith("hasConnectedSuccessfully", true);
+    expect(mockStore.save).toHaveBeenCalled();
+  });
 });
 
 describe("recovery after a failed store open", () => {

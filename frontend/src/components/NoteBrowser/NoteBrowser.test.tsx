@@ -50,6 +50,12 @@ vi.mock("../../context/NotesContext", () => ({
   useNotes: () => mockUseNotes(),
 }));
 
+const mockUseOffline =
+  vi.fn<() => { isOffline: boolean; lastSyncedAt: string | null }>();
+vi.mock("../../context/OfflineContext", () => ({
+  useOffline: () => mockUseOffline(),
+}));
+
 import { NoteBrowser } from "./NoteBrowser";
 
 const refreshNotes = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
@@ -72,6 +78,14 @@ function renderBrowser() {
     </MemoryRouter>,
   );
 }
+
+// Applies to every describe block below: none of them are exercising
+// offline behavior, so default to "online" and let the individual test
+// that cares override it.
+beforeEach(() => {
+  mockUseOffline.mockReset();
+  mockUseOffline.mockReturnValue({ isOffline: false, lastSyncedAt: null });
+});
 
 describe("NoteBrowser Today button", () => {
   beforeEach(() => {
@@ -360,5 +374,32 @@ describe("NoteBrowser + New note / templates", () => {
     await createNoteViaPicker(user, "note1.md");
     await user.click(screen.getByRole("button", { name: "Create note" }));
     await waitFor(() => expect(mockPutNote).toHaveBeenCalledWith("note1.md", ""));
+  });
+});
+
+// Regression coverage for review finding #3 (2026-08-31 code review): the
+// beforeEach above always sets isOffline: false, so nothing previously
+// exercised the `|| isOffline` half of either button's disabled
+// expression -- a change that silently dropped it would have passed the
+// full suite.
+describe("NoteBrowser offline gating (R3)", () => {
+  it("disables both Today and + New note while offline", () => {
+    setNotesState([makeNoteMeta("other.md")]);
+    mockUseOffline.mockReturnValue({ isOffline: true, lastSyncedAt: null });
+
+    renderBrowser();
+
+    expect(screen.getByRole("button", { name: "Today" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "+ New note" })).toBeDisabled();
+  });
+
+  it("re-enables both buttons once back online", () => {
+    setNotesState([makeNoteMeta("other.md")]);
+    mockUseOffline.mockReturnValue({ isOffline: false, lastSyncedAt: null });
+
+    renderBrowser();
+
+    expect(screen.getByRole("button", { name: "Today" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "+ New note" })).toBeEnabled();
   });
 });

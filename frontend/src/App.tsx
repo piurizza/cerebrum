@@ -8,6 +8,7 @@ import {
   Routes,
 } from "react-router-dom";
 import { NoteBrowser } from "./components/NoteBrowser/NoteBrowser";
+import { OfflineBanner } from "./components/OfflineBanner";
 import { useAuth } from "./context/AuthContext";
 import { NotesProvider } from "./context/NotesContext";
 import { useZenMode, ZenModeProvider } from "./context/ZenModeContext";
@@ -76,6 +77,7 @@ function AppShell() {
         </button>
       </aside>
       <main className="app-main">
+        <OfflineBanner />
         <Routes>
           <Route
             path="/"

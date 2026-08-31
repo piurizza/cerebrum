@@ -77,6 +77,17 @@ describe("MarkdownEditor", () => {
     expect(capturedProps.value).toBe("hello world");
     expect(capturedProps.onChange).toBe(onChange);
     expect(capturedProps.theme).toBe("light");
+    expect(capturedProps.readOnly).toBe(false);
+  });
+
+  it("threads readOnly through to CodeMirror, defaulting to false when omitted", () => {
+    render(<MarkdownEditor value="" onChange={vi.fn()} currentPath="notes/a.md" />);
+    expect(capturedProps.readOnly).toBe(false);
+
+    render(
+      <MarkdownEditor value="" onChange={vi.fn()} currentPath="notes/a.md" readOnly />,
+    );
+    expect(capturedProps.readOnly).toBe(true);
   });
 
   it("wires the extensions array from the current notes list and note path", () => {

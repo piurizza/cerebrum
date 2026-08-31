@@ -1,7 +1,12 @@
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { checkHealth } from "./health";
-import { getStoredServerUrl, setStoredServerUrl } from "./store";
+import {
+  getHasConnectedSuccessfully,
+  getStoredServerUrl,
+  setHasConnectedSuccessfully,
+  setStoredServerUrl,
+} from "./store";
 import { validateServerUrl } from "./validation";
 
 // The bootstrap window ships chromeless and pinned to a small size (see
@@ -125,16 +130,44 @@ export function initApp(container: HTMLElement): void {
     container.querySelector<HTMLElement>("#error-message")?.focus();
   }
 
+  // Shared tail for both paths that end up inside the real app: a plain
+  // successful health-check, and the R4/KTD5 navigate-through-on-failure
+  // path below. `extra`, when given, is awaited alongside the window-chrome
+  // expansion rather than before it -- both are independent, best-effort,
+  // fire-and-forget-tolerant operations, so there's no reason to make the
+  // navigation wait for them sequentially.
+  async function proceedIntoApp(url: string, extra?: Promise<unknown>): Promise<void> {
+    await Promise.allSettled([extra ?? Promise.resolve(), expandToAppWindow()]);
+    navigation.navigateTo(url);
+  }
+
   async function runHealthCheck(url: string): Promise<void> {
     state = { kind: "checking", url };
     render();
     const result = await checkHealth(url);
     if (result.ok) {
-      // Best-effort: a stuck permission or platform quirk here shouldn't
-      // strand the user on the bootstrap screen forever -- fall through to
-      // navigation either way, just possibly still chromeless.
-      await expandToAppWindow().catch(() => {});
-      navigation.navigateTo(url);
+      // Record that this URL has connected successfully at least once, so
+      // a later failed health-check for it can navigate through to the
+      // offline snapshot instead of hard-blocking on the error screen
+      // (R4/KTD5). Fine to re-set this on every success rather than only
+      // the first.
+      await proceedIntoApp(
+        url,
+        setHasConnectedSuccessfully().catch(() => {}),
+      );
+      return;
+    }
+    // A URL that has connected successfully before still navigates through
+    // on a failed health-check -- the cached frontend can serve the vault
+    // as it stood at the last successful sync (R4). The hard error/retry
+    // screen is reserved for a URL that has never connected: first-time
+    // setup, a typo'd URL, a server that's never been reachable -- there
+    // is nothing to show offline for those.
+    const hasConnectedSuccessfully = await getHasConnectedSuccessfully().catch(
+      () => false,
+    );
+    if (hasConnectedSuccessfully) {
+      await proceedIntoApp(url);
       return;
     }
     state = { kind: "error", url, reason: result.reason };
@@ -172,6 +205,19 @@ export function initApp(container: HTMLElement): void {
     .then((stored) => {
       if (stored) {
         runHealthCheck(stored);
+        return;
+      }
+      // First launch (or a store that's been cleared): auto-connect to the
+      // build-time default when one is configured (VITE_DEFAULT_SERVER_URL,
+      // see .env.example), instead of making every install type in a URL
+      // it's overwhelmingly likely to already know -- most deployments
+      // point at exactly one server. Reuses handleSubmit rather than a
+      // separate first-launch path: an invalid or unreachable default
+      // falls through to the exact same validation-error/retry screens a
+      // manually typed URL would hit, not a special case to keep in sync.
+      const defaultUrl = import.meta.env.VITE_DEFAULT_SERVER_URL;
+      if (defaultUrl) {
+        handleSubmit(defaultUrl);
       } else {
         render();
       }

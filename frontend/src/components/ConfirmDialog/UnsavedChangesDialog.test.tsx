@@ -101,4 +101,24 @@ describe("UnsavedChangesDialog", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Save failed: network error");
   });
+
+  // Regression coverage for review finding #8 (2026-08-31 code review):
+  // this was the one write entry point in NoteViewPage never gated on
+  // isOffline -- Save disables here, but Discard/Cancel (neither touches
+  // the network) must stay available so an offline user can still leave
+  // the dirty note.
+  it("disables only Save, not Discard/Cancel, when isOffline", () => {
+    render(
+      <UnsavedChangesDialog
+        isOffline
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  });
 });

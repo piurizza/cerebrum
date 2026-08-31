@@ -33,9 +33,17 @@ export function MarkdownEditor({
     () => [
       markdown(),
       autocompletion({ override: [noteLinkCompletionSource(notes, currentPath)] }),
-      imagePasteExtension(currentPath, setPasteError),
+      // Omitted entirely when `readOnly` -- CodeMirror's `readOnly` facet
+      // is opt-in per extension (consulted by commands that implement
+      // editing, not enforced automatically), and this extension's own
+      // `paste` domEventHandler never checked it. Left wired in, pasting an
+      // image into a frozen offline draft (KTD6) still fired a real
+      // `uploadAttachment()` POST and mutated the "preserved" draft via
+      // placeholder insert/remove -- exactly what R3 says must not happen
+      // while offline (review finding #2, 2026-08-31 code review).
+      ...(readOnly ? [] : [imagePasteExtension(currentPath, setPasteError)]),
     ],
-    [notes, currentPath],
+    [notes, currentPath, readOnly],
   );
 
   return (

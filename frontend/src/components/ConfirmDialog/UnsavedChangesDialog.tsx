@@ -4,6 +4,12 @@ import { useFocusTrap } from "../../hooks/useFocusTrap";
 interface UnsavedChangesDialogProps {
   error?: string | null;
   busy?: boolean;
+  /** Disables only the Save action (a network write) while offline, same
+   * as every other write entry point in NoteViewPage -- Discard/Cancel
+   * stay available since neither touches the network (review finding #8,
+   * 2026-08-31 code review: this dialog's Save was the one write path
+   * that had never been gated on isOffline). Defaults to `false`. */
+  isOffline?: boolean;
   onSave: () => void;
   onDiscard: () => void;
   onCancel: () => void;
@@ -19,6 +25,7 @@ interface UnsavedChangesDialogProps {
 export function UnsavedChangesDialog({
   error,
   busy,
+  isOffline = false,
   onSave,
   onDiscard,
   onCancel,
@@ -66,7 +73,7 @@ export function UnsavedChangesDialog({
             type="button"
             className="btn btn-primary"
             onClick={onSave}
-            disabled={busy}
+            disabled={busy || isOffline}
           >
             {busy ? "Saving..." : "Save"}
           </button>

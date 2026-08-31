@@ -48,11 +48,22 @@ export function NoteViewPage() {
 
   useEffect(() => {
     if (!path) return;
+    // Guards against a stale response overwriting a newer one: opening
+    // note A (getNote(A) in flight) then quickly navigating to note B
+    // before A resolves re-runs this effect for `path=B`, but A's promise
+    // is still outstanding. If A later settles (e.g. it's slower under the
+    // service worker's networkTimeoutSeconds fallback -- plausible exactly
+    // in the flaky-connection conditions this feature targets), its
+    // .then()/.catch() must not clobber the state of the now-different,
+    // already-loaded note B. Mirrors AuthContext.tsx's mount-effect
+    // cancellation pattern (review finding #6, 2026-08-31 code review).
+    let cancelled = false;
     setLoading(true);
     setLoadError(null);
     setMode("preview");
     getNote(path)
       .then((note) => {
+        if (cancelled) return;
         setContent(note.content);
         setSavedContent(note.content);
         setTitle(note.title);
@@ -60,13 +71,19 @@ export function NoteViewPage() {
         setUpdated(note.updated);
       })
       .catch((err) => {
+        if (cancelled) return;
         // No prior `.catch()` existed here -- a cache-miss offline (or
         // any other fetch failure) rejected silently, leaving `loading`
         // false but content/title/etc. at their previous stale values
         // (or blank on first load). Surface it explicitly instead.
         setLoadError(err);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [path]);
 
   const isDirty = content !== savedContent;
@@ -103,6 +120,15 @@ export function NoteViewPage() {
   const blocker = useBlocker(isDirty);
 
   const handleBlockedSave = useCallback(async () => {
+    // Mirrors the Cmd+S keydown handler's `if (saving || isOffline) return;`
+    // guard below -- this was the one write entry point in the component
+    // never gated on isOffline (review finding #8, 2026-08-31 code
+    // review), so clicking Save in this dialog while offline still
+    // attempted a real putNote() and surfaced a raw fetch-failure message
+    // instead of the app's established offline messaging. The dialog's own
+    // Save button is now also disabled via the isOffline prop below; this
+    // is defense in depth for any other caller of this handler.
+    if (isOffline) return;
     setBlockerError(null);
     try {
       await handleSave();
@@ -114,7 +140,7 @@ export function NoteViewPage() {
       // Discard is chosen, or Cancel is chosen (R3).
       setBlockerError(errorMessage(err));
     }
-  }, [handleSave, blocker]);
+  }, [handleSave, blocker, isOffline]);
 
   function handleBlockedDiscard() {
     setBlockerError(null);
@@ -174,6 +200,7 @@ export function NoteViewPage() {
         <UnsavedChangesDialog
           error={blockerError}
           busy={saving}
+          isOffline={isOffline}
           onSave={handleBlockedSave}
           onDiscard={handleBlockedDiscard}
           onCancel={handleBlockedCancel}

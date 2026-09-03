@@ -56,7 +56,10 @@ test("backdrop tap closes the drawer and restores focus", async ({ page }) => {
   await page.locator(hamburger()).tap();
   await expect(page.locator(sidebar)).toHaveClass(/is-open/);
 
-  await page.locator(backdrop()).tap();
+  // Tap the exposed strip of the backdrop to the right of the ~320px
+  // drawer -- the element's centre sits under the drawer, which would
+  // intercept the tap.
+  await page.locator(backdrop()).tap({ position: { x: 390, y: 450 } });
 
   await expect(page.locator(sidebar)).not.toHaveClass(/is-open/);
   await expect.poll(() => drawerLeft(page)).toBeLessThan(0);

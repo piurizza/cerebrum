@@ -92,6 +92,18 @@ export default defineConfig({
       },
     },
   },
+  // `vite preview` serves the production build for the local-only Playwright
+  // mobile suite; proxy its API calls to the running Docker frontend (nginx
+  // -> backend) so a locally-built `dist/` can be exercised end-to-end
+  // without rebuilding the frontend image.
+  preview: {
+    proxy: {
+      "/api": {
+        target: process.env.E2E_API_TARGET ?? "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
+  },
   test: {
     // Most tests render components or touch the DOM and need jsdom.
     // Pure-logic files that don't (src/lib/*.test.ts) opt out with a

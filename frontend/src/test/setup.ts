@@ -39,3 +39,21 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     disconnect() {}
   };
 }
+
+// jsdom does not implement `window.matchMedia`. `ThemeContext` reads it once
+// on first load for the OS colour-scheme fallback, and the mobile layout
+// work (drawer `isMobile` gate, PWA install detection) queries it too.
+// Default: nothing matches (desktop, light). Tests that need a specific
+// query to match override `window.matchMedia` per-case.
+if (typeof window !== "undefined" && typeof window.matchMedia === "undefined") {
+  window.matchMedia = (query: string): MediaQueryList => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  });
+}

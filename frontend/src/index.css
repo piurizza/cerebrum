@@ -127,12 +127,12 @@ a {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .app-layout {
   display: flex;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .app-sidebar {
@@ -196,6 +196,18 @@ a {
   flex: 1;
   min-width: 0;
   padding: 1.5rem;
+}
+
+/* --- Mobile layout ---------------------------------------------------------
+   Single breakpoint (see the mobile-pwa plan, KTD5). Below 768px the sidebar
+   becomes an off-canvas drawer behind a top bar (filled in by later units);
+   this block is the scaffold. `--topbar-h` is declared on `.app-layout` (a
+   common ancestor of `.app-main` / `.graph-view`) because `.app-topbar` is a
+   sibling of `.app-main` and a custom property set there would not cascade. */
+@media (max-width: 768px) {
+  .app-layout {
+    --topbar-h: 3rem;
+  }
 }
 
 /* Buttons */
@@ -483,7 +495,7 @@ a {
   z-index: 1;
   width: 100%;
   max-width: 420px;
-  max-height: calc(100vh - 4rem);
+  max-height: calc(100dvh - 4rem);
   overflow-y: auto;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -877,7 +889,7 @@ a {
 /* Graph view */
 
 .graph-view {
-  height: calc(100vh - 3rem);
+  height: calc(100dvh - 3rem);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
@@ -934,7 +946,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  min-height: 100dvh;
   padding: 1.5rem;
 }
 

@@ -16,6 +16,13 @@ build/
 node_modules/
 frontend/dist/
 frontend/.env
+frontend/dev-dist/
+
+# Playwright (local-only mobile E2E — not part of the CI gate)
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/e2e/.auth/
 
 # Node + Rust (desktop) — node_modules/ above already covers
 # desktop/node_modules/; src-tauri/ has its own nested .gitignore for the

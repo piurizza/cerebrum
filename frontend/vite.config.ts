@@ -12,24 +12,70 @@ import { configDefaults, defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [
     react(),
-    // App-shell precaching: when the configured server is unreachable, the
-    // webview's request for the frontend's own HTML/JS/CSS would otherwise
-    // fail outright and no app code would ever run to serve a fallback.
-    // A service worker is the only thing that can intercept that request
-    // and answer from the Cache API instead. Only the shell is precached
-    // here -- API responses (the vault's actual content) are a later unit.
+    // App-shell precaching + PWA installability. A service worker is the
+    // only thing that can intercept the webview's request for the app's own
+    // HTML/JS/CSS when the configured server is unreachable and answer from
+    // the Cache API instead; the manifest below makes the app installable
+    // to a phone's home screen (over a browser-trusted origin -- see the
+    // README "Install on a phone" section).
     VitePWA({
-      registerType: "autoUpdate",
-      injectRegister: false,
-      // This unit only needs app-shell precaching (see workbox config
-      // below), not full PWA installability -- skip generating/injecting
-      // a web manifest so we don't ship placeholder app metadata
-      // ("frontend", default theme color) nobody asked for.
-      manifest: false,
+      // `prompt`, not `autoUpdate` (KTD7): a waiting SW surfaces a Reload
+      // toast (ReloadPrompt, U8) instead of silently skip-waiting and
+      // reloading, which could drop an unsaved edit. `autoUpdate` also
+      // never fires `needRefresh`. `injectRegister: "auto"` lets the
+      // plugin wire registration through the single `useRegisterSW`
+      // consumer in ReloadPrompt (the literal `false` also failed the
+      // plugin's `== null` guard, so skip-waiting never engaged anyway).
+      registerType: "prompt",
+      injectRegister: "auto",
+      // KTD9: static manifest colours cannot track the runtime theme
+      // toggle, so both pin to the dark palette (which matches the app
+      // icon). `<meta name="theme-color">` carries the light/dark pair and
+      // is JS-updated for the toggle case (U7). `background_color` is the
+      // splash colour and accepts a one-frame mismatch on the light theme.
+      manifest: {
+        name: "Cerebrum",
+        short_name: "Cerebrum",
+        id: "/",
+        description:
+          "A self-hosted second brain: plain-markdown notes with a graph view.",
+        display: "standalone",
+        start_url: "/",
+        scope: "/",
+        orientation: "any",
+        theme_color: "#26221d",
+        background_color: "#26221d",
+        icons: [
+          {
+            src: "pwa-192x192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "pwa-512x512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "maskable-icon-512x512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
+      },
       workbox: {
-        // Covers the built JS/CSS/HTML plus any bundled font/image assets;
-        // `dist` is Vite's build output root at the time workbox scans it.
-        globPatterns: ["**/*.{js,css,html,svg,woff,woff2,ttf,eot}"],
+        // Covers the built JS/CSS/HTML plus bundled font/image assets
+        // (`png,ico` so the icons precache -- R9); `dist` is Vite's build
+        // output root at the time workbox scans it.
+        globPatterns: ["**/*.{js,css,html,svg,png,ico,woff,woff2,ttf,eot}"],
+        // The SPA navigation fallback serves index.html for unknown routes;
+        // exclude `/api/*` so an offline API request fails (and hits the
+        // NetworkFirst rules below) instead of resolving to the app shell.
+        navigateFallback: "index.html",
+        navigateFallbackDenylist: [/^\/api\//],
         // Full-vault offline snapshot (R1): every note-list/note-content/
         // graph GET response the app makes -- both the ones `sync.ts`'s
         // proactive full-vault sync fires on a successful load and the

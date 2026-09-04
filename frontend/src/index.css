@@ -207,100 +207,11 @@ a {
   display: none;
 }
 
-/* --- Mobile layout ---------------------------------------------------------
-   Single breakpoint (see the mobile-pwa plan, KTD5). Below 768px the sidebar
-   becomes an off-canvas drawer behind a top bar. `--topbar-h` is declared on
-   `.app-layout` (a common ancestor of `.app-main` / `.graph-view`) because
-   `.app-topbar` is a sibling of `.app-main` and a custom property set there
-   would not cascade; it includes the notch inset so `calc(100dvh -
-   var(--topbar-h))` panes (graph / editor, U4) stay exact on notched
-   devices. */
-@media (max-width: 768px) {
-  .app-layout {
-    --topbar-h: calc(3rem + env(safe-area-inset-top));
-    flex-direction: column;
-  }
-
-  .app-topbar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
-    height: var(--topbar-h);
-    padding: env(safe-area-inset-top) max(0.5rem, env(safe-area-inset-right)) 0
-      max(0.5rem, env(safe-area-inset-left));
-    background: var(--bg-sidebar);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .app-hamburger {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: var(--radius);
-    background: transparent;
-    color: var(--text);
-    font-size: 1.2rem;
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .app-hamburger:hover {
-    background: var(--bg);
-  }
-
-  .app-hamburger:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
-    border-color: var(--accent);
-  }
-
-  .app-topbar-brand {
-    font-size: 0.9rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    color: var(--text-muted);
-  }
-
-  .app-sidebar {
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 90;
-    width: min(80vw, 320px);
-    transform: translateX(-100%);
-    transition: transform var(--transition);
-    padding-left: max(0.875rem, env(safe-area-inset-left));
-    padding-bottom: max(1.125rem, env(safe-area-inset-bottom));
-  }
-
-  .app-sidebar.is-open {
-    transform: translateX(0);
-  }
-
-  /* The wordmark shows in the top bar on mobile, not the drawer. */
-  .app-sidebar .app-title {
-    display: none;
-  }
-
-  .drawer-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 80;
-    width: 100%;
-    height: 100%;
-    border: none;
-    background: rgb(0 0 0 / 45%);
-  }
-
-  .app-main {
-    padding: 1rem;
-  }
-}
+/* The mobile breakpoint lives in a single `@media (max-width: 768px)` block
+   at the very end of this file (search "Mobile layout") -- it overrides
+   component rules defined further down (`.btn`, `.modal*`, `.tag-pill`,
+   `.note-link`, ...), so it must come after them in source order to win on
+   equal specificity. */
 
 /* Buttons */
 
@@ -1168,4 +1079,166 @@ a {
 .one-time-secret .error-text {
   padding: 0;
   background: none;
+}
+
+/* --- Mobile layout -------------------------------------------------------
+   Single breakpoint (see the mobile-pwa plan, KTD5). Below 768px the
+   sidebar becomes an off-canvas drawer behind a top bar, modals go
+   edge-to-edge, and tap targets grow to >=44px. This block is intentionally
+   last: several rules here override component styles defined earlier in the
+   file and rely on source order to win at equal specificity.
+
+   `--topbar-h` is declared on `.app-layout` (a common ancestor of
+   `.app-main` / `.graph-view`) because `.app-topbar` is a sibling of
+   `.app-main` and a custom property set there would not cascade; it folds
+   in the notch inset so `calc(100dvh - var(--topbar-h))` panes (graph /
+   editor, U4) stay exact on notched devices. */
+@media (max-width: 768px) {
+  .app-layout {
+    --topbar-h: calc(3rem + env(safe-area-inset-top));
+    flex-direction: column;
+  }
+
+  .app-topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    height: var(--topbar-h);
+    padding: env(safe-area-inset-top) max(0.5rem, env(safe-area-inset-right)) 0
+      max(0.5rem, env(safe-area-inset-left));
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .app-hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text);
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .app-hamburger:hover {
+    background: var(--bg);
+  }
+
+  .app-hamburger:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+    border-color: var(--accent);
+  }
+
+  .app-topbar-brand {
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text-muted);
+  }
+
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    /* Slide via `left`, NOT `transform`: a transformed ancestor becomes the
+       containing block for `position: fixed` descendants, which would clip
+       the folder-picker / template modals (rendered inside NoteBrowser,
+       inside this aside) to the 320px drawer instead of the viewport. */
+    left: calc(-1 * min(80vw, 320px));
+    z-index: 90;
+    width: min(80vw, 320px);
+    transition: left var(--transition);
+    padding-left: max(0.875rem, env(safe-area-inset-left));
+    padding-bottom: max(1.125rem, env(safe-area-inset-bottom));
+  }
+
+  .app-sidebar.is-open {
+    left: 0;
+  }
+
+  /* The wordmark shows in the top bar on mobile, not the drawer. */
+  .app-sidebar .app-title {
+    display: none;
+  }
+
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: rgb(0 0 0 / 45%);
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+
+  /* U3: edge-to-edge modals (R5) */
+
+  .modal-overlay {
+    padding: 0;
+  }
+
+  .modal {
+    max-width: none;
+    /* A true full-screen sheet (goal: "modals fill the phone screen"):
+       exactly viewport-tall, edge to edge, square corners, content
+       scrolling inside. */
+    min-height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    /* Safe-area padding on every side so the sheet clears the notch in
+       landscape and the home indicator in portrait. */
+    padding: max(1.25rem, env(safe-area-inset-top))
+      max(1.25rem, env(safe-area-inset-right)) max(1.25rem, env(safe-area-inset-bottom))
+      max(1.25rem, env(safe-area-inset-left));
+  }
+
+  /* U3: >=44px touch targets (R6). `min-height` plus a flex/inline-flex box
+     so short-label controls still fill the target; extra inline padding
+     widens the hit area. The hamburger is already 44x44 above. */
+  .btn,
+  .btn-sm,
+  .tag-pill,
+  .note-link,
+  .note-folder,
+  .app-nav a {
+    min-height: 44px;
+  }
+
+  .btn-sm {
+    padding-inline: 0.75rem;
+  }
+
+  .tag-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 0.9rem;
+  }
+
+  .note-link {
+    justify-content: center;
+    padding: 0.5rem 0.6rem;
+  }
+
+  .note-folder {
+    padding: 0.5rem 0.6rem;
+  }
+
+  .app-nav a {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 0.7rem;
+  }
 }

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { setThemeColor } from "../lib/themeColor";
 
 type Theme = "light" | "dark";
 
@@ -52,6 +53,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
+    setThemeColor(theme);
     try {
       window.localStorage.setItem(STORAGE_KEY, theme);
     } catch {

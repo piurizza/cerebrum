@@ -13,6 +13,7 @@ vi.mock("./context/ZenModeContext", () => ({
   ZenModeProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock("./components/OfflineBanner", () => ({ OfflineBanner: () => null }));
+vi.mock("./components/IosInstallHint", () => ({ IosInstallHint: () => null }));
 // Uncontrolled input: its value survives parent re-renders but not an
 // unmount -- exactly the signal for "the drawer subtree is hidden with
 // CSS, never conditionally rendered".

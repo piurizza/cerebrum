@@ -583,3 +583,12 @@ how consistently each was cited as high-value across that research.
   in-app retry -- Tauri v2 has no native page-load-failure event to
   detect this, and it wasn't judged likely enough to warrant a Rust-side
   navigation-failure handler for v1.
+- **Mobile support is responsive web plus an installable PWA.** The React
+  app is responsive below a 768px breakpoint (off-canvas drawer, 44px
+  touch targets, full-screen modals) and installs to a phone's home
+  screen as a PWA over a browser-trusted origin. Native shells (Tauri
+  Android/iOS, Capacitor) are deferred, not rejected -- same personal-use,
+  additive-later stance as the Linux-only desktop app above. Offline
+  *editing* on mobile is out of scope: the shell and last-synced vault
+  cache for reading, but the app stays a thin client to one server,
+  consistent with the "No CRDT / offline-first sync" bullet above.

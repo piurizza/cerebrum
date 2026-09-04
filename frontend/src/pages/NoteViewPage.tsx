@@ -9,6 +9,7 @@ import { NotePathHeader } from "../components/Editor/NotePathHeader";
 import { useOffline } from "../context/OfflineContext";
 import { useTheme } from "../context/ThemeContext";
 import { useZenMode } from "../context/ZenModeContext";
+import { setEditorDirty } from "../lib/editorDirty";
 import { stripFrontmatter } from "../lib/noteContent";
 
 type ViewMode = "edit" | "preview";
@@ -110,6 +111,14 @@ export function NoteViewPage() {
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  // Mirror the dirty state into the module-scoped flag ReloadPrompt reads,
+  // so a service-worker update can't reload the page over an unsaved
+  // buffer (U8 / R15). Clear it when this page unmounts.
+  useEffect(() => {
+    setEditorDirty(isDirty);
+    return () => setEditorDirty(false);
   }, [isDirty]);
 
   // Intercepts every router-mediated navigation away from a dirty note --

@@ -44,3 +44,11 @@ desktop/.env
 
 # Agent planning artifacts (brainstorm/plan docs) — local working notes, not committed
 /docs/plans/
+
+# `tailscale cert` writes to the current directory by default (README
+# "Install on a phone" section) -- these are private key material and must
+# never be committed. Belt-and-suspenders: the real copies belong in the
+# frontend's cert volume (/etc/nginx/certs/cerebrum.{crt,key}), not here.
+*.ts.net.crt
+*.ts.net.key
+*.pem

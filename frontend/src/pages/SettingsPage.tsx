@@ -1,4 +1,10 @@
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   createApiToken,
   createInvite,
@@ -11,6 +17,12 @@ import {
 import { ConfirmDialog } from "../components/ConfirmDialog/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { formatTimestamp } from "../lib/formatDate";
+import {
+  canInstall,
+  isStandalone,
+  promptInstall,
+  subscribeInstall,
+} from "../lib/pwaInstall";
 import type { AccountSummary, ApiTokenMeta } from "../types/auth";
 
 /** A plaintext secret (personal API token or invite token) shown exactly
@@ -307,12 +319,41 @@ function AdminSection() {
   );
 }
 
+/** Android/Chrome in-app install control (R17). Shows only when a
+ * `beforeinstallprompt` event has been captured and the app isn't already
+ * installed -- iOS has no such event (that's the A2HS hint, U10). Exported
+ * for a focused test that doesn't need the whole page's API mocks. */
+export function InstallSection() {
+  const installable = useSyncExternalStore(subscribeInstall, canInstall, () => false);
+
+  if (!installable || isStandalone()) return null;
+
+  return (
+    <section className="settings-section">
+      <h2>Install app</h2>
+      <p className="empty-hint">
+        Add Cerebrum to your home screen for a full-screen, app-like experience.
+      </p>
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={() => {
+          void promptInstall();
+        }}
+      >
+        Install
+      </button>
+    </section>
+  );
+}
+
 export function SettingsPage() {
   return (
     <div className="settings-page">
       <h1>Settings</h1>
       <ApiTokensSection />
       <AdminSection />
+      <InstallSection />
     </div>
   );
 }

@@ -23,6 +23,9 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 frontend/e2e/.auth/
+# defensive: a stray run with cwd at the repo root drops these here
+/test-results/
+/playwright-report/
 
 # Node + Rust (desktop) — node_modules/ above already covers
 # desktop/node_modules/; src-tauri/ has its own nested .gitignore for the

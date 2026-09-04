@@ -1241,4 +1241,49 @@ a {
     align-items: center;
     padding: 0.5rem 0.7rem;
   }
+
+  /* U4: note editor + graph at phone width (R7). Layout only; CodeMirror
+     caret-above-keyboard, `[[` autocomplete placement, and force-graph
+     pinch/pan still want a real-device pass. */
+
+  .note-view {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+    /* Stop being a fixed-height flex parent -- the page scrolls instead. */
+    height: auto;
+  }
+
+  .note-editor {
+    max-width: none;
+  }
+
+  /* `height: 100%` (set on `.cm-editor` by the CodeMirror `height` prop) has
+     no fixed parent height to resolve against once `.note-view` is auto;
+     give the editor a tall min and let content grow it. */
+  .note-editor .cm-editor {
+    height: auto;
+    min-height: 60dvh;
+  }
+
+  /* Backlinks drop below the editor as a full-width section rather than a
+     side rail (no `<details>` collapse -- that needs markup, out of scope
+     here; stacking already keeps the editor above the fold). */
+  .note-backlinks {
+    width: auto;
+    padding: 1rem 0 0;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .graph-view {
+    /* Exact remaining height under the top bar (notch inset already folded
+       into --topbar-h). Negative margin cancels `.app-main`'s 1rem mobile
+       padding so the canvas goes edge to edge with no page scroll -- keep
+       in sync if that padding changes. */
+    height: calc(100dvh - var(--topbar-h));
+    margin: -1rem;
+    border: none;
+    border-radius: 0;
+  }
 }

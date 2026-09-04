@@ -11,6 +11,7 @@ import {
 } from "react-router-dom";
 import { NoteBrowser } from "./components/NoteBrowser/NoteBrowser";
 import { OfflineBanner } from "./components/OfflineBanner";
+import { ReloadPrompt } from "./components/ReloadPrompt";
 import { useAuth } from "./context/AuthContext";
 import { NotesProvider } from "./context/NotesContext";
 import { useZenMode, ZenModeProvider } from "./context/ZenModeContext";
@@ -203,10 +204,16 @@ export function AppShell() {
  * 401) before the redirect to `/login` kicks in. */
 function RootLayout() {
   const { loading } = useAuth();
-  if (loading) {
-    return <p className="loading-indicator">Loading...</p>;
-  }
-  return <Outlet />;
+  return (
+    <>
+      {/* Above the auth gate on purpose: registering the service worker
+          (ReloadPrompt owns the single `useRegisterSW`) must not depend on
+          being logged in, or a logged-out visit stops precaching the
+          offline shell. The toast still renders inside the themed tree. */}
+      <ReloadPrompt />
+      {loading ? <p className="loading-indicator">Loading...</p> : <Outlet />}
+    </>
+  );
 }
 
 export const router = createBrowserRouter([

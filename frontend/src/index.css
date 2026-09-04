@@ -943,6 +943,33 @@ a {
   margin-bottom: 0.75rem;
 }
 
+/* Service-worker update / offline-ready toast (ReloadPrompt, U8). Bottom-
+   anchored so it doesn't fight the top bar; safe-area padded for the home
+   indicator. */
+.pwa-toast {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 110;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 auto;
+  max-width: 30rem;
+  padding: 0.7rem 0.9rem;
+  padding-bottom: max(0.7rem, env(safe-area-inset-bottom));
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+  font-size: 0.9rem;
+}
+
+.pwa-toast-hint {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
 /* Auth pages (login/register) */
 
 .auth-page {

@@ -7,6 +7,26 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
+    <!-- theme-color: the media-less tag FIRST -- it's the fallback browsers
+         honour and the one themeColor.ts mutates on the in-app toggle (U7,
+         R11). The prefers-color-scheme pair below covers the first paint
+         before JS runs and the OS-scheme case. -->
+    <meta name="theme-color" content="#26221d" />
+    <meta
+      name="theme-color"
+      content="#f4ede0"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#26221d"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Cerebrum" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
     <title>Cerebrum</title>
     <!-- Atkinson Hyperlegible Next: a typeface designed and iterated against
          legibility research (character-disambiguation and low-vision

@@ -9,6 +9,7 @@ import {
   Routes,
   useLocation,
 } from "react-router-dom";
+import { IosInstallHint } from "./components/IosInstallHint";
 import { NoteBrowser } from "./components/NoteBrowser/NoteBrowser";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { ReloadPrompt } from "./components/ReloadPrompt";
@@ -177,6 +178,7 @@ export function AppShell() {
       </aside>
       <main className="app-main" inert={isMobile && drawerOpen}>
         <OfflineBanner />
+        <IosInstallHint />
         <Routes>
           <Route
             path="/"

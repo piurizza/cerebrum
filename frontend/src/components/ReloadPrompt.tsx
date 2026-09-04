@@ -18,18 +18,21 @@ const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
  * not depend on being logged in.
  */
 export function ReloadPrompt() {
+  const [registration, setRegistration] = useState<
+    ServiceWorkerRegistration | undefined
+  >();
   const {
     offlineReady: [offlineReady, setOfflineReady],
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW({
-    onRegisteredSW(_swUrl, registration) {
-      setRegistration(registration ?? undefined);
+    // `onRegisteredSW` only fires after `navigator.serviceWorker.register`
+    // resolves -- always a later tick, so `setRegistration` is defined by
+    // the time it runs.
+    onRegisteredSW(_swUrl, swRegistration) {
+      setRegistration(swRegistration ?? undefined);
     },
   });
-  const [registration, setRegistration] = useState<
-    ServiceWorkerRegistration | undefined
-  >();
   const editorDirty = useSyncExternalStore(
     subscribeEditorDirty,
     getEditorDirty,

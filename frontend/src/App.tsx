@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   createBrowserRouter,
   Navigate,
@@ -6,12 +7,14 @@ import {
   Outlet,
   Route,
   Routes,
+  useLocation,
 } from "react-router-dom";
 import { NoteBrowser } from "./components/NoteBrowser/NoteBrowser";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { useAuth } from "./context/AuthContext";
 import { NotesProvider } from "./context/NotesContext";
 import { useZenMode, ZenModeProvider } from "./context/ZenModeContext";
+import { useFocusTrap } from "./hooks/useFocusTrap";
 import { GraphViewPage } from "./pages/GraphViewPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NoteViewPage } from "./pages/NoteViewPage";
@@ -33,22 +36,117 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function AppShell() {
+/** Subscribes to a media query and re-renders on match changes. Local to
+ * this file -- the only consumer is the mobile drawer gate below. Reads
+ * `window.matchMedia` once (captured on first render) so a test can swap
+ * the implementation per-case before mounting. */
+function useMediaQuery(query: string): boolean {
+  const [mql] = useState(() => window.matchMedia(query));
+  return useSyncExternalStore(
+    (onChange) => {
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    () => mql.matches,
+    () => false,
+  );
+}
+
+export function AppShell() {
   const { logout } = useAuth();
   const { isZen } = useZenMode();
+  const isMobile = useMediaQuery("(max-width: 768px)");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
+  const hamburgerRef = useRef<HTMLButtonElement>(null);
+  const location = useLocation();
+
+  // Navigating (a nav link, a note, the graph) closes an open drawer. The
+  // body reads no dependency -- it must simply re-fire whenever the path
+  // changes, which is exactly the array the exhaustive-deps lint wants to
+  // shrink to `[]` (that would run it once and never close on nav).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: must re-fire on every pathname change
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [location.pathname]);
+
+  // Growing past the breakpoint dissolves the drawer concept: drop any
+  // open state so the sidebar reverts cleanly to its docked desktop form.
+  useEffect(() => {
+    if (!isMobile) setDrawerOpen(false);
+  }, [isMobile]);
+
+  // Escape closes the drawer. Focus return to the hamburger is handled by
+  // useFocusTrap's restore (the hamburger is focused before we open, so it
+  // is the trap's captured trigger).
+  useEffect(() => {
+    if (!isMobile || !drawerOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setDrawerOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isMobile, drawerOpen]);
+
+  useFocusTrap(drawerRef, isMobile && drawerOpen);
+
+  // Inert the sidebar when Zen mode has collapsed it, or when it is an
+  // off-canvas drawer that is currently closed -- never for a merely
+  // "closed drawer" at desktop width, which would inert the docked sidebar.
+  const sidebarHidden = isZen || (isMobile && !drawerOpen);
+  const sidebarClass = ["app-sidebar", isZen && "is-zen", drawerOpen && "is-open"]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div className="app-layout">
+      {/* Mobile-only chrome (index.css hides it at desktop widths). The
+          wordmark lives here on mobile; the drawer keeps nav + browser +
+          Log out only. */}
+      <header className="app-topbar">
+        <button
+          type="button"
+          ref={hamburgerRef}
+          className="app-hamburger"
+          aria-label="Menu"
+          aria-expanded={drawerOpen}
+          aria-controls="app-sidebar"
+          onClick={() => {
+            // Focus first so the trap captures the hamburger as its
+            // restore target on open, and so a pointer toggle-to-close
+            // still lands focus somewhere sane.
+            hamburgerRef.current?.focus();
+            setDrawerOpen((open) => !open);
+          }}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
+        <span className="app-topbar-brand">Cerebrum</span>
+      </header>
+
+      {drawerOpen && (
+        <button
+          type="button"
+          className="drawer-backdrop"
+          aria-label="Close menu"
+          onClick={() => setDrawerOpen(false)}
+        />
+      )}
+
       {/* Zen mode only collapses the sidebar visually (width/opacity in
           index.css) -- without `inert`/`aria-hidden`, every nav link,
           search box, tag filter, note, and Logout stays keyboard- and
           screen-reader-reachable while invisible. `inert` (React 19) drops
           it from both the tab order and the accessibility tree; `aria-
           hidden` covers browsers where `inert` isn't yet respected by
-          assistive tech. */}
+          assistive tech. The same treatment applies to the closed drawer
+          on mobile. */}
       <aside
-        className={isZen ? "app-sidebar is-zen" : "app-sidebar"}
-        inert={isZen}
-        aria-hidden={isZen}
+        id="app-sidebar"
+        ref={drawerRef}
+        className={sidebarClass}
+        inert={sidebarHidden}
+        aria-hidden={sidebarHidden}
       >
         <h1 className="app-title">Cerebrum</h1>
         <nav className="app-nav">
@@ -76,7 +174,7 @@ function AppShell() {
           Log out
         </button>
       </aside>
-      <main className="app-main">
+      <main className="app-main" inert={isMobile && drawerOpen}>
         <OfflineBanner />
         <Routes>
           <Route

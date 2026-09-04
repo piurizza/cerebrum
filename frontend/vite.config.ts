@@ -6,7 +6,7 @@ import { VitePWA } from "vite-plugin-pwa";
 // would fail `tsc -b` (and therefore `npm run build`, since
 // tsconfig.node.json includes this file in its build graph) the moment a
 // `test` block is added below.
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -92,6 +92,18 @@ export default defineConfig({
       },
     },
   },
+  // `vite preview` serves the production build for the local-only Playwright
+  // mobile suite; proxy its API calls to the running Docker frontend (nginx
+  // -> backend) so a locally-built `dist/` can be exercised end-to-end
+  // without rebuilding the frontend image.
+  preview: {
+    proxy: {
+      "/api": {
+        target: process.env.E2E_API_TARGET ?? "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
+  },
   test: {
     // Most tests render components or touch the DOM and need jsdom.
     // Pure-logic files that don't (src/lib/*.test.ts) opt out with a
@@ -100,5 +112,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: false,
     setupFiles: ["./src/test/setup.ts"],
+    // `e2e/` holds Playwright specs (`*.spec.ts` importing `@playwright/test`),
+    // a different runner entirely -- keep Vitest from collecting them.
+    exclude: [...configDefaults.exclude, "e2e/**"],
   },
 });

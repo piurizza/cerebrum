@@ -83,9 +83,26 @@ register, so the app won't install. `localhost` is the only plaintext
 exception and doesn't help a real device. Two ways to get a trusted
 origin for a self-hosted deployment:
 
-- **Tailscale** (no domain, free): join the machine and the phone to a
-  tailnet, enable **HTTPS Certificates** in the admin console
-  (login.tailscale.com → DNS), then:
+- **Tailscale** (no domain, free):
+
+      sudo dnf install tailscale               # or your distro's package
+      sudo systemctl enable --now tailscaled
+      sudo tailscale up                        # opens a browser login
+
+  In the admin console (login.tailscale.com → **DNS**), enable
+  **MagicDNS** and **HTTPS Certificates**. Install the Tailscale app on
+  the phone too, signed into the same account — any device on the
+  tailnet can then reach this machine, from anywhere, not just the LAN.
+
+  Find this machine's tailnet name (`tailscale status` shows the short
+  hostname; the full name is in `tailscale status --json` under
+  `Self.DNSName`, or just run `tailscale cert` with no argument — it
+  prints the exact domain to use). Then, **one time**, make yourself the
+  Tailscale operator so `cert` doesn't need root on every renewal:
+
+      sudo tailscale set --operator=$USER
+
+  Now issue the cert:
 
       tailscale cert <machine>.<tailnet>.ts.net
 
@@ -100,7 +117,8 @@ origin for a self-hosted deployment:
 
   Then open `https://<name>.ts.net:8443` on the phone (any tailnet
   device, from anywhere). Tailscale certs last 90 days — re-run
-  `tailscale cert` and re-copy to renew (a monthly cron is enough).
+  `tailscale cert` and re-copy to renew (a monthly cron is enough; the
+  `--operator` step above means the cron doesn't need root either).
 
 - **Reverse proxy + Let's Encrypt**: put Caddy or nginx with a real
   domain in front of `CEREBRUM_PORT`, terminating TLS there. More setup

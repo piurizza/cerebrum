@@ -124,6 +124,11 @@ export function NoteBrowser() {
     content: string,
     onSuccess: () => void,
   ): Promise<void> {
+    // Defense in depth behind the disabled "+ New note" button, mirroring
+    // NoteViewPage.handleBlockedSave: a create/template modal opened while
+    // online whose Confirm is clicked after connectivity drops would
+    // otherwise fire a real putNote() and surface a raw fetch error.
+    if (isOffline) return;
     await putNote(path, content);
     await refreshNotes();
     onSuccess();
@@ -207,6 +212,12 @@ export function NoteBrowser() {
       navigate(`/notes/${encodeNotePath(path)}`);
       return;
     }
+
+    // Same defense-in-depth as writeNoteAndNavigate -- but placed AFTER the
+    // cached-note branch above, so an offline user can still open today's
+    // note if it is already in the vault; only the create (putNote) is
+    // gated.
+    if (isOffline) return;
 
     setTodayError(null);
     setIsOpeningToday(true);

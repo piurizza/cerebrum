@@ -402,4 +402,17 @@ describe("NoteBrowser offline gating (R3)", () => {
     expect(screen.getByRole("button", { name: "Today" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "+ New note" })).toBeEnabled();
   });
+
+  // Defense in depth (U5): `writeNoteAndNavigate` and `handleToday`
+  // early-return on `isOffline` *before* their `putNote`, mirroring
+  // `NoteViewPage.handleBlockedSave`, so a create/template modal opened
+  // while online cannot issue a write if its Confirm is clicked after
+  // connectivity drops. That transition is not cleanly reproducible here
+  // (React render-closure timing), so it is covered structurally: the two
+  // "disables both..."/"re-enables both..." tests above are the primary
+  // gate, and the guards are a one-line copy of the reviewed
+  // `handleBlockedSave` pattern. `handleToday`'s guard sits AFTER its
+  // `noteExistsAt(path)` -> navigate branch, so "navigates directly
+  // without calling putNote when today's note already exists" above still
+  // proves an offline user keeps the cached-note shortcut.
 });

@@ -104,7 +104,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!navigator.onLine && wasSessionEstablished()) {
+    // Read once at mount: nothing between here and the refresh resolving
+    // changes it (`login()` is the only writer and cannot run in that
+    // window).
+    const established = wasSessionEstablished();
+
+    if (!navigator.onLine && established) {
       // Skip the network attempt entirely -- it would just hang until
       // refreshSession()'s 10s timeout with navigator.onLine already known
       // false, staring at "Loading..." for a call known to fail.
@@ -119,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (token !== null) {
           markSessionEstablished();
           setIsAuthenticated(true);
-        } else if (wasSessionEstablished() && !refreshFailureWasAuthRejection()) {
+        } else if (established && !refreshFailureWasAuthRejection()) {
           // No server verdict (network failure / 5xx / own timeout) and a
           // session is on record -- authenticated-from-cache. U2's signal
           // has already flipped `OfflineContext.isOffline`, so writes are

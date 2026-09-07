@@ -7,6 +7,47 @@ import { VitePWA } from "vite-plugin-pwa";
 // tsconfig.node.json includes this file in its build graph) the moment a
 // `test` block is added below.
 import { configDefaults, defineConfig } from "vitest/config";
+import type { WorkboxPlugin } from "workbox-core";
+
+// Applied to BOTH `/api` NetworkFirst rules below. NetworkFirst only falls
+// back to the cache when `fetch()` itself rejects or `networkTimeoutSeconds`
+// fires -- a *resolved* 5xx (backend container down, nginx still up -> 502)
+// is handed to the app as-is, so the sidebar shows "Failed to load notes:
+// 502" instead of the cached vault.
+//
+//  1. `fetchDidSucceed` throwing on a 5xx makes NetworkFirst treat it like a
+//     network failure and serve the cached response (rethrowing only on a
+//     genuine cache miss -- unchanged from today).
+//  2. `cachedResponseWillBeUsed` then stamps every cache-served response with
+//     `X-SW-Cache-Fallback: 1`. The app (`src/api/client.ts`) reads that
+//     header to keep `OfflineContext.isOffline` stable while `sync.ts`'s pool
+//     of proactive GETs settles during an outage -- without the marker each
+//     cache hit looks like a live 200 and fires a false "back online". This
+//     is safe *because* both rules are NetworkFirst: `cachedResponseWillBeUsed`
+//     fires only on the fallback path here, never on the happy path (it would
+//     be unsafe under StaleWhileRevalidate).
+const apiOfflineFallbackPlugins: WorkboxPlugin[] = [
+  {
+    fetchDidSucceed: async ({ response }) => {
+      if (response.status >= 500) {
+        throw new Error("5xx -- fall back to the cached response");
+      }
+      return response;
+    },
+  },
+  {
+    cachedResponseWillBeUsed: async ({ cachedResponse }) => {
+      if (!cachedResponse) return cachedResponse;
+      const headers = new Headers(cachedResponse.headers);
+      headers.set("X-SW-Cache-Fallback", "1");
+      return new Response(cachedResponse.body, {
+        status: cachedResponse.status,
+        statusText: cachedResponse.statusText,
+        headers,
+      });
+    },
+  },
+];
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -131,6 +172,7 @@ export default defineConfig({
             options: {
               cacheName: "api-notes",
               networkTimeoutSeconds: 4,
+              plugins: apiOfflineFallbackPlugins,
             },
           },
           {
@@ -140,6 +182,7 @@ export default defineConfig({
             options: {
               cacheName: "api-graph",
               networkTimeoutSeconds: 4,
+              plugins: apiOfflineFallbackPlugins,
             },
           },
         ],

@@ -203,8 +203,14 @@ export function AppShell() {
  * Blocks rendering every route until the initial silent-refresh attempt
  * resolves one way or the other -- otherwise an unauthenticated visitor
  * would flash the authenticated shell (and its mount-time `listNotes()`
- * 401) before the redirect to `/login` kicks in. */
-function RootLayout() {
+ * 401) before the redirect to `/login` kicks in.
+ *
+ * This gate now only fires for a genuine first-load with no session on
+ * record: a browser that has logged in before seeds `loading=false` from
+ * its `sessionEstablished` marker (KTD-B) and renders the cached app
+ * immediately, with `AuthProvider`'s mount effect reconciling in the
+ * background. */
+export function RootLayout() {
   const { loading } = useAuth();
   return (
     <>

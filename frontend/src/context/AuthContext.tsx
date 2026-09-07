@@ -9,11 +9,17 @@ import {
 import {
   login as loginRequest,
   refreshAccessToken,
-  refreshFailureWasNetworkError,
+  refreshFailureWasAuthRejection,
   setAccessToken,
   setOnRefreshFailure,
 } from "../api/client";
-import { readLastSyncedAt } from "../offline/sync";
+import {
+  clearSessionEstablished,
+  consumeLoggedOut,
+  markLoggedOut,
+  markSessionEstablished,
+  wasSessionEstablished,
+} from "../lib/sessionEstablished";
 
 // This context deliberately does NOT track `isAdmin`, and only tracks
 // `username` when a login form directly supplied it for this session.
@@ -38,16 +44,21 @@ import { readLastSyncedAt } from "../offline/sync";
 // sync with the server's actual authorization state the way a
 // client-cached boolean could.
 //
-// One deliberate exception to "asserts with confidence" (KTD0): when a
-// refresh attempt fails at the network layer (no response ever came back
-// -- not an explicit rejection from a reachable server) *and* a previous
-// `syncVault()` run has left a last-synced-at marker in `localStorage`,
-// the mount-time restore below treats the session as authenticated
-// without a real server verdict. This is an offline-continuity
-// concession, not a weakening of auth -- an explicit rejection (a
-// response that says no) is never overridden by this, only a genuine
-// network-layer failure is, and the next attempt that actually reaches
-// the server goes through the completely unmodified refresh flow.
+// One deliberate exception to "asserts with confidence" (KTD0, broadened):
+// when a mount-time refresh attempt fails with anything OTHER than a
+// definitive 401/403 from a reachable server -- a network-layer failure, a
+// 5xx (backend down behind a live nginx), or the refresh call's own 10s
+// timeout -- *and* this browser has a session-established marker in
+// `localStorage`, the mount-time restore below treats the session as
+// authenticated-from-cache without a real server verdict. This is an
+// offline-continuity concession, not a weakening of auth: a reachable
+// 401/403 (`refreshFailureWasAuthRejection()` in client.ts -- a response
+// came back and said no) is NEVER overridden -- it clears the marker and
+// redirects to /login (KTD-A) -- and the next attempt that reaches the
+// server runs the completely unmodified refresh flow. `navigator.onLine`
+// is used only as a UX shortcut (skip a network attempt known to be
+// doomed), never as the accept/reject signal -- it stays `true` for any
+// network that can't route to this specific self-hosted server.
 interface AuthContextValue {
   isAuthenticated: boolean;
   username: string | null;
@@ -59,15 +70,18 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // KTD-B: a browser with a session on record renders the cached app
+  // immediately -- seed `isAuthenticated` true and `loading` false from the
+  // marker (read once, lazily), then let the mount effect reconcile against
+  // the server in the background. A genuine first-ever visit (no marker)
+  // still shows the `Loading...` gate until the mount refresh resolves.
+  const [isAuthenticated, setIsAuthenticated] = useState(() => wasSessionEstablished());
   const [username, setUsername] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !wasSessionEstablished());
 
   useEffect(() => {
     // Restore a session from the refresh-token cookie on mount, when there
     // is no in-memory access token yet (e.g. the tab was just reloaded).
-    // This is what makes session renewal transparent across a reload, not
-    // just across an expired access token within an already-loaded page.
     //
     // Goes through `refreshAccessToken()` (the `navigator.locks`-guarded
     // entry point), not the raw unlocked fetch -- a page reload is exactly
@@ -77,45 +91,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // the loser looks identical to token theft and the reuse-detection
     // response revokes the whole family, including the winner's
     // freshly-rotated token -- force-logging out every tab.
-    // KTD0: offline-aware restore. A previously synced vault existing in
-    // `localStorage` is evidence a session was valid as of that sync, so
-    // a *network-layer* refresh failure (see `refreshFailureWasNetworkError`
-    // in client.ts -- the fetch itself never got a response, as opposed to
-    // an explicit rejection from a server that was actually reached) is
-    // treated as offline continuity rather than a logout.
-    //
-    // Deliberately NOT gated on `navigator.onLine` for that decision:
-    // `navigator.onLine` only reliably reports `false` for a genuinely
-    // absent network interface (airplane mode). It stays `true` the
-    // moment *any* network is up, even one that can't reach this specific
-    // self-hosted server -- coffee-shop wifi, a different LAN, mobile
-    // data with no route home. That's the overwhelmingly common way this
-    // app actually goes "offline" from the user's perspective, and a
-    // `navigator.onLine`-gated check would silently fail to cover it,
-    // logging the user out instead of restoring the offline snapshot.
-    // `navigator.onLine` is still useful as a pure UX shortcut below --
-    // skip the doomed network attempt outright when we're sure there's no
-    // network at all -- but the actual accept/reject decision after a
-    // real attempt is made rests on what that attempt discovered, not on
-    // the browser's optimistic guess.
-    //
-    // This never bypasses a *reachable* server's actual verdict: an
-    // explicit rejection (a response came back and said no) still logs
-    // the user out even with a snapshot present -- only a network-layer
-    // failure falls back to offline-valid. The moment the network
-    // genuinely reaches the server again, the very next mount or
-    // 401-retry runs the unmodified refresh flow and would correctly log
-    // out an actually-invalid session.
     let cancelled = false;
 
-    function hasSyncedSnapshot(): boolean {
-      return readLastSyncedAt() !== null;
+    // KTD-C: an explicit `logout()` wrote a one-shot tombstone. Consume it
+    // BEFORE any refresh -- clearing the session-established marker alone
+    // does not make logout stick, because a successful refresh against the
+    // still-valid httpOnly cookie would immediately re-establish the
+    // session (the gap the old `logout()` docstring called known).
+    if (consumeLoggedOut()) {
+      setIsAuthenticated(false);
+      setLoading(false);
+      return;
     }
 
-    if (!navigator.onLine && hasSyncedSnapshot()) {
+    if (!navigator.onLine && wasSessionEstablished()) {
       // Skip the network attempt entirely -- it would just hang until
-      // refreshSession()'s 10s timeout with navigator.onLine already
-      // known false, staring at "Loading..." for a call known to fail.
+      // refreshSession()'s 10s timeout with navigator.onLine already known
+      // false, staring at "Loading..." for a call known to fail.
       setIsAuthenticated(true);
       setLoading(false);
       return;
@@ -125,10 +117,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((token) => {
         if (cancelled) return;
         if (token !== null) {
+          markSessionEstablished();
           setIsAuthenticated(true);
-        } else if (refreshFailureWasNetworkError() && hasSyncedSnapshot()) {
+        } else if (wasSessionEstablished() && !refreshFailureWasAuthRejection()) {
+          // No server verdict (network failure / 5xx / own timeout) and a
+          // session is on record -- authenticated-from-cache. U2's signal
+          // has already flipped `OfflineContext.isOffline`, so writes are
+          // gated and the offline banner shows.
           setIsAuthenticated(true);
         } else {
+          // A definitive 401/403 from a reachable server (KTD-A), or no
+          // session on record at all. Clear the marker so a later cold
+          // open goes straight to /login via `Loading...` rather than
+          // re-seeding and re-flashing the authenticated shell.
+          clearSessionEstablished();
           setIsAuthenticated(false);
         }
       })
@@ -142,30 +144,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // A refresh triggered later by `request()`'s 401-retry path (not this
-    // component's own mount-time call above) can also fail -- e.g. the
-    // refresh cookie itself expired or the account was deactivated mid-
-    // session. Without this, the authenticated shell stayed mounted with
-    // every subsequent API call throwing, instead of redirecting to
-    // `/login` the same way an unauthenticated visit does.
-    setOnRefreshFailure(() => setIsAuthenticated(false));
+    // component's own mount-time call above) can also fail. A transient
+    // failure (5xx, network) with a session on record keeps the
+    // authenticated shell mounted -- forcing `/login` on a brief backend
+    // blip would be exactly the "stranded at the login page" behaviour this
+    // feature removes. Only a definitive 401/403 (or no marker at all)
+    // clears the marker and flips `isAuthenticated` so `RequireAuth`
+    // redirects to `/login`.
+    setOnRefreshFailure(() => {
+      if (wasSessionEstablished() && !refreshFailureWasAuthRejection()) return;
+      clearSessionEstablished();
+      setIsAuthenticated(false);
+    });
     return () => setOnRefreshFailure(null);
   }, []);
 
   const login = useCallback(async (user: string, password: string) => {
     await loginRequest(user, password);
+    markSessionEstablished();
     setIsAuthenticated(true);
     setUsername(user);
   }, []);
 
   const logout = useCallback(() => {
-    // No server-side logout/session-revoke endpoint exists in this plan
-    // (only token-specific revoke and account deactivation do), so this
-    // can only clear the in-memory access token -- the httpOnly
-    // refresh-token cookie is unreachable from JS and stays valid
-    // server-side, meaning a page reload right after "logout" would
-    // silently re-establish the session via that cookie. A genuine, known
-    // gap given the backend surface available to this unit.
+    // No server-side logout/session-revoke endpoint exists (only
+    // token-specific revoke and account deactivation do). So this clears
+    // the in-memory access token and -- KTD-C -- clears the
+    // session-established marker and writes a one-shot logout tombstone the
+    // mount effect consumes before any refresh. That tombstone is what
+    // makes an explicit logout actually stick: the httpOnly refresh-token
+    // cookie is unreachable from JS and stays valid server-side, so without
+    // it a reload's successful refresh would silently re-establish the
+    // session.
     setAccessToken(null);
+    clearSessionEstablished();
+    markLoggedOut();
     setIsAuthenticated(false);
     setUsername(null);
   }, []);

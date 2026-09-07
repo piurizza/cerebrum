@@ -25,12 +25,17 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// The access token lives in memory only -- never localStorage/sessionStorage
-// (this codebase has zero prior localStorage usage). An in-memory store is
-// more XSS-resistant than persisting a JWT to disk; the trade-off is that it
-// doesn't survive a page reload on its own -- AuthContext's silent refresh
-// on mount (via the httpOnly refresh-token cookie) is what restores a
-// session across a reload.
+// The access token lives in memory only -- never localStorage/sessionStorage.
+// An in-memory store is more XSS-resistant than persisting a JWT to disk;
+// the trade-off is that it doesn't survive a page reload on its own --
+// AuthContext's silent refresh on mount (via the httpOnly refresh-token
+// cookie) is what restores a session across a reload. `localStorage` does
+// hold a few non-credential `cerebrum:` flags (`lastSyncedAt` in
+// offline/sync.ts; `sessionEstablished` + the one-shot `loggedOut`
+// tombstone in lib/sessionEstablished.ts) -- none is a token or secret, and
+// forging `sessionEstablished` via XSS grants no auth, since no access
+// token is persisted and the mount refresh flow still adjudicates the
+// session.
 let accessToken: string | null = null;
 
 export function setAccessToken(token: string | null): void {

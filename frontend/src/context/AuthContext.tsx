@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import {
@@ -78,6 +79,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(() => wasSessionEstablished());
   const [username, setUsername] = useState<string | null>(null);
   const [loading, setLoading] = useState(() => !wasSessionEstablished());
+  // Guards the mount effect's still-pending refreshAccessToken() promise
+  // against an explicit logout() that completes first (review finding #1,
+  // 2026-09-07 code review): AuthProvider mounts once for the app's
+  // lifetime and never unmounts on logout, so the effect's own `cancelled`
+  // closure (set only by its cleanup) is never true at that point --
+  // without this, a refresh that resolves after the user clicks Logout
+  // would silently re-authenticate the same tab and erase the KTD-C
+  // tombstone logout() just wrote, with no reload involved. `logout()` sets
+  // this; the mount effect's `.then()` checks it before applying either the
+  // success or the cache-restore branch.
+  const loggedOutDuringMountRefreshRef = useRef(false);
 
   useEffect(() => {
     // Restore a session from the refresh-token cookie on mount, when there
@@ -120,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     refreshAccessToken()
       .then((token) => {
-        if (cancelled) return;
+        if (cancelled || loggedOutDuringMountRefreshRef.current) return;
         if (token !== null) {
           markSessionEstablished();
           setIsAuthenticated(true);
@@ -186,6 +198,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     markLoggedOut();
     setIsAuthenticated(false);
     setUsername(null);
+    // See loggedOutDuringMountRefreshRef's declaration above -- discards a
+    // still-pending mount-time refresh's eventual resolution instead of
+    // letting it silently re-authenticate this tab.
+    loggedOutDuringMountRefreshRef.current = true;
   }, []);
 
   return (

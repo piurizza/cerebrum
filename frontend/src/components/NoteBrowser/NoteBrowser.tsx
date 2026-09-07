@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   encodeNotePath,
@@ -25,6 +25,15 @@ const SEARCH_DEBOUNCE_MS = 250;
 export function NoteBrowser() {
   const { notes, error, loading, refreshNotes } = useNotes();
   const { isOffline } = useOffline();
+  // writeNoteAndNavigate/handleToday's isOffline guards below run after an
+  // `await` (getNote(templatePath) in handleTemplateConfirm, or nothing in
+  // handleToday's own case), so reading the plain `isOffline` binding
+  // closes over whatever render started that async chain -- a connectivity
+  // drop during the await is invisible to a guard checking a stale value
+  // (review finding #2, 2026-09-07 code review). Mirrors OfflineContext's
+  // own fix for the identical problem.
+  const isOfflineRef = useRef(isOffline);
+  isOfflineRef.current = isOffline;
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [todayError, setTodayError] = useState<string | null>(null);
@@ -127,8 +136,11 @@ export function NoteBrowser() {
     // Defense in depth behind the disabled "+ New note" button, mirroring
     // NoteViewPage.handleBlockedSave: a create/template modal opened while
     // online whose Confirm is clicked after connectivity drops would
-    // otherwise fire a real putNote() and surface a raw fetch error.
-    if (isOffline) return;
+    // otherwise fire a real putNote() and surface a raw fetch error. Reads
+    // the ref, not the closed-over `isOffline`, so a drop during
+    // handleTemplateConfirm's own `await getNote(...)` above still trips
+    // this guard.
+    if (isOfflineRef.current) return;
     await putNote(path, content);
     await refreshNotes();
     onSuccess();
@@ -213,11 +225,11 @@ export function NoteBrowser() {
       return;
     }
 
-    // Same defense-in-depth as writeNoteAndNavigate -- but placed AFTER the
-    // cached-note branch above, so an offline user can still open today's
-    // note if it is already in the vault; only the create (putNote) is
-    // gated.
-    if (isOffline) return;
+    // Same defense-in-depth as writeNoteAndNavigate (including reading the
+    // ref, not the closed-over binding) -- but placed AFTER the cached-note
+    // branch above, so an offline user can still open today's note if it
+    // is already in the vault; only the create (putNote) is gated.
+    if (isOfflineRef.current) return;
 
     setTodayError(null);
     setIsOpeningToday(true);

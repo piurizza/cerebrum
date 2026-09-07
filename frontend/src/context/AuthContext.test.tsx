@@ -332,6 +332,49 @@ describe("AuthProvider login / logout", () => {
     expect(mockMarkLoggedOut).toHaveBeenCalled();
   });
 
+  // Regression coverage for review finding #1 (2026-09-07 code review):
+  // AuthProvider mounts once for the app's lifetime and never unmounts on
+  // logout, so the mount effect's own `cancelled` closure (set only by its
+  // cleanup) is never true here -- without a separate guard, a refresh that
+  // resolves *after* an explicit logout would silently re-authenticate the
+  // same tab and erase the just-written logout tombstone, no reload
+  // involved.
+  it("discards a mount-time refresh that resolves after an explicit logout, even when it would have succeeded", async () => {
+    mockWasSessionEstablished.mockReturnValue(true);
+    let resolveRefresh!: (token: string | null) => void;
+    mockRefreshAccessToken.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    // The mount refresh is still pending -- optimistic seed (KTD-B) already
+    // shows the shell as authenticated at this point.
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
+
+    await user.click(screen.getByRole("button", { name: "logout" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false"),
+    );
+    mockMarkSessionEstablished.mockClear();
+
+    // The mount-time refresh resolves only now, with a real token -- the
+    // exact race the fix guards against.
+    await act(async () => {
+      resolveRefresh("access-token");
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
+    expect(mockMarkSessionEstablished).not.toHaveBeenCalled();
+  });
+
   it("throws when useAuth is called outside an AuthProvider", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 

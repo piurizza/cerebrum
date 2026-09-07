@@ -37,10 +37,13 @@ async function freshClient() {
   return import("./client");
 }
 
-function jsonResponse(body: unknown, init: { status?: number } = {}) {
+function jsonResponse(
+  body: unknown,
+  init: { status?: number; headers?: Record<string, string> } = {},
+) {
   return new Response(JSON.stringify(body), {
     status: init.status ?? 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...init.headers },
   });
 }
 
@@ -58,7 +61,7 @@ describe("fetchWithToken() network classification", () => {
     expect(onRecovery).not.toHaveBeenCalled();
   });
 
-  it("fires onNetworkRecovery for any HTTP response, including a non-2xx one", async () => {
+  it("fires onNetworkRecovery for a 4xx response -- the server was reached and answered", async () => {
     const client = await freshClient();
     const onFailure = vi.fn();
     const onRecovery = vi.fn();
@@ -72,6 +75,67 @@ describe("fetchWithToken() network classification", () => {
 
     expect(onRecovery).toHaveBeenCalledTimes(1);
     expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it("fires onNetworkFailure for a 5xx on a GET -- nginx up but backend unreachable", async () => {
+    const client = await freshClient();
+    const onFailure = vi.fn();
+    const onRecovery = vi.fn();
+    client.setOnNetworkStatusChange({ onFailure, onRecovery });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ detail: "Bad gateway" }, { status: 502 })),
+    );
+
+    await expect(client.listNotes()).rejects.toThrow(/Bad gateway|502/);
+
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onRecovery).not.toHaveBeenCalled();
+  });
+
+  it("fires onNetworkRecovery for a 5xx on a WRITE -- a one-off write error must not flip the whole app offline", async () => {
+    const client = await freshClient();
+    const onFailure = vi.fn();
+    const onRecovery = vi.fn();
+    client.setOnNetworkStatusChange({ onFailure, onRecovery });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ detail: "Service unavailable" }, { status: 503 }),
+        ),
+    );
+
+    // The call still surfaces the error to its caller...
+    await expect(client.putNote("note.md", "x")).rejects.toThrow(/unavailable|503/);
+    // ...but the offline signal is not tripped by a write 5xx.
+    expect(onRecovery).toHaveBeenCalledTimes(1);
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it("fires onNetworkFailure for a cache-served response (X-SW-Cache-Fallback), even at status 200", async () => {
+    const client = await freshClient();
+    const onFailure = vi.fn();
+    const onRecovery = vi.fn();
+    client.setOnNetworkStatusChange({ onFailure, onRecovery });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse([], { headers: { "X-SW-Cache-Fallback": "1" } }),
+        ),
+    );
+
+    await client.listNotes();
+
+    // The service worker served this from cache during an outage -- the app
+    // must treat it as "still offline", not as evidence the server is back.
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onRecovery).not.toHaveBeenCalled();
   });
 
   it("aborts and reports a network failure when the request exceeds the fetch timeout", async () => {
@@ -178,5 +242,121 @@ describe("refreshSession() offline-restore classification (KTD0)", () => {
     expect(token).toBeNull();
     expect(client.refreshFailureWasNetworkError()).toBe(false);
     expect(onRecovery).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("refreshFailureWasAuthRejection() -- reachable 401/403 vs everything else", () => {
+  it("is false after a genuine network-layer failure (still a network error, not an auth verdict)", async () => {
+    const client = await freshClient();
+    client.setOnNetworkStatusChange({ onFailure: vi.fn(), onRecovery: vi.fn() });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+    await client.refreshAccessToken();
+
+    expect(client.refreshFailureWasAuthRejection()).toBe(false);
+    expect(client.refreshFailureWasNetworkError()).toBe(true);
+  });
+
+  it("is false after the refresh call's own timeout abort", async () => {
+    vi.useFakeTimers();
+    const client = await freshClient();
+    client.setOnNetworkStatusChange({ onFailure: vi.fn(), onRecovery: vi.fn() });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+        });
+      }),
+    );
+
+    const pending = client.refreshAccessToken();
+    pending.catch(() => {});
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+
+    expect(client.refreshFailureWasAuthRejection()).toBe(false);
+  });
+
+  it("is true after a reachable server returns 401", async () => {
+    const client = await freshClient();
+    client.setOnNetworkStatusChange({ onFailure: vi.fn(), onRecovery: vi.fn() });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ detail: "unauthorized" }, { status: 401 })),
+    );
+
+    const token = await client.refreshAccessToken();
+
+    expect(token).toBeNull();
+    expect(client.refreshFailureWasAuthRejection()).toBe(true);
+  });
+
+  it("is true after a reachable server returns 403", async () => {
+    const client = await freshClient();
+    client.setOnNetworkStatusChange({ onFailure: vi.fn(), onRecovery: vi.fn() });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ detail: "forbidden" }, { status: 403 })),
+    );
+
+    await client.refreshAccessToken();
+
+    expect(client.refreshFailureWasAuthRejection()).toBe(true);
+  });
+
+  it("is false after a 5xx on refresh, and that 5xx fires onNetworkFailure (the mount-time trigger)", async () => {
+    const client = await freshClient();
+    const onFailure = vi.fn();
+    const onRecovery = vi.fn();
+    client.setOnNetworkStatusChange({ onFailure, onRecovery });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ detail: "bad gateway" }, { status: 502 })),
+    );
+
+    const token = await client.refreshAccessToken();
+
+    expect(token).toBeNull();
+    expect(client.refreshFailureWasAuthRejection()).toBe(false);
+    // refreshSession() is the deliberate carve-out from the GET-only 5xx
+    // rule: it is the reliable onNetworkFailure trigger on mount.
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onRecovery).not.toHaveBeenCalled();
+  });
+
+  it("is false after a successful refresh", async () => {
+    const client = await freshClient();
+    client.setOnNetworkStatusChange({ onFailure: vi.fn(), onRecovery: vi.fn() });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ access_token: "tok" })),
+    );
+
+    const token = await client.refreshAccessToken();
+
+    expect(token).toBe("tok");
+    expect(client.refreshFailureWasAuthRejection()).toBe(false);
+  });
+
+  it("resets to false when a later non-5xx response comes back, even from a prior true state", async () => {
+    const client = await freshClient();
+    client.setOnNetworkStatusChange({ onFailure: vi.fn(), onRecovery: vi.fn() });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: "no" }, { status: 401 }));
+    await client.refreshAccessToken();
+    expect(client.refreshFailureWasAuthRejection()).toBe(true);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ access_token: "tok" }));
+    await client.refreshAccessToken();
+    expect(client.refreshFailureWasAuthRejection()).toBe(false);
   });
 });

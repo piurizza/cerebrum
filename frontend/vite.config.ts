@@ -108,6 +108,26 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // NOT `skipWaiting` (KTD7 stays in force -- an *update* deployed
+        // while the app is open still waits for the user's manual Reload
+        // via ReloadPrompt, so an in-progress edit is never dropped by a
+        // silent reload). `clientsClaim` is a different, safe axis: once a
+        // worker *is* active (this first-ever install, or later after the
+        // user's own manual reload), it takes control of already-open
+        // pages immediately instead of only future navigations. Without
+        // it, confirmed live (2026-09-08): a fresh login's page is NEVER
+        // claimed by the SW it just installed for the rest of that
+        // session, so none of `sync.ts`'s `syncVault()` fetches -- even
+        // though they succeed over the live network -- are ever seen by
+        // the SW's fetch handler to get cached.
+        // `navigator.serviceWorker.controller` stayed `null` through an
+        // entire 15s+ online session; the vault synced (`lastSyncedAt`
+        // set) but nothing was actually retrievable offline. A page
+        // reload while already authenticated worked around this by
+        // accident (the SW is controlling by the *next* navigation even
+        // without this option) -- that's why earlier testing never caught
+        // it.
+        clientsClaim: true,
         // Covers the built JS/CSS/HTML plus bundled font/image assets
         // (`png,ico` so the icons precache -- R9); `dist` is Vite's build
         // output root at the time workbox scans it.

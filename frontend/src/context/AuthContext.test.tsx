@@ -46,6 +46,13 @@ vi.mock("../lib/sessionEstablished", () => ({
   markLoggedOut: () => mockMarkLoggedOut(),
 }));
 
+// login()'s own syncVault() call (2026-09-08 fix) is mocked so tests can
+// assert it fires without exercising the real fetch chain.
+const mockSyncVault = vi.fn<() => Promise<void>>(() => Promise.resolve());
+vi.mock("../offline/sync", () => ({
+  syncVault: () => mockSyncVault(),
+}));
+
 import { setNavigatorOnLine } from "../test/factories";
 import { AuthProvider, useAuth } from "./AuthContext";
 
@@ -87,6 +94,8 @@ beforeEach(() => {
   mockMarkSessionEstablished.mockReset();
   mockClearSessionEstablished.mockReset();
   mockMarkLoggedOut.mockReset();
+  mockSyncVault.mockReset();
+  mockSyncVault.mockResolvedValue(undefined);
   setNavigatorOnLine(true);
 });
 
@@ -300,6 +309,12 @@ describe("AuthProvider login / logout", () => {
     expect(screen.getByTestId("username")).toHaveTextContent("alice");
     expect(mockLogin).toHaveBeenCalledWith("alice", "hunter2");
     expect(mockMarkSessionEstablished).toHaveBeenCalled();
+    // Regression coverage (2026-09-08 fix): main.tsx's own syncVault() call
+    // fires once at page load, before any credentials exist, and 401s
+    // harmlessly -- it is never retried for the rest of this page session.
+    // Without login() also calling it, a fresh login (no intervening
+    // reload) never gets R1's proactive full-vault sync at all.
+    expect(mockSyncVault).toHaveBeenCalled();
   });
 
   it("clears auth state, the access token, the marker, and drops a logout tombstone on logout", async () => {

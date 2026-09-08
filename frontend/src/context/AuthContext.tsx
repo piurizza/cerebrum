@@ -21,6 +21,7 @@ import {
   markSessionEstablished,
   wasSessionEstablished,
 } from "../lib/sessionEstablished";
+import { syncVault } from "../offline/sync";
 
 // This context deliberately does NOT track `isAdmin`, and only tracks
 // `username` when a login form directly supplied it for this session.
@@ -181,6 +182,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     markSessionEstablished();
     setIsAuthenticated(true);
     setUsername(user);
+    // R1's proactive full-vault sync (main.tsx's own `void syncVault();`)
+    // fires exactly once, unconditionally, at page load -- including on
+    // the very load that's still showing this login form, before any
+    // credentials exist. That call 401s (no access token yet), fails
+    // harmlessly per syncVault()'s own docstring, and is never retried for
+    // the rest of this page session -- login() doesn't re-trigger it, and
+    // nothing else does either. Net effect: logging in and going offline a
+    // short while later, with no intervening reload, leaves the vault
+    // essentially uncached -- R1's offline snapshot never actually ran.
+    // Confirmed live (2026-09-08): 10-20s online after login was not
+    // enough for a fresh device to have anything meaningfully cached
+    // offline. A page reload while already authenticated doesn't have
+    // this gap -- main.tsx's call runs again, and by then a valid
+    // refresh-token cookie exists, so its internal 401-retry (through the
+    // same `navigator.locks`-guarded refreshAccessToken() this component
+    // uses) succeeds. Firing it again here closes the one path that
+    // never gets a working attempt.
+    void syncVault();
   }, []);
 
   const logout = useCallback(() => {

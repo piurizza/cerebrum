@@ -196,6 +196,15 @@ API calls.
   `react-router-dom` links, not full page loads — external links open
   normally in a new tab. A link-autocomplete picker while typing is still
   planned (see [Feature roadmap](#9-feature-roadmap-user-stories)).
+- **mermaid** renders fenced ` ```mermaid ` blocks in the preview as SVG
+  diagrams. Loaded lazily together with **DOMPurify** on the first
+  diagram, so notes without diagrams pay nothing. `securityLevel:
+  "strict"` plus a second DOMPurify pass over the final SVG (SVG profile,
+  so `htmlLabels: false`), because note content is not trusted: any
+  account and any MCP client can write notes. Dynamic-import chunks are
+  built under `assets/lazy/` and kept out of the service worker precache
+  (cached on first use instead), except workbox-window, which the PWA
+  registration needs on every start.
 - **react-force-graph** (2D canvas variant) for graph visualization —
   wraps d3-force physics with canvas rendering, zoom/pan, and node-click
   handling out of the box. Canvas rendering scales to hundreds of nodes
@@ -421,6 +430,9 @@ history.
 
 ### Editing experience
 
+- [x] render ` ```mermaid ` fenced blocks as diagrams in the preview,
+      following the light/dark theme; an invalid diagram shows mermaid's
+      parse error with its source underneath, never a blank space.
 - [x] see whether they have unsaved changes
 - [x] save via a keyboard shortcut (e.g. Cmd/Ctrl+S) -- a window-level
       keydown listener on `NoteViewPage` (not a CodeMirror keymap, so it
@@ -555,6 +567,17 @@ how consistently each was cited as high-value across that research.
   doesn't cover endpoints whose request body isn't a JSON-typed
   contract today -- `PUT /notes/{path}`'s raw-markdown body and
   `POST /attachments`'s raw-bytes body -- those stay untyped by design.
+- **Mermaid diagrams render offline only if they were rendered online
+  first.** The mermaid chunks (~5 MB) are cached on first use rather than
+  precached, so installing the PWA stays as light as before; a vault
+  opened offline for the first time shows diagrams as their source with
+  a load error.
+- **`npm audit` flags a low-severity KaTeX advisory**
+  ([GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7))
+  through mermaid, which pins `katex@^0.16`; the fix is in 0.18.2. It
+  needs an existing prototype-pollution bug to be exploitable. Mermaid
+  12.2.0 moves to a fixed KaTeX but was one day old when this landed;
+  revisit once it has aged (after 2026-10-27).
 - **`npm audit` flags a high-severity advisory in `react-router`** (RSC-mode
   CSRF bypass). Not applicable here — this app uses plain client-side
   routing, not React Router's RSC/framework mode. Revisit if that changes.

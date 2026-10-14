@@ -17,14 +17,21 @@ vi.mock("../../api/client", async () => {
   };
 });
 
+vi.mock("../../lib/mermaid", () => ({ renderMermaid: vi.fn() }));
+
 import { fetchAttachmentBlobUrl } from "../../api/client";
+import { ThemeProvider } from "../../context/ThemeContext";
+import { renderMermaid } from "../../lib/mermaid";
 
 const mockFetchAttachmentBlobUrl = vi.mocked(fetchAttachmentBlobUrl);
+const mockRenderMermaid = vi.mocked(renderMermaid);
 
 function renderPreview(body: string, currentPath = "notes/a.md") {
   return render(
     <MemoryRouter>
-      <MarkdownPreview body={body} currentPath={currentPath} />
+      <ThemeProvider>
+        <MarkdownPreview body={body} currentPath={currentPath} />
+      </ThemeProvider>
     </MemoryRouter>,
   );
 }
@@ -32,6 +39,7 @@ function renderPreview(body: string, currentPath = "notes/a.md") {
 describe("MarkdownPreview", () => {
   beforeEach(() => {
     mockFetchAttachmentBlobUrl.mockReset();
+    mockRenderMermaid.mockReset();
   });
 
   it("renders an internal .md link as a router Link to the resolved note path", () => {
@@ -86,5 +94,49 @@ describe("MarkdownPreview", () => {
     const img = screen.getByRole("img", { name: "alt text" });
     expect(img).toHaveAttribute("src", "https://example.com/pic.png");
     expect(mockFetchAttachmentBlobUrl).not.toHaveBeenCalled();
+  });
+
+  describe("mermaid blocks", () => {
+    const fence = "```";
+
+    it("renders a fenced mermaid block as the diagram SVG", async () => {
+      mockRenderMermaid.mockResolvedValue(
+        '<svg data-testid="diagram"><text>A</text></svg>',
+      );
+
+      renderPreview(`${fence}mermaid\nflowchart LR\n  A --> B\n${fence}`);
+
+      expect(await screen.findByTestId("diagram")).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Diagram" })).toBeInTheDocument();
+      expect(mockRenderMermaid).toHaveBeenCalledWith(
+        "flowchart LR\n  A --> B",
+        "light",
+      );
+    });
+
+    it("shows the parse error and keeps the source visible when rendering fails", async () => {
+      mockRenderMermaid.mockRejectedValue(new Error("Parse error on line 2"));
+
+      renderPreview(`${fence}mermaid\nflowchart LR\n  A --\n${fence}`);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Parse error on line 2",
+      );
+      expect(screen.getByText(/flowchart LR/)).toBeInTheDocument();
+    });
+
+    it("leaves other fenced code blocks as plain code", () => {
+      renderPreview(`${fence}sql\nSELECT 1;\n${fence}`);
+
+      expect(screen.getByText("SELECT 1;").closest("pre")).not.toBeNull();
+      expect(mockRenderMermaid).not.toHaveBeenCalled();
+    });
+
+    it("does not treat inline code mentioning mermaid as a diagram", () => {
+      renderPreview("Use a `mermaid` block.");
+
+      expect(screen.getByText("mermaid").tagName).toBe("CODE");
+      expect(mockRenderMermaid).not.toHaveBeenCalled();
+    });
   });
 });

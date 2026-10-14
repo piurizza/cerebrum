@@ -71,6 +71,12 @@ export default defineConfig({
         // (`png,ico` so the icons precache -- R9); `dist` is Vite's build
         // output root at the time workbox scans it.
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff,woff2,ttf,eot}"],
+        // Lazy chunks (today: mermaid and its diagram/layout engines, ~5 MB)
+        // are cached on first use by the CacheFirst rule below instead of
+        // precached, so installing or updating the PWA doesn't download
+        // them for a vault that never shows a diagram. The trade-off: a
+        // diagram never rendered online won't render offline.
+        globIgnores: ["assets/lazy/**"],
         // The SPA navigation fallback serves index.html for unknown routes;
         // exclude `/api/*` so an offline API request fails (and hits the
         // NetworkFirst rules below) instead of resolving to the app shell.
@@ -106,6 +112,16 @@ export default defineConfig({
         // silently stop matching the moment the origin isn't the SW's own.
         runtimeCaching: [
           {
+            // Content-hashed file names, so a cached chunk is never stale.
+            urlPattern: ({ url, request }) =>
+              request.method === "GET" && url.pathname.startsWith("/assets/lazy/"),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "lazy-chunks",
+              expiration: { maxEntries: 200 },
+            },
+          },
+          {
             // Covers both `listNotes()` (`GET /api/notes`) and
             // `getNote(path)` (`GET /api/notes/<path>`, `path` possibly
             // containing further encoded `/`s for nested folders).
@@ -130,6 +146,22 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // Non-entry chunks only exist for dynamic imports; a folder of
+        // their own lets the service worker cache them on first use
+        // instead of precaching them. The one exception is workbox-window,
+        // which the PWA registration imports dynamically on every start:
+        // it is part of the app shell and must stay precached, or a first
+        // offline start couldn't register the service worker.
+        chunkFileNames: (chunk) =>
+          chunk.moduleIds.some((id) => id.includes("/node_modules/workbox-window/"))
+            ? "assets/[name]-[hash].js"
+            : "assets/lazy/[name]-[hash].js",
+      },
+    },
+  },
   server: {
     proxy: {
       "/api": {

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { Link } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 import { encodeNotePath, errorMessage, fetchAttachmentBlobUrl } from "../../api/client";
 import { resolveAttachmentTarget, resolveLinkTarget } from "../../lib/noteContent";
+import { MermaidDiagram } from "./MermaidDiagram";
 
 interface MarkdownPreviewProps {
   body: string;
@@ -74,6 +75,24 @@ function AttachmentImage({ attachmentPath, alt }: AttachmentImageProps) {
   return <img src={blobUrl} alt={alt} />;
 }
 
+type HastNode = NonNullable<ExtraProps["node"]>;
+type HastChild = HastNode["children"][number];
+
+function textContent(node: HastChild): string {
+  if (node.type === "text") return node.value;
+  if (node.type === "element") return node.children.map(textContent).join("");
+  return "";
+}
+
+/** The source of a fenced ```mermaid block, or null for any other `<pre>`. */
+function mermaidSource(pre: HastNode | undefined): string | null {
+  const code = pre?.children[0];
+  if (code?.type !== "element" || code.tagName !== "code") return null;
+  const classes = code.properties.className;
+  if (!Array.isArray(classes) || !classes.includes("language-mermaid")) return null;
+  return textContent(code).replace(/\n$/, "");
+}
+
 export function MarkdownPreview({ body, currentPath }: MarkdownPreviewProps) {
   const components: Components = {
     a({ href, children, ...props }) {
@@ -86,6 +105,13 @@ export function MarkdownPreview({ body, currentPath }: MarkdownPreviewProps) {
           {children}
         </a>
       );
+    },
+    pre({ node, children, ...props }) {
+      const source = mermaidSource(node);
+      if (source !== null) {
+        return <MermaidDiagram source={source} />;
+      }
+      return <pre {...props}>{children}</pre>;
     },
     img({ src, alt }) {
       const resolved =

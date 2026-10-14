@@ -828,6 +828,25 @@ a {
   padding: 0;
 }
 
+.markdown-preview__mermaid {
+  margin: 1rem 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.markdown-preview__mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Mermaid parse errors point at the failing column with a caret line, which
+   only lines up with the source above it in a monospace, pre-wrapped block. */
+.markdown-preview__mermaid-error .error-text {
+  white-space: pre-wrap;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.8rem;
+}
+
 .markdown-preview blockquote {
   margin: 0;
   padding-left: 1rem;

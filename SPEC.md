@@ -527,6 +527,17 @@ how consistently each was cited as high-value across that research.
       relocating its attachment folder; see
       [Known gaps](#10-known-gaps--future-work) for the narrower
       constraints that remain.
+- [x] see notes created or changed while the window was in the
+      background (another device, an MCP client, a file edited on disk)
+      in the sidebar when the window comes back to the foreground -- the
+      note list refetches on `focus` and on `visibilitychange` to
+      visible, so a long-lived window (the desktop app, an installed PWA)
+      that never reloads still picks them up. No polling and no push
+      channel: a window that stays in the foreground while notes change
+      underneath it still needs a manual reload. A failed background
+      refresh keeps the last good list rather than replacing the sidebar
+      with an error, and an older response never overwrites a newer one.
+      Only the list refreshes: an open note's content does not.
 
 ## 10. Known gaps / future work
 

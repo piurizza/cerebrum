@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { errorMessage, listNotes } from "../api/client";
@@ -33,22 +34,73 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const lastIssuedRequest = useRef(0);
+  const lastAppliedRequest = useRef(0);
+
+  // Applies a response only if no later-issued request has already been
+  // applied. Two fetches can now overlap (a focus refresh and an explicit
+  // refreshNotes() after a create), and an older response landing last
+  // would otherwise roll the list back past the note just created. A
+  // discarded response is never fresher than the one already applied, so
+  // the "after `await refreshNotes()` the list is current" contract holds.
+  const fetchNotes = useCallback(async (): Promise<void> => {
+    lastIssuedRequest.current += 1;
+    const request = lastIssuedRequest.current;
+    const result = await listNotes();
+    if (request < lastAppliedRequest.current) {
+      return;
+    }
+    lastAppliedRequest.current = request;
+    setNotes(result);
+    setError(null);
+  }, []);
 
   const refreshNotes = useCallback(async () => {
     try {
-      const result = await listNotes();
-      setNotes(result);
-      setError(null);
+      await fetchNotes();
     } catch (err: unknown) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchNotes]);
 
   useEffect(() => {
     refreshNotes();
   }, [refreshNotes]);
+
+  // Notes written while this window was in the background (another
+  // device, an MCP client, a file edited on disk) only reach the sidebar
+  // through a fresh listNotes() -- there is no push channel. A
+  // long-lived window (the desktop app, an installed PWA) never reloads,
+  // so refetch when it comes back to the foreground. A failed background
+  // refresh keeps the last good list instead of replacing the sidebar
+  // with an error: the user didn't ask for it, and a wake-from-sleep
+  // focus event commonly fires before the network is back.
+  useEffect(() => {
+    let inFlight = false;
+
+    function refreshInBackground() {
+      if (inFlight || document.visibilityState !== "visible") {
+        return;
+      }
+      inFlight = true;
+      fetchNotes()
+        .catch((err: unknown) => {
+          console.warn(`Background note refresh failed: ${errorMessage(err)}`);
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    }
+
+    window.addEventListener("focus", refreshInBackground);
+    document.addEventListener("visibilitychange", refreshInBackground);
+    return () => {
+      window.removeEventListener("focus", refreshInBackground);
+      document.removeEventListener("visibilitychange", refreshInBackground);
+    };
+  }, [fetchNotes]);
 
   return (
     <NotesContext.Provider value={{ notes, error, loading, refreshNotes }}>

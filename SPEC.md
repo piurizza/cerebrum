@@ -443,7 +443,8 @@ history.
 ### Attachments
 
 - [x] embed an image in a note -- pasted images render inline in the
-      preview via an authenticated fetch + blob URL (`<img src>` can't
+      preview, scaled down to the reading column when wider than it,
+      via an authenticated fetch + blob URL (`<img src>` can't
       carry an `Authorization` header, and a URL-embedded token would leak
       into browser history/logs)
 - [x] paste/upload an image into a note -- pasting an image from the

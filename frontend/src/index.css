@@ -765,6 +765,10 @@ a {
   border-radius: var(--radius);
   font-size: 1.2rem;
   line-height: 1.7;
+  /* A bare URL or a long identifier is one unbreakable word; let it wrap
+     instead of pushing the whole page into horizontal scroll. Ordinary
+     words are unaffected, and <pre> keeps its own scroll. */
+  overflow-wrap: anywhere;
 }
 
 .markdown-preview > :first-child {
@@ -845,6 +849,13 @@ a {
   white-space: pre-wrap;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.8rem;
+}
+
+/* Pasted screenshots and attached diagrams are routinely wider than the
+   reading column; without a cap they overflow it instead of scaling down. */
+.markdown-preview img {
+  max-width: 100%;
+  height: auto;
 }
 
 .markdown-preview blockquote {

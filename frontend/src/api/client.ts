@@ -25,12 +25,17 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// The access token lives in memory only -- never localStorage/sessionStorage
-// (this codebase has zero prior localStorage usage). An in-memory store is
-// more XSS-resistant than persisting a JWT to disk; the trade-off is that it
-// doesn't survive a page reload on its own -- AuthContext's silent refresh
-// on mount (via the httpOnly refresh-token cookie) is what restores a
-// session across a reload.
+// The access token lives in memory only -- never localStorage/sessionStorage.
+// An in-memory store is more XSS-resistant than persisting a JWT to disk;
+// the trade-off is that it doesn't survive a page reload on its own --
+// AuthContext's silent refresh on mount (via the httpOnly refresh-token
+// cookie) is what restores a session across a reload. `localStorage` does
+// hold a few non-credential `cerebrum:` flags (`lastSyncedAt` in
+// offline/sync.ts; `sessionEstablished` + the one-shot `loggedOut`
+// tombstone in lib/sessionEstablished.ts) -- none is a token or secret, and
+// forging `sessionEstablished` via XSS grants no auth, since no access
+// token is persisted and the mount refresh flow still adjudicates the
+// session.
 let accessToken: string | null = null;
 
 export function setAccessToken(token: string | null): void {
@@ -118,10 +123,26 @@ async function fetchWithToken(
       credentials: "include",
       signal: controller.signal,
     });
-    // A response -- any response, including a non-2xx one -- proves the
-    // network layer actually reached the server. Only fetch() itself
-    // throwing (below) means it didn't.
-    onNetworkRecovery?.();
+    // Deciding what a response means for the "can I reach my server" signal:
+    //  - `X-SW-Cache-Fallback` header: the service worker served this from
+    //    cache during an outage (vite.config.ts). It looks like a live 200
+    //    but the server is unreachable -- treat as a failure so the offline
+    //    banner and write-gating stay engaged while sync.ts's pool of
+    //    proactive GETs settles.
+    //  - a 5xx on a GET: nginx up, backend unreachable -- same as a dropped
+    //    connection. Scoped to GET (which is what the SW cache-fallback
+    //    rules cover): a one-off 5xx on a write must stay a plain error, not
+    //    strand the whole app read-only.
+    //  - anything else (2xx, or a 4xx -- the server answering): recovery.
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (
+      response.headers.get("X-SW-Cache-Fallback") ||
+      (method === "GET" && response.status >= 500)
+    ) {
+      onNetworkFailure?.();
+    } else {
+      onNetworkRecovery?.();
+    }
     return response;
   } catch (err) {
     onNetworkFailure?.();
@@ -257,6 +278,23 @@ export function refreshFailureWasNetworkError(): boolean {
   return lastRefreshFailureWasNetworkError;
 }
 
+// Set by refreshSession() below: true ONLY when the last refresh got a
+// response whose status was 401 or 403 -- a reachable server explicitly
+// rejecting the session. False for a network-layer failure, this call's own
+// timeout, a 5xx, or a success. AuthContext (KTD-A) uses this to decide
+// whether a failed mount refresh means "the session is genuinely dead --
+// redirect to /login and clear the session-established marker" or "the
+// server is just unreachable -- fall back to the cached vault". This is a
+// finer distinction than `lastRefreshFailureWasNetworkError`, which stays
+// false for both a 5xx and a 401; after U4 lands, AuthContext consumes this
+// one instead and `refreshFailureWasNetworkError()` has no remaining
+// consumer (kept for now to avoid churning its tests).
+let lastRefreshFailureWasAuthRejection = false;
+
+export function refreshFailureWasAuthRejection(): boolean {
+  return lastRefreshFailureWasAuthRejection;
+}
+
 async function refreshSession(): Promise<string> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
@@ -288,19 +326,32 @@ async function refreshSession(): Promise<string> {
       // trusted for the auth decision.
       const isOwnTimeout = err instanceof DOMException && err.name === "AbortError";
       lastRefreshFailureWasNetworkError = !isOwnTimeout;
+      lastRefreshFailureWasAuthRejection = false;
       onNetworkFailure?.();
       throw err;
     }
-    // A response -- any response -- proves the network layer reached the
-    // server, same reasoning as fetchWithToken() above. True for both the
-    // ok and not-ok branches below, so set once here rather than in each.
-    onNetworkRecovery?.();
+    // A response came back, so the network layer reached *something*. But a
+    // 5xx here means the backend is down behind a still-up nginx -- for the
+    // offline signal that is "unreachable", same as a dropped connection
+    // (this is refreshSession()'s deliberate carve-out from the GET-only 5xx
+    // rule in fetchWithToken(): the mount refresh is the reliable
+    // onNetworkFailure trigger, and it is never SW-cached). A <500 response
+    // is the server answering -- recovery.
+    if (response.status >= 500) {
+      onNetworkFailure?.();
+    } else {
+      onNetworkRecovery?.();
+    }
     lastRefreshFailureWasNetworkError = false;
     if (!response.ok) {
-      // A response came back and the server said no -- an explicit
-      // rejection, not a network failure.
+      // A response came back and the server said no. A 401/403 is a
+      // definitive auth rejection (KTD-A -- redirect to /login); anything
+      // else (a 5xx especially) is not.
+      lastRefreshFailureWasAuthRejection =
+        response.status === 401 || response.status === 403;
       throw new Error(`POST /auth/refresh failed: ${response.status}`);
     }
+    lastRefreshFailureWasAuthRejection = false;
     const data = (await response.json()) as LoginResponse;
     return data.access_token;
   } finally {

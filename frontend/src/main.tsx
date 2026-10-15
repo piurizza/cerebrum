@@ -24,6 +24,16 @@ import { syncVault } from "./offline/sync";
 // Fire-and-forget -- `syncVault()` never throws (see its own docstring)
 // and must not delay the initial render below.
 //
+// This module-load call alone never authenticates -- there's no access
+// token yet on a fresh /login page load, so it 401s and gives up
+// harmlessly. `AuthContext.login()` fires it again on a successful login
+// for exactly that reason (2026-09-08 fix): without that second call, a
+// fresh login-then-browse-then-offline session had nothing proactively
+// cached, only whichever individual notes were opportunistically cached
+// by ordinary navigation. This call still matters on its own for a
+// reload while already authenticated (a valid refresh-token cookie makes
+// its internal 401-retry succeed).
+//
 // Deliberately UNCONDITIONAL, not gated on `navigator.onLine` -- an
 // earlier version checked it here as a "why race a sync we already know
 // is doomed" optimization, but `navigator.onLine` is read at module-load

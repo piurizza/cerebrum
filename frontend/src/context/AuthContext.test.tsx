@@ -9,11 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockLogin = vi.fn<(username: string, password: string) => Promise<void>>();
 const mockRefreshAccessToken = vi.fn<() => Promise<string | null>>();
 const mockSetAccessToken = vi.fn<(token: string | null) => void>();
-// Defaults to `false` (an explicit rejection, not a network failure) --
-// the safer default, since a test that forgets to set this should exercise
-// "the session really is logged out", not silently fall into the
-// offline-restore path it isn't testing for.
-const mockRefreshFailureWasNetworkError = vi.fn<() => boolean>(() => false);
+// Defaults to `false` (not a definitive auth rejection) -- the offline-
+// continuity default. A test that wants "the session really is dead" sets
+// this to `true`.
+const mockRefreshFailureWasAuthRejection = vi.fn<() => boolean>(() => false);
 let capturedRefreshFailureCallback: (() => void) | null = null;
 const mockSetOnRefreshFailure = vi.fn<(callback: (() => void) | null) => void>(
   (callback) => {
@@ -24,19 +23,42 @@ const mockSetOnRefreshFailure = vi.fn<(callback: (() => void) | null) => void>(
 vi.mock("../api/client", () => ({
   login: (username: string, password: string) => mockLogin(username, password),
   refreshAccessToken: () => mockRefreshAccessToken(),
-  refreshFailureWasNetworkError: () => mockRefreshFailureWasNetworkError(),
+  refreshFailureWasAuthRejection: () => mockRefreshFailureWasAuthRejection(),
   setAccessToken: (token: string | null) => mockSetAccessToken(token),
   setOnRefreshFailure: (callback: (() => void) | null) =>
     mockSetOnRefreshFailure(callback),
 }));
 
-import { LAST_SYNCED_AT_KEY } from "../offline/sync";
+// The session-established marker + logout tombstone are mocked so tests can
+// drive `wasSessionEstablished()` / `consumeLoggedOut()` directly and assert
+// on the mark/clear calls, without depending on jsdom's localStorage.
+const mockWasSessionEstablished = vi.fn<() => boolean>(() => false);
+const mockConsumeLoggedOut = vi.fn<() => boolean>(() => false);
+const mockMarkSessionEstablished = vi.fn<() => void>();
+const mockClearSessionEstablished = vi.fn<() => void>();
+const mockMarkLoggedOut = vi.fn<() => void>();
+
+vi.mock("../lib/sessionEstablished", () => ({
+  wasSessionEstablished: () => mockWasSessionEstablished(),
+  consumeLoggedOut: () => mockConsumeLoggedOut(),
+  markSessionEstablished: () => mockMarkSessionEstablished(),
+  clearSessionEstablished: () => mockClearSessionEstablished(),
+  markLoggedOut: () => mockMarkLoggedOut(),
+}));
+
+// login()'s own syncVault() call (2026-09-08 fix) is mocked so tests can
+// assert it fires without exercising the real fetch chain.
+const mockSyncVault = vi.fn<() => Promise<void>>(() => Promise.resolve());
+vi.mock("../offline/sync", () => ({
+  syncVault: () => mockSyncVault(),
+}));
+
 import { setNavigatorOnLine } from "../test/factories";
 import { AuthProvider, useAuth } from "./AuthContext";
 
-// Renders the context's live values as text/data attributes so tests can
-// assert on post-update state via RTL queries, and exposes login/logout as
-// buttons so the test can trigger them the same way real consumers would.
+// Renders the context's live values as text so tests can assert on
+// post-update state via RTL queries, and exposes login/logout as buttons so
+// the test can trigger them the same way real consumers would.
 function Consumer() {
   const { isAuthenticated, username, loading, login, logout } = useAuth();
   return (
@@ -58,14 +80,22 @@ beforeEach(() => {
   mockLogin.mockReset();
   mockRefreshAccessToken.mockReset();
   mockSetAccessToken.mockReset();
-  mockRefreshFailureWasNetworkError.mockReset();
-  mockRefreshFailureWasNetworkError.mockReturnValue(false);
+  mockRefreshFailureWasAuthRejection.mockReset();
+  mockRefreshFailureWasAuthRejection.mockReturnValue(false);
   mockSetOnRefreshFailure.mockReset();
   mockSetOnRefreshFailure.mockImplementation((callback) => {
     capturedRefreshFailureCallback = callback;
   });
   capturedRefreshFailureCallback = null;
-  window.localStorage.clear();
+  mockWasSessionEstablished.mockReset();
+  mockWasSessionEstablished.mockReturnValue(false);
+  mockConsumeLoggedOut.mockReset();
+  mockConsumeLoggedOut.mockReturnValue(false);
+  mockMarkSessionEstablished.mockReset();
+  mockClearSessionEstablished.mockReset();
+  mockMarkLoggedOut.mockReset();
+  mockSyncVault.mockReset();
+  mockSyncVault.mockResolvedValue(undefined);
   setNavigatorOnLine(true);
 });
 
@@ -73,8 +103,8 @@ afterEach(() => {
   setNavigatorOnLine(true);
 });
 
-describe("AuthProvider", () => {
-  it("restores an authenticated session on mount when refresh resolves a token", async () => {
+describe("AuthProvider mount restore", () => {
+  it("restores an authenticated session when refresh resolves a token, and marks the browser established", async () => {
     mockRefreshAccessToken.mockResolvedValue("access-token");
 
     render(
@@ -87,9 +117,10 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("loading")).toHaveTextContent("false"),
     );
     expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
+    expect(mockMarkSessionEstablished).toHaveBeenCalled();
   });
 
-  it("leaves the session unauthenticated on mount when refresh resolves null", async () => {
+  it("leaves the session unauthenticated when refresh resolves null and no session is on record", async () => {
     mockRefreshAccessToken.mockResolvedValue(null);
 
     render(
@@ -104,7 +135,159 @@ describe("AuthProvider", () => {
     expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
   });
 
-  it("sets isAuthenticated and username on successful login", async () => {
+  it("restores from cache when refresh fails without an auth rejection (5xx / timeout / network) and a session is on record", async () => {
+    mockWasSessionEstablished.mockReturnValue(true);
+    mockRefreshAccessToken.mockResolvedValue(null);
+    mockRefreshFailureWasAuthRejection.mockReturnValue(false);
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
+    expect(mockRefreshAccessToken).toHaveBeenCalled();
+  });
+
+  it("logs out and clears the marker on a definitive 401/403, even with a session on record", async () => {
+    mockWasSessionEstablished.mockReturnValue(true);
+    mockRefreshAccessToken.mockResolvedValue(null);
+    mockRefreshFailureWasAuthRejection.mockReturnValue(true);
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
+    expect(mockClearSessionEstablished).toHaveBeenCalled();
+  });
+
+  it("consumes a logout tombstone before any refresh -- straight to unauthenticated", async () => {
+    mockConsumeLoggedOut.mockReturnValue(true);
+    mockWasSessionEstablished.mockReturnValue(true);
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
+    expect(mockRefreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("restores from cache when offline with a session on record, without calling refreshAccessToken", async () => {
+    setNavigatorOnLine(false);
+    mockWasSessionEstablished.mockReturnValue(true);
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
+    expect(mockRefreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("leaves the session unauthenticated when offline with no session on record", async () => {
+    setNavigatorOnLine(false);
+    mockWasSessionEstablished.mockReturnValue(false);
+    mockRefreshAccessToken.mockResolvedValue(null);
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
+  });
+
+  it("seeds isAuthenticated true and loading false synchronously when a session is on record (KTD-B)", () => {
+    mockWasSessionEstablished.mockReturnValue(true);
+    // A never-resolving refresh: the seed must not depend on it settling.
+    mockRefreshAccessToken.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    // Asserted synchronously, before any `await` -- the optimistic seed.
+    expect(screen.getByTestId("loading")).toHaveTextContent("false");
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
+  });
+});
+
+describe("AuthProvider mid-session refresh failure", () => {
+  it("keeps the shell mounted on a transient failure (no auth rejection) with a session on record", async () => {
+    mockWasSessionEstablished.mockReturnValue(true);
+    mockRefreshAccessToken.mockResolvedValue("access-token");
+    mockRefreshFailureWasAuthRejection.mockReturnValue(false);
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
+
+    act(() => {
+      capturedRefreshFailureCallback?.();
+    });
+
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
+    expect(mockClearSessionEstablished).not.toHaveBeenCalled();
+  });
+
+  it("logs out and clears the marker on a definitive 401/403 mid-session", async () => {
+    mockWasSessionEstablished.mockReturnValue(true);
+    mockRefreshAccessToken.mockResolvedValue("access-token");
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+
+    mockRefreshFailureWasAuthRejection.mockReturnValue(true);
+    act(() => {
+      capturedRefreshFailureCallback?.();
+    });
+
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
+    expect(mockClearSessionEstablished).toHaveBeenCalled();
+  });
+});
+
+describe("AuthProvider login / logout", () => {
+  it("sets isAuthenticated, username, and the established marker on successful login", async () => {
     mockRefreshAccessToken.mockResolvedValue(null);
     mockLogin.mockResolvedValue(undefined);
     const user = userEvent.setup();
@@ -125,9 +308,16 @@ describe("AuthProvider", () => {
     );
     expect(screen.getByTestId("username")).toHaveTextContent("alice");
     expect(mockLogin).toHaveBeenCalledWith("alice", "hunter2");
+    expect(mockMarkSessionEstablished).toHaveBeenCalled();
+    // Regression coverage (2026-09-08 fix): main.tsx's own syncVault() call
+    // fires once at page load, before any credentials exist, and 401s
+    // harmlessly -- it is never retried for the rest of this page session.
+    // Without login() also calling it, a fresh login (no intervening
+    // reload) never gets R1's proactive full-vault sync at all.
+    expect(mockSyncVault).toHaveBeenCalled();
   });
 
-  it("clears auth state and the access token on logout", async () => {
+  it("clears auth state, the access token, the marker, and drops a logout tombstone on logout", async () => {
     mockRefreshAccessToken.mockResolvedValue(null);
     mockLogin.mockResolvedValue(undefined);
     const user = userEvent.setup();
@@ -153,116 +343,51 @@ describe("AuthProvider", () => {
     );
     expect(screen.getByTestId("username")).toHaveTextContent("null");
     expect(mockSetAccessToken).toHaveBeenCalledWith(null);
+    expect(mockClearSessionEstablished).toHaveBeenCalled();
+    expect(mockMarkLoggedOut).toHaveBeenCalled();
   });
 
-  it("flips isAuthenticated to false when the registered refresh-failure callback fires", async () => {
-    mockRefreshAccessToken.mockResolvedValue("access-token");
+  // Regression coverage for review finding #1 (2026-09-07 code review):
+  // AuthProvider mounts once for the app's lifetime and never unmounts on
+  // logout, so the mount effect's own `cancelled` closure (set only by its
+  // cleanup) is never true here -- without a separate guard, a refresh that
+  // resolves *after* an explicit logout would silently re-authenticate the
+  // same tab and erase the just-written logout tombstone, no reload
+  // involved.
+  it("discards a mount-time refresh that resolves after an explicit logout, even when it would have succeeded", async () => {
+    mockWasSessionEstablished.mockReturnValue(true);
+    let resolveRefresh!: (token: string | null) => void;
+    mockRefreshAccessToken.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+    const user = userEvent.setup();
 
     render(
       <AuthProvider>
         <Consumer />
       </AuthProvider>,
     );
-    await waitFor(() =>
-      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
-    );
+    // The mount refresh is still pending -- optimistic seed (KTD-B) already
+    // shows the shell as authenticated at this point.
     expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
 
-    expect(capturedRefreshFailureCallback).not.toBeNull();
-    act(() => {
-      capturedRefreshFailureCallback?.();
+    await user.click(screen.getByRole("button", { name: "logout" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false"),
+    );
+    mockMarkSessionEstablished.mockClear();
+
+    // The mount-time refresh resolves only now, with a real token -- the
+    // exact race the fix guards against.
+    await act(async () => {
+      resolveRefresh("access-token");
+      await Promise.resolve();
     });
 
     expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
-  });
-
-  it("restores an authenticated session on mount when offline with a prior synced-at marker, without calling refreshAccessToken", async () => {
-    setNavigatorOnLine(false);
-    window.localStorage.setItem(LAST_SYNCED_AT_KEY, "2026-08-10T12:00:00.000Z");
-
-    render(
-      <AuthProvider>
-        <Consumer />
-      </AuthProvider>,
-    );
-
-    await waitFor(() =>
-      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
-    );
-    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
-    // The whole point of the offline-restore short-circuit is skipping the
-    // network attempt entirely -- not just tolerating its eventual
-    // failure -- so refreshAccessToken must never be reached.
-    expect(mockRefreshAccessToken).not.toHaveBeenCalled();
-  });
-
-  it("leaves the session unauthenticated when offline with no prior synced-at marker", async () => {
-    setNavigatorOnLine(false);
-    mockRefreshAccessToken.mockResolvedValue(null);
-
-    render(
-      <AuthProvider>
-        <Consumer />
-      </AuthProvider>,
-    );
-
-    await waitFor(() =>
-      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
-    );
-    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
-  });
-
-  it("restores an authenticated session when refresh fails at the network layer while navigator.onLine still reports true, with a synced-at marker present", async () => {
-    // This is the realistic case the offline-restore fix exists for:
-    // wifi/mobile data is up (navigator.onLine is `true`), but this
-    // specific self-hosted server isn't reachable from the current
-    // network -- coffee-shop wifi, a different LAN, mobile data with no
-    // route home. navigator.onLine never goes false here; only the
-    // network-layer-failure signal does. A version of this fix gated on
-    // `navigator.onLine` alone would incorrectly log the user out in
-    // exactly this scenario.
-    setNavigatorOnLine(true);
-    window.localStorage.setItem(LAST_SYNCED_AT_KEY, "2026-08-10T12:00:00.000Z");
-    mockRefreshAccessToken.mockResolvedValue(null);
-    mockRefreshFailureWasNetworkError.mockReturnValue(true);
-
-    render(
-      <AuthProvider>
-        <Consumer />
-      </AuthProvider>,
-    );
-
-    await waitFor(() =>
-      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
-    );
-    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
-    expect(mockRefreshAccessToken).toHaveBeenCalled();
-  });
-
-  it("leaves the session unauthenticated when refresh is explicitly rejected by a reachable server, even with a synced-at marker present", async () => {
-    // The other half of the same fix: an explicit rejection (the server
-    // was reached and said no -- e.g. a genuinely expired or revoked
-    // refresh token) must never be swallowed by the offline-restore
-    // fallback just because a stale synced-at marker happens to exist.
-    // refreshFailureWasNetworkError() reporting `false` (the default) is
-    // exactly what distinguishes this from the network-layer-failure case
-    // above.
-    setNavigatorOnLine(true);
-    window.localStorage.setItem(LAST_SYNCED_AT_KEY, "2026-08-10T12:00:00.000Z");
-    mockRefreshAccessToken.mockResolvedValue(null);
-    mockRefreshFailureWasNetworkError.mockReturnValue(false);
-
-    render(
-      <AuthProvider>
-        <Consumer />
-      </AuthProvider>,
-    );
-
-    await waitFor(() =>
-      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
-    );
-    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
-    expect(mockRefreshAccessToken).toHaveBeenCalled();
+    expect(mockMarkSessionEstablished).not.toHaveBeenCalled();
   });
 
   it("throws when useAuth is called outside an AuthProvider", () => {

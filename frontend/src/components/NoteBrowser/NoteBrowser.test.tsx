@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -401,5 +401,60 @@ describe("NoteBrowser offline gating (R3)", () => {
 
     expect(screen.getByRole("button", { name: "Today" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "+ New note" })).toBeEnabled();
+  });
+
+  // Defense in depth (U5): `writeNoteAndNavigate` and `handleToday`
+  // early-return on `isOffline` *before* their `putNote`, mirroring
+  // `NoteViewPage.handleBlockedSave`, so a create/template modal opened
+  // while online cannot issue a write if its Confirm is clicked after
+  // connectivity drops. `handleToday`'s guard sits AFTER its
+  // `noteExistsAt(path)` -> navigate branch, so "navigates directly
+  // without calling putNote when today's note already exists" above still
+  // proves an offline user keeps the cached-note shortcut.
+  //
+  // Regression coverage for review finding #2 (2026-09-07 code review):
+  // the guard originally read the closed-over `isOffline` binding, which
+  // is stale by the time `handleTemplateConfirm`'s own `await
+  // getNote(templatePath)` resolves -- a connectivity drop mid-await was
+  // invisible to it. Now that the guard reads a live ref, this transition
+  // is reproducible: flip `isOffline` and rerender while `getNote` is
+  // still pending, before letting it resolve.
+  it("does not call putNote if isOffline flips true while handleTemplateConfirm's own getNote() is still pending", async () => {
+    const user = userEvent.setup();
+    // This describe block has no beforeEach resetting these -- unlike
+    // "NoteBrowser + New note / templates" above, which does per-test. Clear
+    // call history left over from whichever test last touched them.
+    mockPutNote.mockClear();
+    mockGetNote.mockReset();
+    setNotesState([makeNoteMeta("templates/Meeting.md")]);
+    let resolveGetNote!: (value: { content: string }) => void;
+    mockGetNote.mockReturnValue(
+      new Promise((resolve) => {
+        resolveGetNote = resolve;
+      }),
+    );
+
+    const { rerender } = renderBrowser();
+    await user.click(screen.getByRole("button", { name: "+ New note" }));
+    await user.type(screen.getByPlaceholderText("note.md"), "note1.md");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await user.click(screen.getByLabelText("Meeting"));
+    await user.click(screen.getByRole("button", { name: "Create note" }));
+
+    // Connectivity drops while getNote() is still in flight -- rerender so
+    // the ref (not just the mock's return value) actually updates.
+    mockUseOffline.mockReturnValue({ isOffline: true, lastSyncedAt: null });
+    rerender(
+      <MemoryRouter>
+        <NoteBrowser />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      resolveGetNote({ content: "# Agenda\n\nItems." });
+      await Promise.resolve();
+    });
+
+    expect(mockPutNote).not.toHaveBeenCalled();
   });
 });

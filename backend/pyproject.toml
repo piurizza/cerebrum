@@ -2,6 +2,7 @@
 name = "cerebrum"
 version = "0.1.0"
 description = "Self-hosted second brain: markdown notes with a traversable link graph."
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "argon2-cffi>=23.1.0",

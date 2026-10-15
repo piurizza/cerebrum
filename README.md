@@ -159,3 +159,7 @@ one.
 reverse proxy or tunnel) -- this is the same pre-existing gap the rest of
 Cerebrum's remote access already has, not something specific to MCP, and
 this project does not terminate TLS itself.
+
+## License
+
+[MIT](LICENSE)

@@ -6,8 +6,16 @@ import { test as base, expect } from "@playwright/test";
 // second use tripping revocation. Cheapest robust approach: log in through
 // the real form once per test. Login is ~1s and this is a local-only suite.
 
-const USERNAME = process.env.E2E_USERNAME ?? "piurizza";
-const PASSWORD = process.env.E2E_PASSWORD ?? "provaprova123";
+// Read from the environment, never hardcoded: the suite logs in to a real
+// running deployment, so a default here would publish that account's
+// password with the repo.
+const USERNAME = process.env.E2E_USERNAME;
+const PASSWORD = process.env.E2E_PASSWORD;
+if (!USERNAME || !PASSWORD) {
+  throw new Error(
+    "Set E2E_USERNAME and E2E_PASSWORD to an account on the running stack before `npm run test:e2e`.",
+  );
+}
 
 export const test = base.extend({
   page: async ({ page }, use) => {

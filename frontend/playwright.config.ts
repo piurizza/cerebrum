@@ -9,8 +9,8 @@ import { defineConfig, devices } from "@playwright/test";
 // Prerequisites:
 //   * the Docker stack is up and serving the frontend on http://localhost:8080
 //     (`docker compose up -d`)
-//   * the test account exists (piurizza / provaprova123) -- e2e/fixtures.ts
-//     logs in through the real form once per test
+//   * E2E_USERNAME / E2E_PASSWORD are set to an account on that stack --
+//     e2e/fixtures.ts logs in through the real form once per test
 //   * a system Google Chrome is installed; `channel: "chrome"` uses it so
 //     Playwright needs no downloaded browser (CI never installs one)
 //

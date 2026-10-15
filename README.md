@@ -150,15 +150,17 @@ To build a `.deb`: `make build-desktop` (needs `webkit2gtk4.1-devel` and
 An MCP server is mounted at `/api/mcp`, reachable through the same
 frontend-published port and nginx proxy as the REST API (no separate port).
 Remote clients (e.g. Claude Desktop) can read, search, create, and update
-notes over it. Every call requires the same credential as the rest of the
-backend; until the backend-authentication feature ships, that check is a
-fail-closed stub (`mcp_allow_stub_auth`, off by default) rather than a real
-one.
+notes over it.
 
-**If you expose this beyond `localhost`, put TLS in front of it** (a
-reverse proxy or tunnel) -- this is the same pre-existing gap the rest of
-Cerebrum's remote access already has, not something specific to MCP, and
-this project does not terminate TLS itself.
+Every call is authenticated. Generate a personal API token in
+**Settings** (it starts with `cbm_pat_`) and give it to your MCP client
+as a bearer token. Tokens can be revoked from the same page, and a
+deactivated account's tokens stop working immediately.
+
+**If you expose this beyond your own machine, use HTTPS** -- the bundled
+`https://` port (see [Run with Docker](#run-with-docker)) or a
+Tailscale / reverse-proxy setup (see [Install on a phone](#install-on-a-phone-pwa)),
+so the token never travels in plain text.
 
 ## License
 

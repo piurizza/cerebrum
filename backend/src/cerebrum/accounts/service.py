@@ -41,7 +41,8 @@ _DUMMY_PASSWORD_HASH = _password_hasher.hash("dummy-password-for-timing-parity")
 class InvalidCredentialError(Exception):
     """Wrong username/password, or a deactivated account, at login. One
     class covers both causes so the API layer cannot leak which one
-    occurred."""
+    occurred. Also raised by `change_password()` for a wrong current
+    password or a locked/inactive account."""
 
 
 class InvalidTokenError(Exception):
@@ -348,6 +349,95 @@ async def authenticate(
         raise InvalidCredentialError("invalid username or password")
 
     _record_successful_login(auth_db, row["id"])
+
+    return User(
+        id=row["id"],
+        username=row["username"],
+        is_admin=bool(row["is_admin"]),
+        is_active=bool(row["is_active"]),
+        created_at=row["created_at"],
+    )
+
+
+async def change_password(
+    user_id: int,
+    current_password: str,
+    new_password: str,
+    auth_db: sqlite3.Connection,
+) -> User:
+    """Replace an authenticated account's password, after re-checking the
+    current one.
+
+    The caller is already authenticated (the route sits behind
+    `get_current_identity`), so this is not a login: there is no username to
+    enumerate and no timing-parity work to do. But a wrong `current_password`
+    still counts toward the same lockout `authenticate()` enforces, and a
+    locked account is refused here too -- otherwise a stolen access token
+    could be used to brute-force the password through this endpoint without
+    ever tripping the lockout login has.
+
+    On success, every refresh token the account holds is revoked in the
+    same transaction as the hash update. Rotating a password is most often a
+    response to it having leaked, and leaving existing sessions alive would
+    keep anyone who logged in with the old password signed in. The route
+    issues the caller a fresh session afterwards so they stay logged in on
+    the device they changed it from. Personal API tokens are deliberately
+    left alone: they're separate, individually revocable credentials (often
+    wired into MCP clients), listed in Settings for review.
+
+    Raises `WeakPasswordError` if `new_password` is too short, and
+    `InvalidCredentialError` for a wrong current password, a locked-out
+    account, or an account that no longer exists or is inactive.
+    """
+    if len(new_password) < _MIN_PASSWORD_LENGTH:
+        raise WeakPasswordError(
+            f"password must be at least {_MIN_PASSWORD_LENGTH} characters"
+        )
+
+    with auth_write_lock:
+        row = auth_db.execute(
+            """
+            SELECT id, username, password_hash, is_admin, is_active, created_at,
+                   locked_until
+            FROM users WHERE id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+
+    if row is None or not row["is_active"]:
+        raise InvalidCredentialError("account not found or inactive")
+
+    locked_until = row["locked_until"]
+    if locked_until is not None and datetime.fromisoformat(locked_until) > datetime.now(
+        UTC
+    ):
+        raise InvalidCredentialError("account temporarily locked")
+
+    password_ok = await anyio.to_thread.run_sync(
+        _verify_password_or_dummy, row["password_hash"], current_password
+    )
+    if not password_ok:
+        _record_failed_login(auth_db, user_id)
+        raise InvalidCredentialError("current password is incorrect")
+
+    new_hash = await anyio.to_thread.run_sync(_password_hasher.hash, new_password)
+    now_iso = datetime.now(UTC).isoformat()
+    with auth_write_lock, auth_db:
+        auth_db.execute(
+            """
+            UPDATE users
+            SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL
+            WHERE id = ?
+            """,
+            (new_hash, user_id),
+        )
+        auth_db.execute(
+            """
+            UPDATE refresh_tokens SET revoked_at = ?
+            WHERE user_id = ? AND revoked_at IS NULL
+            """,
+            (now_iso, user_id),
+        )
 
     return User(
         id=row["id"],

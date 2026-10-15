@@ -6,6 +6,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
+  changePassword,
   createApiToken,
   createInvite,
   deactivateAccount,
@@ -16,6 +17,7 @@ import {
 } from "../api/client";
 import { ConfirmDialog } from "../components/ConfirmDialog/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
+import { useOffline } from "../context/OfflineContext";
 import { formatTimestamp } from "../lib/formatDate";
 import {
   canInstall,
@@ -50,6 +52,106 @@ function OneTimeSecret({ label, value }: { label: string; value: string }) {
         </button>
       </div>
     </div>
+  );
+}
+
+// Mirrors the backend's floor (accounts/service.py's _MIN_PASSWORD_LENGTH)
+// so the obvious mistake is caught before a round trip; the server still
+// enforces it either way.
+const MIN_PASSWORD_LENGTH = 12;
+
+/** Change the signed-in account's password. The server signs out every
+ * other session as part of the change, so this is also how to recover from
+ * a leaked password. Exported for a focused test that doesn't need the
+ * whole page's API mocks. */
+export function ChangePasswordSection() {
+  const { isOffline } = useOffline();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setDone(false);
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      setError(`New password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("New passwords don't match.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setDone(true);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="settings-section">
+      <h2>Change password</h2>
+      <form onSubmit={handleSubmit} className="settings-stacked-form">
+        <label className="rename-field">
+          Current password
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+          />
+        </label>
+        <label className="rename-field">
+          New password
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+          />
+        </label>
+        <label className="rename-field">
+          Confirm new password
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+          />
+        </label>
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={
+            saving || isOffline || !currentPassword || !newPassword || !confirmPassword
+          }
+        >
+          {saving ? "Saving..." : "Change password"}
+        </button>
+      </form>
+      {isOffline && (
+        <p className="empty-hint">Reconnect to the server to change your password.</p>
+      )}
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+      {done && (
+        <p role="status">Password changed. Every other device has been signed out.</p>
+      )}
+    </section>
   );
 }
 
@@ -351,6 +453,7 @@ export function SettingsPage() {
   return (
     <div className="settings-page">
       <h1>Settings</h1>
+      <ChangePasswordSection />
       <ApiTokensSection />
       <AdminSection />
       <InstallSection />

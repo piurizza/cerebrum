@@ -507,6 +507,26 @@ export async function login(username: string, password: string): Promise<void> {
   setAccessToken(data.access_token);
 }
 
+// Changing the password revokes every session the account holds, this
+// one's included, and the response hands back a fresh session the same way
+// login does (new access token here, new refresh-token cookie set by the
+// response). Adopting the new access token immediately keeps this device
+// signed in; every other device is signed out on its next refresh.
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const data = await request<LoginResponse>("/account/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+  setAccessToken(data.access_token);
+}
+
 export function register(
   username: string,
   password: string,

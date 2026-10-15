@@ -256,6 +256,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/account/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change Own Password
+         * @description Change the caller's own password.
+         *
+         *     `change_password()` revokes every refresh token the account holds, which
+         *     includes the caller's own -- so this issues a fresh session and returns
+         *     it the same way `/api/auth/login` does, keeping the caller signed in on
+         *     this device while every other session is signed out.
+         *
+         *     A wrong current password is a 403, not a 401: the caller *is*
+         *     authenticated, and a 401 here would send the frontend's
+         *     refresh-and-retry path (`fetchWithRetry()` in `client.ts`) through a
+         *     pointless token refresh before surfacing the error.
+         */
+        post: operations["change_own_password_api_account_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/register": {
         parameters: {
             query?: never;
@@ -375,6 +405,13 @@ export interface components {
         AttachmentUploadResponse: {
             /** Path */
             path: string;
+        };
+        /** ChangePasswordRequest */
+        ChangePasswordRequest: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
         };
         /** CreateApiTokenRequest */
         CreateApiTokenRequest: {
@@ -998,6 +1035,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskItem"][];
+                };
+            };
+        };
+    };
+    change_own_password_api_account_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

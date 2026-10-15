@@ -28,9 +28,10 @@ from cerebrum.settings import get_settings
 unauthenticated_router = APIRouter()
 
 
-def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
-    """Shared by `login()` and `refresh()` -- both hand the caller a fresh
-    refresh token under identical cookie flags."""
+def set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    """Shared by `login()`, `refresh()`, and `api/account.py`'s
+    change-password route -- all hand the caller a fresh refresh token under
+    identical cookie flags."""
     settings = get_settings()
     response.set_cookie(
         key="refresh_token",
@@ -91,7 +92,7 @@ async def login(
         ) from exc
 
     access_token, refresh_token = issue_session(user, auth_db)
-    _set_refresh_cookie(response, refresh_token)
+    set_refresh_cookie(response, refresh_token)
     return LoginResponse(access_token=access_token)
 
 
@@ -114,5 +115,5 @@ async def refresh(
         # login.
         raise HTTPException(status_code=401, detail="Invalid refresh token") from exc
 
-    _set_refresh_cookie(response, new_refresh_token)
+    set_refresh_cookie(response, new_refresh_token)
     return LoginResponse(access_token=access_token)

@@ -1091,7 +1091,22 @@ a {
   flex-wrap: wrap;
 }
 
-.settings-inline-form input {
+/* Several labelled fields, one per row (change password) -- the inline form
+   above suits a single field beside its button. */
+.settings-stacked-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  max-width: 24rem;
+}
+
+.settings-stacked-form .rename-field {
+  align-self: stretch;
+}
+
+.settings-inline-form input,
+.settings-stacked-form input {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);

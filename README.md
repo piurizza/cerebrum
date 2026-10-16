@@ -18,21 +18,29 @@ making architectural changes.
 
 ## Requirements
 
-**To run with Docker:** Docker Engine 23.0 or newer with the Compose v2
-plugin (`docker compose`). The Dockerfiles use BuildKit cache mounts, and
-BuildKit is the default builder from Engine 23.0. Docker Desktop also
-works. Ports 8080 (HTTP) and 8443 (HTTPS) must be free, or set other ones
-in `.env`.
+**To run the prebuilt images** (the usual way; see
+[Run with Docker](#run-with-docker)): Docker with the Compose v2 plugin
+(`docker compose`), on x86_64 -- the published images are x86_64 only for
+now. Nothing is compiled, so building needs no extra memory or disk. Ports
+8080 (HTTP) and 8443 (HTTPS) must be free, or set other ones in `.env`.
 
 | Resource | Requirement | Measured |
 |---|---|---|
-| RAM, building the images | 2 GB free | Frontend build passes with a 2 GB memory limit and is killed at 1.5 GB |
-| RAM, running | 100 MB | 75 MB backend + 11 MB frontend (nginx), idle |
-| CPU, running | Any | Under 1% of one core when idle |
+| RAM | 100 MB | 75 MB backend + 11 MB frontend (nginx), idle |
+| CPU | Any | Under 1% of one core when idle |
 | Disk, images | 470 MB | 349 MB backend + 114 MB frontend |
-| Disk, while building | 2.5 GB | Images + 2 GB of build cache; `docker builder prune` frees the cache afterwards |
 | Disk, your notes | Size of your notes + index | 2.8 MB for 51 notes, including the search index and accounts database |
-| Build time | — | 26 s with an empty build cache |
+
+**To build the images from source** (`make up`, or any architecture
+without published images): Docker Engine 23.0 or newer, since the
+Dockerfiles use BuildKit cache mounts and BuildKit is the default builder
+from 23.0, plus:
+
+| Resource | Requirement | Measured |
+|---|---|---|
+| RAM | 2 GB free | Frontend build passes with a 2 GB memory limit and is killed at 1.5 GB |
+| Disk | 2.5 GB | Images + 2 GB of build cache; `docker builder prune` frees the cache afterwards |
+| Time | — | 26 s with an empty build cache |
 
 Measured on Fedora 44, x86_64 (Intel Core i7-10750H, 12 threads), Docker
 Engine 29.9.1, with the 51-note vault above. arm64 (e.g. a Raspberry Pi)
@@ -49,7 +57,9 @@ viewport; other current browsers are expected to work but aren't covered
 by tests. Offline mode and installing to a phone need HTTPS (see
 [Install on a phone](#install-on-a-phone-pwa)).
 
-**Desktop app:** Linux only; see [Run desktop app](#run-desktop-app).
+**Desktop app:** Linux x86_64, as a `.deb` (Debian, Ubuntu) or `.rpm`
+(Fedora, openSUSE), plus a running Cerebrum server to connect to; see
+[Run desktop app](#run-desktop-app). No Windows or macOS builds yet.
 
 **Without Docker (development):** Python 3.12+ with
 [uv](https://docs.astral.sh/uv/), and Node 22.
@@ -75,6 +85,24 @@ dependencies, and (in a git repo) installs pre-commit hooks.
     cd frontend && npm run dev           # http://localhost:5173 (proxies /api to :8000)
 
 ## Run with Docker
+
+Each release publishes prebuilt images to GitHub's container registry
+(`ghcr.io/piurizza/cerebrum-backend` and `-frontend`), so running
+Cerebrum needs no Node or Python and no build:
+
+    git clone https://github.com/piurizza/cerebrum.git && cd cerebrum
+    cp .env.example .env    # then set AUTH_JWT_SECRET and AUTH_SETUP_TOKEN
+    mkdir -p vault
+    docker compose pull
+    docker compose up -d    # http://localhost:8080
+
+`docker compose pull && docker compose up -d` again updates to the latest
+release. To stay on one release, set `CEREBRUM_VERSION=0.1.0` (for
+example) in `.env`. Each image carries a GitHub build attestation, which
+`gh attestation verify oci://ghcr.io/piurizza/cerebrum-backend:latest
+--owner piurizza` checks.
+
+To build the images from source instead:
 
     make up     # builds and starts backend + frontend, http://localhost:8080
     make down
@@ -180,15 +208,24 @@ origin for a self-hosted deployment:
 
 ## Run desktop app
 
-    cd desktop && npm run tauri dev
-
 Native window (Linux only for now), no browser tab. On first launch it
 asks for a server URL — point it at any running cerebrum deployment
 (Docker or `make up` locally). No separate backend or account: it's a
 thin client for a server that's already running, not a second copy of
 the app. See [SPEC.md](SPEC.md#7-tech-stack) for why.
 
-To build a `.deb`: `make build-desktop` (needs `webkit2gtk4.1-devel` and
+Each [release](https://github.com/piurizza/cerebrum/releases/latest)
+attaches a `.deb` and an `.rpm` (x86_64, about 6 MB). Download one and
+install it with your package manager, which also pulls in WebKitGTK:
+
+    sudo apt install ./Cerebrum_*_amd64.deb       # Debian, Ubuntu
+    sudo dnf install ./Cerebrum-*.x86_64.rpm      # Fedora
+
+No Windows or macOS builds yet: the app hasn't been tested there, and
+unsigned macOS apps are blocked by default.
+
+To run from source: `cd desktop && npm run tauri dev`. To build the
+packages yourself: `make build-desktop` (needs `webkit2gtk4.1-devel` and
 `librsvg2-devel` system packages on the build machine — not installed by
 `make install-desktop`, since they're OS packages, not npm ones).
 

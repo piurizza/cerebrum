@@ -59,9 +59,9 @@ by tests. Offline mode and installing to a phone need HTTPS (see
 
 **Desktop app:** Linux x86_64, as a `.deb` (Debian, Ubuntu) or `.rpm`
 (Fedora, openSUSE), and macOS, as one `.dmg` for Apple Silicon and Intel
-(tested on macOS 26, Apple Silicon), plus a running Cerebrum server to
-connect to; see
-[Run desktop app](#run-desktop-app). No Windows build yet.
+(tested on macOS 26, Apple Silicon), and 64-bit Windows 10 or 11, as a
+setup `.exe`, plus a running Cerebrum server to connect to; see
+[Run desktop app](#run-desktop-app).
 
 **Without Docker (development):** Python 3.12+ with
 [uv](https://docs.astral.sh/uv/), and Node 22.
@@ -210,15 +210,15 @@ origin for a self-hosted deployment:
 
 ## Run desktop app
 
-Native window on Linux and macOS, no browser tab. On first launch it
+Native window on Linux, macOS and Windows, no browser tab. On first launch it
 asks for a server URL — point it at any running cerebrum deployment
 (Docker or `make up` locally). No separate backend or account: it's a
 thin client for a server that's already running, not a second copy of
 the app. See [SPEC.md](SPEC.md#7-tech-stack) for why.
 
 Each [release](https://github.com/piurizza/cerebrum/releases/latest)
-attaches a `.deb` and an `.rpm` (Linux x86_64) and a `.dmg` (macOS,
-universal).
+attaches a `.deb` and an `.rpm` (Linux x86_64), a `.dmg` (macOS,
+universal) and a setup `.exe` (Windows x64).
 
 **Linux:** download a package and install it with your package manager,
 which also pulls in WebKitGTK:
@@ -235,14 +235,23 @@ has the same effect:
 
     xattr -dr com.apple.quarantine /Applications/Cerebrum.app
 
-No Windows build yet: the app hasn't been tested there.
+**Windows:** run the setup `.exe`; it installs for your user only, no
+administrator rights needed. The installer is not code-signed (that needs
+a paid certificate), so SmartScreen shows "Windows protected your PC":
+click **More info**, then **Run anyway**. The app uses Microsoft's
+WebView2, which Windows 11 includes; on Windows 10 the installer
+downloads it if it's missing. Every pull request that touches the
+desktop app installs and launches the Windows build in CI; it has not
+been tried by hand on a Windows PC yet.
 
 To run from source: `cd desktop && npm run tauri dev`. To build the
 packages yourself: `make build-desktop`. On Linux it needs the
 `webkit2gtk4.1-devel` and `librsvg2-devel` system packages (OS packages,
 not installed by `make install-desktop`); on macOS it needs Xcode's
 command line tools and both Rust targets
-(`rustup target add aarch64-apple-darwin x86_64-apple-darwin`).
+(`rustup target add aarch64-apple-darwin x86_64-apple-darwin`). On
+Windows, run `npm run tauri build -- --bundles nsis` in `desktop/`
+(needs the Visual Studio C++ build tools).
 
 ## MCP server
 

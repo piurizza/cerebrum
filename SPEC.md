@@ -275,7 +275,7 @@ API calls.
   (`${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault`), not stored in an
   anonymous Docker volume, so notes persist on the host filesystem
   independent of the containers — consistent with "no vendor lock-in."
-- `frontend` also serves HTTPS (`CEREBRUM_HTTPS_PORT`, default `8443`),
+- `frontend` also serves HTTPS (`CEREBRUM_HTTPS_PORT`, default `7812`),
   self-signed, generated on first start by `frontend/docker-entrypoint.sh`
   and persisted in a `cerebrum_tls_certs` volume. Required for offline
   mode (§9 Access) — a service worker only registers in a secure context,
@@ -307,13 +307,13 @@ API calls.
 | `WATCHFILES_FORCE_POLLING` | backend | *(unset)* | force polling instead of native filesystem events; opt in on bind-mount/network filesystems (Docker Desktop on macOS/Windows, NFS) |
 | `MAX_ATTACHMENT_SIZE_BYTES` | backend | `10000000` | max size (bytes) of a single pasted image upload |
 | `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
-| `CEREBRUM_PORT` | compose | `8080` | host port for the frontend (HTTP) |
-| `CEREBRUM_HTTPS_PORT` | compose | `8443` | host port for the frontend's self-signed HTTPS listener; required for offline mode |
+| `CEREBRUM_PORT` | compose | `7811` | host port for the frontend (HTTP) |
+| `CEREBRUM_HTTPS_PORT` | compose | `7812` | host port for the frontend's self-signed HTTPS listener; required for offline mode |
 | `CEREBRUM_TLS_SAN` | compose | *(unset)* | extra Subject Alternative Names for the self-signed cert, comma-separated (e.g. `IP:192.168.1.14`) — set to your LAN IP/hostname to use offline mode from another device |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 | `CEREBRUM_DAILY_NOTE_FOLDER` | backend | `daily` | vault-relative folder the "Today" button creates daily notes in. Served to clients by `GET /api/vault-settings`, so changing it needs only a backend restart. Leading/trailing slashes are trimmed, a blank value means the default, and `.`/`..` segments fail startup. Docker Compose falls back to the former build-time name `VITE_DAILY_NOTE_FOLDER` |
 | `CEREBRUM_TEMPLATES_FOLDER` | backend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Same handling as `CEREBRUM_DAILY_NOTE_FOLDER`; Compose falls back to the former `VITE_TEMPLATES_FOLDER`. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |
-| `VITE_DEFAULT_SERVER_URL` | desktop | `http://localhost:8080` | server URL the desktop app auto-connects to on first launch (or after its store is cleared) -- most deployments have exactly one server, so this skips the first manual URL entry; the user can always view/change the configured URL afterward via "Change server URL", so this is not a hard-coded target |
+| `VITE_DEFAULT_SERVER_URL` | desktop | `http://localhost:7811` | server URL the desktop app auto-connects to on first launch (or after its store is cleared) -- most deployments have exactly one server, so this skips the first manual URL entry; the user can always view/change the configured URL afterward via "Change server URL", so this is not a hard-coded target |
 
 ## 9. Feature roadmap (user stories)
 

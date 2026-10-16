@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
 // touch emulation and screenshots, which jsdom cannot do.
 //
 // Prerequisites:
-//   * the Docker stack is up and serving the frontend on http://localhost:8080
+//   * the Docker stack is up and serving the frontend on http://localhost:7811
 //     (`docker compose up -d`)
 //   * E2E_USERNAME / E2E_PASSWORD are set to an account on that stack --
 //     e2e/fixtures.ts logs in through the real form once per test
@@ -17,7 +17,7 @@ import { defineConfig, devices } from "@playwright/test";
 // Run: `npm run test:e2e` (from frontend/, with the Node 22 the rest of the
 // frontend toolchain pins).
 
-const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:8080";
+const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:7811";
 
 export default defineConfig({
   testDir: "./e2e",

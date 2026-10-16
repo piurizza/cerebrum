@@ -105,7 +105,7 @@ up:
 	@# Docker creates a missing bind-mount source as root, which that user then
 	@# can't write to -- so create the vault first, as you.
 	@vault=$$(sed -n 's/^CEREBRUM_VAULT_HOST_PATH=//p' .env 2>/dev/null | tail -n 1); mkdir -p "$${vault:-./vault}"
-	docker compose up --build
+	docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 down:
 	docker compose down

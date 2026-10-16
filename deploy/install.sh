@@ -5,7 +5,9 @@
 #   curl -fsSL https://github.com/piurizza/cerebrum/releases/latest/download/install.sh | sh
 #
 # Run it again to update: it replaces compose.yaml with its release's copy,
-# pulls the images and restarts, and never touches .env or your notes.
+# pulls the images and restarts, and never touches .env or your notes. Until
+# a run gets Cerebrum answering, every run shows the first account's invite
+# token, so rerunning after a failed first install still shows it.
 #
 # Optional settings, read from the environment on a fresh install only:
 #   CEREBRUM_INSTALL_DIR   where to install (default: ~/cerebrum-server)
@@ -172,7 +174,11 @@ fail_with_logs() {
 	say ""
 	say "Last backend log lines:"
 	docker compose logs --no-color --tail 20 backend || true
-	fail "$1 Your install is in $INSTALL_DIR; fix the problem above, then run the installer again."
+	token_hint=""
+	if [ "$installed" = false ]; then
+		token_hint=" The invite token is saved in $INSTALL_DIR/.env (AUTH_SETUP_TOKEN) and will be shown again after a successful run."
+	fi
+	fail "$1 Your install is in $INSTALL_DIR; fix the problem above, then run the installer again.$token_hint"
 }
 
 start_stack() {
@@ -222,6 +228,10 @@ main() {
 
 	fresh=false
 	[ -f .env ] || fresh=true
+	# Written once a run gets Cerebrum answering: until then the invite token
+	# has never been shown, so every run shows it.
+	installed=false
+	[ -f .installed ] && installed=true
 	if [ "$fresh" = true ]; then
 		check_fresh_ports_free
 	fi
@@ -234,7 +244,18 @@ main() {
 	if [ "$fresh" = true ]; then
 		step "Creating secrets and the notes folder in $INSTALL_DIR"
 		write_env
+		# New secrets mean a new invite token, which has never been shown.
+		rm -f .installed
+		installed=false
 	fi
+
+	# Compose prefers shell variables over .env, while this script reads only
+	# .env: without these the stack could bind a port the health check never
+	# probes. A fresh .env has already taken the settings above.
+	unset CEREBRUM_VERSION CEREBRUM_UID CEREBRUM_GID AUTH_JWT_SECRET AUTH_SETUP_TOKEN \
+		WATCHFILES_FORCE_POLLING CEREBRUM_DAILY_NOTE_FOLDER VITE_DAILY_NOTE_FOLDER \
+		CEREBRUM_TEMPLATES_FOLDER VITE_TEMPLATES_FOLDER CEREBRUM_VAULT_HOST_PATH \
+		CEREBRUM_TLS_SAN CEREBRUM_BIND_ADDRESS CEREBRUM_PORT CEREBRUM_HTTPS_PORT
 
 	PROBE_HOST=$(probe_host "$(env_value CEREBRUM_BIND_ADDRESS)")
 	if [ "$fresh" = false ]; then
@@ -252,10 +273,12 @@ main() {
 	step "Waiting for Cerebrum to answer"
 	wait_until_healthy
 
-	url="http://localhost:$(env_value CEREBRUM_PORT)"
+	url_host=$PROBE_HOST
+	[ "$url_host" != 127.0.0.1 ] || url_host=localhost
+	url="http://$url_host:$(env_value CEREBRUM_PORT)"
 	label=$(version_label "${current:-latest}")
 	say ""
-	if [ "$fresh" = true ]; then
+	if [ "$installed" = false ]; then
 		say "Cerebrum ${label:+$label }is running at $url"
 		say ""
 		say "Open it, choose Register, and paste this as the Invite token:"
@@ -269,6 +292,7 @@ main() {
 	else
 		say "Cerebrum ${label:+$label }restarted and running at $url"
 	fi
+	: >.installed
 }
 
 main "$@"

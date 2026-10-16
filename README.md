@@ -58,8 +58,10 @@ by tests. Offline mode and installing to a phone need HTTPS (see
 [Install on a phone](#install-on-a-phone-pwa)).
 
 **Desktop app:** Linux x86_64, as a `.deb` (Debian, Ubuntu) or `.rpm`
-(Fedora, openSUSE), plus a running Cerebrum server to connect to; see
-[Run desktop app](#run-desktop-app). No Windows or macOS builds yet.
+(Fedora, openSUSE), and macOS, as one `.dmg` for Apple Silicon and Intel
+(tested on macOS 26, Apple Silicon), plus a running Cerebrum server to
+connect to; see
+[Run desktop app](#run-desktop-app). No Windows build yet.
 
 **Without Docker (development):** Python 3.12+ with
 [uv](https://docs.astral.sh/uv/), and Node 22.
@@ -208,26 +210,39 @@ origin for a self-hosted deployment:
 
 ## Run desktop app
 
-Native window (Linux only for now), no browser tab. On first launch it
+Native window on Linux and macOS, no browser tab. On first launch it
 asks for a server URL — point it at any running cerebrum deployment
 (Docker or `make up` locally). No separate backend or account: it's a
 thin client for a server that's already running, not a second copy of
 the app. See [SPEC.md](SPEC.md#7-tech-stack) for why.
 
 Each [release](https://github.com/piurizza/cerebrum/releases/latest)
-attaches a `.deb` and an `.rpm` (x86_64, about 6 MB). Download one and
-install it with your package manager, which also pulls in WebKitGTK:
+attaches a `.deb` and an `.rpm` (Linux x86_64) and a `.dmg` (macOS,
+universal).
+
+**Linux:** download a package and install it with your package manager,
+which also pulls in WebKitGTK:
 
     sudo apt install ./Cerebrum_*_amd64.deb       # Debian, Ubuntu
     sudo dnf install ./Cerebrum-*.x86_64.rpm      # Fedora
 
-No Windows or macOS builds yet: the app hasn't been tested there, and
-unsigned macOS apps are blocked by default.
+**macOS:** open the `.dmg` and drag Cerebrum into Applications. The app
+is not notarized by Apple (that needs a paid developer account), so the
+first launch is blocked: open it once, then go to **System Settings →
+Privacy & Security** and click **Open Anyway**. macOS remembers the
+choice. If you'd rather not use the dialog, removing the download flag
+has the same effect:
+
+    xattr -dr com.apple.quarantine /Applications/Cerebrum.app
+
+No Windows build yet: the app hasn't been tested there.
 
 To run from source: `cd desktop && npm run tauri dev`. To build the
-packages yourself: `make build-desktop` (needs `webkit2gtk4.1-devel` and
-`librsvg2-devel` system packages on the build machine — not installed by
-`make install-desktop`, since they're OS packages, not npm ones).
+packages yourself: `make build-desktop`. On Linux it needs the
+`webkit2gtk4.1-devel` and `librsvg2-devel` system packages (OS packages,
+not installed by `make install-desktop`); on macOS it needs Xcode's
+command line tools and both Rust targets
+(`rustup target add aarch64-apple-darwin x86_64-apple-darwin`).
 
 ## MCP server
 

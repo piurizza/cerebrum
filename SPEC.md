@@ -255,8 +255,10 @@ API calls.
   capability file grants no `remote` origin access to that
   user-configured URL — it's arbitrary input, not a trusted origin, so
   it never gets native Tauri IPC access.
-- Packaging targets `.deb` only for now; no installer signing,
-  auto-update, or macOS/Windows builds (personal-use scope). See
+- Packaging: `.deb` and `.rpm` for Linux x86_64 and one universal
+  `.dmg` for macOS, all built by the release workflow and attached to
+  each GitHub Release. No installer signing or notarization, no
+  auto-update, no Windows build (personal-use scope). See
   [Feature roadmap](#9-feature-roadmap-user-stories).
 
 ## 8. Deployment
@@ -438,13 +440,13 @@ history.
 - [x] lockout after repeated failed logins (atomic, race-safe counter),
       with timing-attack-resistant rejection (dummy Argon2 hash paid
       even on the locked-out/unknown-user paths).
-- [x] a native desktop app (Linux, `desktop/`) as an alternative to a
+- [x] a native desktop app (Linux and macOS, `desktop/`) as an alternative to a
       browser tab -- a Tauri v2 window pointed at a configured server URL,
       not a second deployment. Reuses the existing self-hosted server and
       cookie login unchanged; see [§7 Tech stack](#7-tech-stack) for the
       CORS/capability decisions this required. Personal use only for now:
-      no installer signing, auto-update, or macOS/Windows builds (see
-      [Known gaps](#10-known-gaps--future-work)).
+      no installer signing or notarization, no auto-update, no Windows
+      build (see [Known gaps](#10-known-gaps--future-work)).
 
 ### Editing experience
 
@@ -622,13 +624,15 @@ how consistently each was cited as high-value across that research.
   unless it's fenced as a code block — the same appears-everywhere
   trade-off already noted for templates, extended here rather than
   given its own exclusion mechanism.
-- **The desktop app (`desktop/`) is Linux-only, personal-use scope.** No
-  installer signing, auto-update, or macOS/Windows builds; no
-  distribution channel (app store, package repo, formal release
-  pipeline); no CI job building the `.deb` (a Tauri Linux build needs
-  system packages -- `libwebkit2gtk-4.1-dev` and related -- with no
-  existing precedent in this repo's CI). `make build-desktop` run
-  locally is the only build path for now. A navigation-failure gap is
+- **The desktop app (`desktop/`) is Linux and macOS only, personal-use
+  scope.** The release workflow builds a `.deb`, an `.rpm` and a
+  universal `.dmg` and attaches them to each GitHub Release, with build
+  provenance attestations. Nothing is signed with a publisher identity:
+  the macOS app is ad-hoc signed and not notarized, so Gatekeeper blocks
+  its first launch until the user allows it in Privacy & Security (the
+  README has the steps); notarization needs a paid Apple Developer ID.
+  No auto-update, no app store or package repository, no Windows build.
+  A navigation-failure gap is
   also accepted: the health-check and the subsequent navigation are two
   separate steps, so a server that drops in the narrow window between
   them can still strand the user on WebKitGTK's raw error page with no
@@ -640,7 +644,7 @@ how consistently each was cited as high-value across that research.
   touch targets, full-screen modals) and installs to a phone's home
   screen as a PWA over a browser-trusted origin. Native shells (Tauri
   Android/iOS, Capacitor) are deferred, not rejected -- same personal-use,
-  additive-later stance as the Linux-only desktop app above. Offline
+  additive-later stance as the desktop app's missing Windows build above. Offline
   *editing* on mobile is out of scope: the shell and last-synced vault
   cache for reading, but the app stays a thin client to one server,
   consistent with the "No CRDT / offline-first sync" bullet above.

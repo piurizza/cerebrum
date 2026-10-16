@@ -67,12 +67,17 @@ test-desktop:
 
 check: lint type-check test
 
-# Not part of `check` -- a Tauri build needs system deps (WebKitGTK) that
-# CI doesn't install yet (KTD7 in the desktop-app plan), and produces a
-# real .deb, not just a compile check. Run manually when verifying
-# packaging.
+# Not part of `check` -- a Tauri build needs platform deps and produces real
+# installers, not just a compile check. Linux builds the .deb and .rpm
+# (needs WebKitGTK dev packages); macOS builds one universal .dmg (needs
+# both Rust targets: rustup target add aarch64-apple-darwin x86_64-apple-darwin).
+# The release workflow builds the same artifacts in CI.
 build-desktop:
+ifeq ($(shell uname -s),Darwin)
+	cd desktop && CI=true $(NPM) run tauri build -- --target universal-apple-darwin --bundles dmg
+else
 	cd desktop && $(NPM) run tauri build
+endif
 
 # Regenerates frontend/src/api/generated/schema.ts from the backend's
 # current OpenAPI schema. The intermediate schema JSON (/openapi.json,

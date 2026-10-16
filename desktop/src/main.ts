@@ -83,7 +83,7 @@ export function initApp(container: HTMLElement): void {
           <input
             id="url-input"
             type="text"
-            placeholder="http://localhost:7811"
+            placeholder="${LOCAL_SERVER_URL}"
             autocomplete="off"
           />
           ${s.error ? `<p class="error" role="alert">${escapeHtml(s.error)}</p>` : ""}

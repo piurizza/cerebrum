@@ -324,10 +324,12 @@ jobs:
           version="${TAG#v}"
           mkdir -p dist
           sed "s/CEREBRUM_VERSION:-latest/CEREBRUM_VERSION:-${version}/g" docker-compose.yml > dist/compose.yaml
-          sed "s/__CEREBRUM_RELEASE_TAG__/${TAG}/" deploy/install.sh > dist/install.sh
+          # Only the assignment: the installer's sentinel comparison must keep the placeholder.
+          sed "s/^RELEASE_TAG=\"__CEREBRUM_RELEASE_TAG__\"$/RELEASE_TAG=\"${TAG}\"/" deploy/install.sh > dist/install.sh
           # Fail loudly rather than publish a file that still says "latest".
           test "$(grep -c "CEREBRUM_VERSION:-${version}}" dist/compose.yaml)" -eq 2
           grep -q "^RELEASE_TAG=\"${TAG}\"$" dist/install.sh
+          test "$(grep -c "__CEREBRUM_RELEASE_TAG__" dist/install.sh)" -eq 1
 
       - if: steps.present.outputs.present == 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

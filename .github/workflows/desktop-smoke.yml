@@ -1,0 +1,90 @@
+name: Desktop smoke test
+
+# Builds the Windows installer, installs it silently, launches the app
+# against a stand-in server and checks it health-checks and loads it.
+# Proves the Windows build installs and starts, not that every screen
+# works. Runs on pull requests that touch the desktop app, and on demand.
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      SMOKE_PORT: "8765"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: desktop/src-tauri
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+
+      # A test build only: the default URL makes the app connect without
+      # anyone typing it. Release builds never set it.
+      - name: Build the installer
+        env:
+          VITE_DEFAULT_SERVER_URL: http://127.0.0.1:${{ env.SMOKE_PORT }}
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Install, launch and check
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $log = Join-Path $env:RUNNER_TEMP "smoke-requests.log"
+          New-Item -ItemType File -Force -Path $log | Out-Null
+          $server = Start-Process python -ArgumentList "scripts/smoke_server.py", $env:SMOKE_PORT, $log -PassThru -WindowStyle Hidden
+
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Write-Host "Installing $($setup.Name) silently"
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+
+          $exe = Get-ChildItem -Path "$env:LOCALAPPDATA", "$env:ProgramFiles" -Filter cerebrum.exe -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "cerebrum.exe not found after install" }
+          Write-Host "Installed at $($exe.FullName)"
+
+          $app = Start-Process $exe.FullName -PassThru
+          $deadline = (Get-Date).AddSeconds(90)
+          do {
+            Start-Sleep -Seconds 3
+            $requests = Get-Content $log
+          } until (($requests -contains "GET /api/health" -and $requests -contains "GET /") -or (Get-Date) -gt $deadline)
+
+          Write-Host "Requests the app made:"; $requests | ForEach-Object { Write-Host "  $_" }
+          $alive = -not $app.HasExited
+          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+
+          if (-not ($requests -contains "GET /api/health")) { throw "the app never health-checked the server" }
+          if (-not ($requests -contains "GET /")) { throw "the app health-checked but never loaded the server's page" }
+          if (-not $alive) { throw "the app exited by itself" }
+          Write-Host "Smoke test passed: installed, launched, health-checked and loaded the server"
+
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-requests-log
+          path: ${{ runner.temp }}/smoke-requests.log
+          if-no-files-found: ignore

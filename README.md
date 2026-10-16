@@ -16,6 +16,44 @@ making architectural changes.
 - `desktop/` — Tauri v2 native client, Linux (points at a running backend/frontend deployment; see [Run desktop app](#run-desktop-app))
 - `vault/` — default local dev directory for `.md` notes (gitignored)
 
+## Requirements
+
+**To run with Docker:** Docker Engine 23.0 or newer with the Compose v2
+plugin (`docker compose`). The Dockerfiles use BuildKit cache mounts, and
+BuildKit is the default builder from Engine 23.0. Docker Desktop also
+works. Ports 8080 (HTTP) and 8443 (HTTPS) must be free, or set other ones
+in `.env`.
+
+| Resource | Requirement | Measured |
+|---|---|---|
+| RAM, building the images | 2 GB free | Frontend build passes with a 2 GB memory limit and is killed at 1.5 GB |
+| RAM, running | 100 MB | 75 MB backend + 11 MB frontend (nginx), idle |
+| CPU, running | Any | Under 1% of one core when idle |
+| Disk, images | 470 MB | 349 MB backend + 114 MB frontend |
+| Disk, while building | 2.5 GB | Images + 2 GB of build cache; `docker builder prune` frees the cache afterwards |
+| Disk, your notes | Size of your notes + index | 2.8 MB for 51 notes, including the search index and accounts database |
+| Build time | — | 26 s with an empty build cache |
+
+Measured on Fedora 44, x86_64 (Intel Core i7-10750H, 12 threads), Docker
+Engine 29.9.1, with the 51-note vault above. arm64 (e.g. a Raspberry Pi)
+is untested.
+
+**On Linux, prefer Docker Engine over Docker Desktop.** Docker Desktop
+runs containers inside a VM, and on Fedora 44 that VM (Docker Desktop
+4.43.1 with QEMU 10.2.2) crashed repeatedly during image downloads and
+builds. Docker Engine runs containers natively, with no VM and no memory
+reservation of its own.
+
+**Browsers:** the end-to-end tests run on Chrome with a Pixel 7 mobile
+viewport; other current browsers are expected to work but aren't covered
+by tests. Offline mode and installing to a phone need HTTPS (see
+[Install on a phone](#install-on-a-phone-pwa)).
+
+**Desktop app:** Linux only; see [Run desktop app](#run-desktop-app).
+
+**Without Docker (development):** Python 3.12+ with
+[uv](https://docs.astral.sh/uv/), and Node 22.
+
 ## Setup
 
     make install
@@ -45,6 +83,15 @@ dependencies, and (in a git repo) installs pre-commit hooks.
 Notes are bind-mounted from `./vault` on the host (override via
 `CEREBRUM_VAULT_HOST_PATH` in a root `.env`, copied from `.env.example`) so
 they persist independently of the containers.
+
+The backend runs as user and group 1000, not root, so notes it creates
+belong to you on the host. If `id -u` doesn't print 1000, set
+`CEREBRUM_UID` and `CEREBRUM_GID` in `.env`. `make up` creates the vault
+directory first; with plain `docker compose up`, create it yourself, or
+Docker creates it owned by root and the backend can't write to it. If an
+older version already ran the backend as root on native Linux Docker,
+hand the vault back to your user once:
+`sudo chown -R "$(id -u):$(id -g)" vault`.
 
 Accounts, sessions, and personal API tokens live in their own SQLite
 database (`auth.sqlite3`), stored alongside the search index under

@@ -1,8 +1,10 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# The cache mount keeps npm's downloaded tarballs between builds, so a
+# rebuild after a lockfile change only fetches what changed.
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY . .
 # Vite bakes import.meta.env.VITE_* values in at the `npm run build` step

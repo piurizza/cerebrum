@@ -2,6 +2,12 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    # Run as the host user that owns the vault, not root -- on native Linux
+    # Docker every note the backend creates in the bind-mounted vault would
+    # otherwise be root-owned on the host. Docker Desktop hides this by
+    # remapping ownership through its VM's file sharing, so it only shows up
+    # without it.
+    user: "${CEREBRUM_UID:-1000}:${CEREBRUM_GID:-1000}"
     environment:
       APP_ENV: production
       CEREBRUM_VAULT_PATH: /data/vault

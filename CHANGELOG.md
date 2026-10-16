@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/piurizza/cerebrum/compare/v0.2.0...v0.3.0) (2026-10-16)
+
+
+### Features
+
+* **desktop:** connect to a server on the same computer without asking ([#57](https://github.com/piurizza/cerebrum/issues/57)) ([4fd5628](https://github.com/piurizza/cerebrum/commit/4fd5628fba2635b0da9668bf5b2c25214491e1c8))
+* install Cerebrum with one command, no clone, on x86_64 and arm64 ([#56](https://github.com/piurizza/cerebrum/issues/56)) ([56a2a34](https://github.com/piurizza/cerebrum/commit/56a2a346059cd83cbb18f8558ebbb2615ad9b8f3))
+* use 7811/7812 as the default ports instead of 8080/8443 ([#55](https://github.com/piurizza/cerebrum/issues/55)) ([337f9cc](https://github.com/piurizza/cerebrum/commit/337f9ccb424e876af862f61aa72ab09f373368e8))
+
 ## [0.2.0](https://github.com/piurizza/cerebrum/compare/v0.1.0...v0.2.0) (2026-10-16)
 
 

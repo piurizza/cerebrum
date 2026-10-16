@@ -11,7 +11,9 @@ name: Release
 # it only changes version numbers and CHANGELOG.md.
 #
 # The monthly schedule rebuilds the latest release's images so they pick up
-# security fixes in their Python/nginx base images.
+# security fixes in their Python/nginx base images. A manual run rebuilds the
+# images and the desktop packages for the latest release, which is how an
+# existing release gets a package added after the fact.
 on:
   push:
     branches: [main]
@@ -123,11 +125,11 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-  # Linux only for now: Windows and macOS builds are one matrix entry each
-  # away, but untested there (and unsigned) -- see README "Run desktop app".
+  # Windows is one more job away, but untested there -- see README "Run
+  # desktop app". The schedule only refreshes images, never packages.
   desktop:
     needs: target
-    if: needs.target.outputs.tag != '' && github.event_name == 'push'
+    if: needs.target.outputs.tag != '' && github.event_name != 'schedule'
     # The oldest supported Ubuntu, so the .deb links against an older glibc
     # and installs on more distributions.
     runs-on: ubuntu-22.04
@@ -182,3 +184,56 @@ jobs:
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             src-tauri/target/release/bundle/deb/*.deb \
             src-tauri/target/release/bundle/rpm/*.rpm
+
+  # One universal .dmg for Apple Silicon and Intel Macs. Ad-hoc signed, not
+  # notarized (that needs a paid Apple Developer ID), so Gatekeeper asks the
+  # user to allow it once -- see README "Run desktop app".
+  desktop-macos:
+    needs: target
+    if: needs.target.outputs.tag != '' && github.event_name != 'schedule'
+    runs-on: macos-15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.target.outputs.tag }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: desktop/src-tauri
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+
+      # GitHub sets CI=true, which makes Tauri skip the Finder window-layout
+      # step of the .dmg; that step needs a logged-in GUI session and fails
+      # in a headless shell. Run locally with CI=true for the same reason.
+      - run: npm run tauri build -- --target universal-apple-darwin --bundles dmg
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+
+      - name: Attach the disk image to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.target.outputs.tag }}
+        run: |
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg

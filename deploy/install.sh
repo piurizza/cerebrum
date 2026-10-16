@@ -27,6 +27,10 @@ set -eu
 RELEASE_TAG="__CEREBRUM_RELEASE_TAG__"
 REPO="piurizza/cerebrum"
 HEALTH_TIMEOUT_SECS=120
+# Same defaults as docker-compose.yml.
+DEFAULT_PORT=7811
+DEFAULT_HTTPS_PORT=7812
+DEFAULT_BIND_ADDRESS=127.0.0.1
 
 say() { printf '%s\n' "$*"; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -109,9 +113,9 @@ write_env() {
 			say "AUTH_SETUP_TOKEN=$setup_token"
 			say "CEREBRUM_UID=$(id -u)"
 			say "CEREBRUM_GID=$(id -g)"
-			say "CEREBRUM_PORT=${CEREBRUM_PORT:-7811}"
-			say "CEREBRUM_HTTPS_PORT=${CEREBRUM_HTTPS_PORT:-7812}"
-			say "CEREBRUM_BIND_ADDRESS=${CEREBRUM_BIND_ADDRESS:-127.0.0.1}"
+			say "CEREBRUM_PORT=${CEREBRUM_PORT:-$DEFAULT_PORT}"
+			say "CEREBRUM_HTTPS_PORT=${CEREBRUM_HTTPS_PORT:-$DEFAULT_HTTPS_PORT}"
+			say "CEREBRUM_BIND_ADDRESS=${CEREBRUM_BIND_ADDRESS:-$DEFAULT_BIND_ADDRESS}"
 			say "CEREBRUM_TLS_SAN=${CEREBRUM_TLS_SAN:-}"
 			if [ "$(uname -s)" = "Darwin" ]; then
 				# Docker Desktop's file sharing doesn't deliver change events
@@ -142,8 +146,8 @@ probe_host() {
 # Fresh install: check the ports it is about to write, before writing
 # anything, so a conflict is fixed by rerunning with another port.
 check_fresh_ports_free() {
-	host=$(probe_host "${CEREBRUM_BIND_ADDRESS:-127.0.0.1}")
-	for port in "${CEREBRUM_PORT:-7811}" "${CEREBRUM_HTTPS_PORT:-7812}"; do
+	host=$(probe_host "${CEREBRUM_BIND_ADDRESS:-$DEFAULT_BIND_ADDRESS}")
+	for port in "${CEREBRUM_PORT:-$DEFAULT_PORT}" "${CEREBRUM_HTTPS_PORT:-$DEFAULT_HTTPS_PORT}"; do
 		if port_in_use "$host" "$port"; then
 			fail "port $port is already in use by another program. Run the installer again with two free ports, for example:
     CEREBRUM_PORT=7821 CEREBRUM_HTTPS_PORT=7822 sh install.sh"

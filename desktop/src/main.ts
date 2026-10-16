@@ -29,10 +29,17 @@ async function expandToAppWindow(): Promise<void> {
   await win.center();
 }
 
+// Where a server installed on the same machine answers by default
+// (docker-compose.yml's CEREBRUM_PORT).
+const LOCAL_SERVER_URL = "http://localhost:7811";
+
 // The bootstrap screen's state machine (see the mermaid diagram in
 // docs/plans/2026-08-12-001-feat-desktop-app-plan.md's Planning Contract):
 // NoURL/form -> Checking -> Navigated (one-way exit) or Error -> Checking.
+// First launch with no stored URL and no build-time default goes through
+// Probing first: found -> the normal submit path, not found -> NoURL/form.
 type ScreenState =
+  | { kind: "probing" }
   | { kind: "form"; prefill: string; error: string | null }
   | { kind: "checking"; url: string }
   | { kind: "error"; url: string; reason: string };
@@ -93,6 +100,15 @@ export function initApp(container: HTMLElement): void {
         handleSubmit(input?.value ?? "");
       });
       input?.focus();
+      return;
+    }
+
+    if (state.kind === "probing") {
+      // Deliberately doesn't name the address: most people seeing this
+      // never asked for localhost, and a failed probe is not an error.
+      container.innerHTML = `
+        <p role="status">Looking for a Cerebrum server on this computer…</p>
+      `;
       return;
     }
 
@@ -174,6 +190,23 @@ export function initApp(container: HTMLElement): void {
     render();
   }
 
+  // Health-check the local default before storing anything: the submit
+  // path stores first and shows the error screen on failure, which is right
+  // for a URL someone typed and wrong for a guess. Only a server that
+  // actually answered goes through it, so validation and storage stay the
+  // same as for a typed URL.
+  async function probeLocalServer(): Promise<void> {
+    state = { kind: "probing" };
+    render();
+    const result = await checkHealth(LOCAL_SERVER_URL);
+    if (result.ok) {
+      handleSubmit(LOCAL_SERVER_URL);
+      return;
+    }
+    state = { kind: "form", prefill: "", error: null };
+    render();
+  }
+
   function handleSubmit(rawInput: string): void {
     const validation = validateServerUrl(rawInput);
     if (!validation.ok) {
@@ -219,7 +252,7 @@ export function initApp(container: HTMLElement): void {
       if (defaultUrl) {
         handleSubmit(defaultUrl);
       } else {
-        render();
+        void probeLocalServer();
       }
     })
     .catch((err) => {

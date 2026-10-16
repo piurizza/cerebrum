@@ -258,6 +258,8 @@ origin for a self-hosted deployment:
 ## Run desktop app
 
 Native window on Linux, macOS and Windows, no browser tab. On first launch it
+looks for a server on the same computer (`http://localhost:7811`, where the
+installer puts it) and connects without asking if one answers; otherwise it
 asks for a server URL — point it at any running cerebrum deployment
 (Docker or `make up` locally). No separate backend or account: it's a
 thin client for a server that's already running, not a second copy of

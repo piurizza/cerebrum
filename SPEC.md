@@ -243,6 +243,14 @@ API calls.
   app requires zero backend changes. A minimal native bootstrap screen
   (URL entry, health-check, retry) is the only thing actually bundled;
   it's Tauri app plumbing, not a second copy of the notes UI.
+- First launch, with no stored URL and no build-time default, health-checks
+  `http://localhost:7811` once before showing the form, behind a neutral
+  "Looking for a Cerebrum server on this computer…" status. Only a server
+  that answered is handed to the normal submit path (validated, stored,
+  connected); a miss shows the empty form with no error and stores
+  nothing, so remote-server users never see a localhost error. One
+  candidate only, no network scanning; existing installs still on 8080
+  get the form.
 - The health-check (`GET /api/health`) goes through **Tauri's HTTP
   plugin** (`@tauri-apps/plugin-http`), not browser `fetch()` — the
   plugin's request runs from the Rust side and isn't subject to the

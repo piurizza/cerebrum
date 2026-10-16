@@ -22,7 +22,7 @@ making architectural changes.
 [Run with Docker](#run-with-docker)): Docker with the Compose v2 plugin
 (`docker compose`), on x86_64 -- the published images are x86_64 only for
 now. Nothing is compiled, so building needs no extra memory or disk. Ports
-8080 (HTTP) and 8443 (HTTPS) must be free, or set other ones in `.env`.
+7811 (HTTP) and 7812 (HTTPS) must be free, or set other ones in `.env`.
 
 | Resource | Requirement | Measured |
 |---|---|---|
@@ -96,7 +96,7 @@ Cerebrum needs no Node or Python and no build:
     cp .env.example .env    # then set AUTH_JWT_SECRET and AUTH_SETUP_TOKEN
     mkdir -p vault
     docker compose pull
-    docker compose up -d    # http://localhost:8080
+    docker compose up -d    # http://localhost:7811
 
 `docker compose pull && docker compose up -d` again updates to the latest
 release. To stay on one release, set `CEREBRUM_VERSION=0.1.0` (for
@@ -106,7 +106,7 @@ example) in `.env`. Each image carries a GitHub build attestation, which
 
 To build the images from source instead:
 
-    make up     # builds and starts backend + frontend, http://localhost:8080
+    make up     # builds and starts backend + frontend, http://localhost:7811
     make down
     make logs
 
@@ -130,7 +130,7 @@ above, not a separate volume. Anyone already backing up the vault is
 already backing up accounts/sessions/tokens; no separate backup step is
 needed as long as `auth.sqlite3` stays under that mount.
 
-The frontend also serves HTTPS on `https://localhost:8443` (override via
+The frontend also serves HTTPS on `https://localhost:7812` (override via
 `CEREBRUM_HTTPS_PORT`), using a self-signed cert nginx generates on first
 start. Offline mode (see [SPEC.md](SPEC.md#7-tech-stack)) needs this --
 a service worker only registers in a secure context, which plain HTTP
@@ -192,7 +192,7 @@ origin for a self-hosted deployment:
       docker compose cp <name>.ts.net.key frontend:/etc/nginx/certs/cerebrum.key
       docker compose restart frontend
 
-  Then open `https://<name>.ts.net:8443` on the phone (any tailnet
+  Then open `https://<name>.ts.net:7812` on the phone (any tailnet
   device, from anywhere). Tailscale certs last 90 days — re-run
   `tailscale cert` and re-copy to renew (a monthly cron is enough; the
   `--operator` step above means the cron doesn't need root either).

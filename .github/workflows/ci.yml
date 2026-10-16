@@ -79,6 +79,39 @@ jobs:
       - name: Build
         run: npm run build
 
+  desktop:
+    name: Desktop
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The web side only (main.ts and its tests). Compiling the Rust shell
+      # and building installers needs platform packages; the release
+      # workflow and desktop-smoke.yml cover that.
+      - name: Lint & format check
+        run: npm run check
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Test
+        run: npm run test:run
+
   api-types:
     name: API Types
     runs-on: ubuntu-latest

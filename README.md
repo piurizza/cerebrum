@@ -141,12 +141,20 @@ Cerebrum needs no Node or Python and no build:
     docker compose up -d    # http://localhost:7811
 
 `docker compose pull && docker compose up -d` again updates to the latest
-release. **Upgrading from 0.2 or earlier:** the ports now listen on this
-machine only. If you open Cerebrum from other devices, add
-`CEREBRUM_BIND_ADDRESS=0.0.0.0` to `.env` and run `docker compose up -d`. To stay on one release, set `CEREBRUM_VERSION=0.1.0` (for
+release. To stay on one release, set `CEREBRUM_VERSION=0.1.0` (for
 example) in `.env`. Each image carries a GitHub build attestation, which
 `gh attestation verify oci://ghcr.io/piurizza/cerebrum-backend:latest
 --owner piurizza` checks.
+
+**Upgrading from 0.2 or earlier:** two defaults changed, so check `.env`
+before running `docker compose up -d`:
+
+- The ports moved from 8080/8443 to 7811/7812. To keep your old address,
+  set `CEREBRUM_PORT=8080` and `CEREBRUM_HTTPS_PORT=8443`. If you
+  installed Cerebrum on a phone, keep the old HTTPS port: the installed
+  app and its offline copy belong to that exact address, port included.
+- The ports now listen on this machine only. If you open Cerebrum from
+  other devices, set `CEREBRUM_BIND_ADDRESS=0.0.0.0`.
 
 To build the images from source instead:
 

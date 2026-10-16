@@ -1,0 +1,10 @@
+# Development only: build the images from this checkout instead of pulling
+# the published ones. `make up` passes this file; by hand:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+# The built images keep the published names, so docker-compose.yml alone
+# then runs them too.
+services:
+  backend:
+    build: ./backend
+  frontend:
+    build: ./frontend

@@ -146,6 +146,7 @@ All endpoints under `/api`.
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 | GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |
 | GET | `/api/tasks` | Every open (unchecked) markdown checkbox across the vault, joined with its note's title, ordered by note path then line; read-only |
+| GET | `/api/vault-settings` | `{ daily_note_folder, templates_folder }` -- the server's vault folder conventions (see `CEREBRUM_DAILY_NOTE_FOLDER` / `CEREBRUM_TEMPLATES_FOLDER` below); the web app loads it on start and on login and keeps the last copy for offline use |
 
 The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated with a personal API token:
 
@@ -306,8 +307,8 @@ API calls.
 | `CEREBRUM_HTTPS_PORT` | compose | `8443` | host port for the frontend's self-signed HTTPS listener; required for offline mode |
 | `CEREBRUM_TLS_SAN` | compose | *(unset)* | extra Subject Alternative Names for the self-signed cert, comma-separated (e.g. `IP:192.168.1.14`) — set to your LAN IP/hostname to use offline mode from another device |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
-| `VITE_DAILY_NOTE_FOLDER` | frontend | `daily` | vault-relative folder the "Today" button creates daily notes in. Build-time only -- baked into the frontend image at `npm run build`; changing it on a deployed instance needs `docker compose build/up frontend`, not just an env edit |
-| `VITE_TEMPLATES_FOLDER` | frontend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Build-time only, same rebuild caveat as `VITE_DAILY_NOTE_FOLDER` above. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |
+| `CEREBRUM_DAILY_NOTE_FOLDER` | backend | `daily` | vault-relative folder the "Today" button creates daily notes in. Served to clients by `GET /api/vault-settings`, so changing it needs only a backend restart. Leading/trailing slashes are trimmed, a blank value means the default, and `.`/`..` segments fail startup. Docker Compose falls back to the former build-time name `VITE_DAILY_NOTE_FOLDER` |
+| `CEREBRUM_TEMPLATES_FOLDER` | backend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Same handling as `CEREBRUM_DAILY_NOTE_FOLDER`; Compose falls back to the former `VITE_TEMPLATES_FOLDER`. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |
 | `VITE_DEFAULT_SERVER_URL` | desktop | `http://localhost:8080` | server URL the desktop app auto-connects to on first launch (or after its store is cleared) -- most deployments have exactly one server, so this skips the first manual URL entry; the user can always view/change the configured URL afterward via "Change server URL", so this is not a hard-coded target |
 
 ## 9. Feature roadmap (user stories)
@@ -484,17 +485,16 @@ how consistently each was cited as high-value across that research.
       "+ New note") opens today's note, creating it with a
       `# <full date>` heading if it doesn't exist yet -- never overwrites
       an existing one. Path is `<folder>/<YYYY-MM-DD>.md`; `<folder>`
-      defaults to `daily` and is configurable via `VITE_DAILY_NOTE_FOLDER`
-      (build-time only -- see [Environment variables](#environment-variables);
-      changing it on a deployed instance needs a frontend rebuild, not a
-      runtime edit). The date is always the *browser's* local calendar
+      defaults to `daily` and is configurable on the server via
+      `CEREBRUM_DAILY_NOTE_FOLDER` (see
+      [Environment variables](#environment-variables)). The date is always the *browser's* local calendar
       day, never the server's or UTC -- a self-hosted server can run in a
       different timezone than the browser opening it, so using the
       server's clock could silently pick the wrong day near midnight.
 - [x] note templates -- a template is an ordinary note under a
-      configurable vault folder (default `templates`, `VITE_TEMPLATES_FOLDER`
-      -- see [Environment variables](#environment-variables); build-time
-      only, same as `VITE_DAILY_NOTE_FOLDER`). A template directly under
+      configurable vault folder (default `templates`,
+      `CEREBRUM_TEMPLATES_FOLDER` -- see
+      [Environment variables](#environment-variables)). A template directly under
       that folder is *global* (offered for any new note); one in a
       subfolder is *scoped* to that subfolder's name and is prioritized
       for a matching target folder, but never hidden for others. The

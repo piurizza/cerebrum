@@ -12,6 +12,7 @@ import type {
   NoteMeta,
   TaskItem,
 } from "../types/note";
+import type { VaultSettings } from "../types/vault";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -407,6 +408,10 @@ export function encodeNotePath(path: string): string {
 
 export function listNotes(): Promise<NoteMeta[]> {
   return request<NoteMeta[]>("/notes");
+}
+
+export function getVaultSettings(): Promise<VaultSettings> {
+  return request<VaultSettings>("/vault-settings");
 }
 
 export function getNote(path: string): Promise<Note> {

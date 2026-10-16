@@ -1,17 +1,13 @@
-import { normalizeFolderEnvVar } from "./envFolder";
+import { vaultFolders } from "./vaultSettings";
 
 const headingFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "full",
 });
 
-/** The vault-relative folder daily notes live in, configurable at build
- * time via `VITE_DAILY_NOTE_FOLDER` (same `import.meta.env.VITE_*`
- * pattern as `api/client.ts`'s `VITE_API_BASE_URL`). Normalization
- * (fallback + slash-trim) is shared with `templates.ts`'s
- * `VITE_TEMPLATES_FOLDER` via `normalizeFolderEnvVar` -- see that
- * function's doc comment for why the trim matters. */
+/** The vault-relative folder daily notes live in, set on the server
+ * (`CEREBRUM_DAILY_NOTE_FOLDER`) and read through `vaultSettings.ts`. */
 function dailyNoteFolder(): string {
-  return normalizeFolderEnvVar(import.meta.env.VITE_DAILY_NOTE_FOLDER, "daily");
+  return vaultFolders().dailyNoteFolder;
 }
 
 /** Today's daily-note path, e.g. "daily/2026-08-11.md" -- computed from

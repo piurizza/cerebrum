@@ -1,6 +1,6 @@
 import type { NoteMeta } from "../types/note";
-import { normalizeFolderEnvVar } from "./envFolder";
 import { splitNotePath } from "./noteTree";
+import { vaultFolders } from "./vaultSettings";
 
 export type TemplateTier = "matching-scope" | "global" | "other-scope";
 
@@ -11,11 +11,10 @@ export interface TemplateOption {
   tier: TemplateTier;
 }
 
-/** The vault-relative folder templates live in, configurable at build time
- * via `VITE_TEMPLATES_FOLDER`. Shares `dailyNote.ts`'s normalization via
- * `normalizeFolderEnvVar` (fallback + slash-trim). */
+/** The vault-relative folder templates live in, set on the server
+ * (`CEREBRUM_TEMPLATES_FOLDER`) and read through `vaultSettings.ts`. */
 export function templatesFolder(): string {
-  return normalizeFolderEnvVar(import.meta.env.VITE_TEMPLATES_FOLDER, "templates");
+  return vaultFolders().templatesFolder;
 }
 
 const TIER_RANK: Record<TemplateTier, number> = {

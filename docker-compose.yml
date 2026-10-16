@@ -20,6 +20,12 @@ services:
       # unreliable (Docker Desktop on macOS/Windows, NFS) -- left empty by
       # default so the operator decides, not an auto-detect guess.
       WATCHFILES_FORCE_POLLING: ${WATCHFILES_FORCE_POLLING:-}
+      # Vault folders the web app uses for "Today" and the template picker,
+      # served by `GET /api/vault-settings`. Changing them needs only a
+      # restart. Falls back to the VITE_* names these had when they were
+      # baked into the frontend build, so an existing .env keeps working.
+      CEREBRUM_DAILY_NOTE_FOLDER: ${CEREBRUM_DAILY_NOTE_FOLDER:-${VITE_DAILY_NOTE_FOLDER:-daily}}
+      CEREBRUM_TEMPLATES_FOLDER: ${CEREBRUM_TEMPLATES_FOLDER:-${VITE_TEMPLATES_FOLDER:-templates}}
     volumes:
       - ${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault
     healthcheck:
@@ -35,16 +41,7 @@ services:
       retries: 5
 
   frontend:
-    build:
-      context: ./frontend
-      # VITE_* values are baked in at build time (Vite reads them from
-      # the process env during `npm run build`), not runtime -- unlike
-      # the backend's `environment:` settings above, changing this on an
-      # already-deployed instance needs `docker compose build/up
-      # frontend`, not just an env edit.
-      args:
-        VITE_DAILY_NOTE_FOLDER: ${VITE_DAILY_NOTE_FOLDER:-daily}
-        VITE_TEMPLATES_FOLDER: ${VITE_TEMPLATES_FOLDER:-templates}
+    build: ./frontend
     restart: unless-stopped
     environment:
       # Extra Subject Alternative Names for the self-signed HTTPS cert

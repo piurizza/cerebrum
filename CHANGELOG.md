@@ -3,6 +3,16 @@
 ## [0.3.0](https://github.com/piurizza/cerebrum/compare/v0.2.0...v0.3.0) (2026-10-16)
 
 
+### Upgrading from 0.2
+
+Two defaults changed. Check `.env` before running `docker compose up -d`:
+
+* **The ports moved from 8080/8443 to 7811/7812.** To keep your old address, set `CEREBRUM_PORT=8080` and `CEREBRUM_HTTPS_PORT=8443`. If you installed Cerebrum on a phone, keep the old HTTPS port: the installed app and its offline copy belong to that exact address, port included.
+* **The ports now listen on this machine only.** If you open Cerebrum from other devices, set `CEREBRUM_BIND_ADDRESS=0.0.0.0`.
+
+New installs with the one-command installer aren't affected.
+
+
 ### Features
 
 * **desktop:** connect to a server on the same computer without asking ([#57](https://github.com/piurizza/cerebrum/issues/57)) ([4fd5628](https://github.com/piurizza/cerebrum/commit/4fd5628fba2635b0da9668bf5b2c25214491e1c8))

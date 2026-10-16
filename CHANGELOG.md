@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/piurizza/cerebrum/compare/v0.1.0...v0.2.0) (2026-10-16)
+
+
+### Features
+
+* **desktop:** release a universal macOS .dmg ([#51](https://github.com/piurizza/cerebrum/issues/51)) ([91ec45d](https://github.com/piurizza/cerebrum/commit/91ec45d2e414f2265fd6c2ba460e98605bcea84c))
+* **desktop:** Windows installer, with a CI smoke test that installs and launches it ([#54](https://github.com/piurizza/cerebrum/issues/54)) ([2477dcb](https://github.com/piurizza/cerebrum/commit/2477dcbc29c94c3bb12d00c000cb8c2ff25a2567))
+
 ## 0.1.0 (2026-10-16)
 
 

@@ -53,6 +53,16 @@ function fillAndSubmit(container: HTMLElement, value: string): void {
   form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
+// First launch with no stored URL: the local-server probe runs (and, by
+// default, finds nothing) before the form appears. Clears the health-check
+// call history so a test's assertions count only what the test triggers.
+async function renderFirstLaunchForm(): Promise<void> {
+  mockGetStoredServerUrl.mockResolvedValue(null);
+  initApp(container);
+  await flush();
+  mockCheckHealth.mockClear();
+}
+
 let container: HTMLElement;
 let navigateSpy: ReturnType<typeof vi.spyOn>;
 
@@ -68,6 +78,10 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   navigateSpy = vi.spyOn(navigation, "navigateTo").mockImplementation(() => {});
+  // First launch now probes for a server on this computer before showing
+  // the form; by default nothing answers, which is what the "no URL known
+  // yet" tests mean. Tests about the probe override this.
+  mockCheckHealth.mockResolvedValue({ ok: false, reason: "nothing on this computer" });
   mockGetHasConnectedSuccessfully.mockResolvedValue(false);
   mockSetHasConnectedSuccessfully.mockResolvedValue(undefined);
   mockSetDecorations.mockResolvedValue(undefined);
@@ -110,9 +124,7 @@ describe("first launch (F1)", () => {
   });
 
   it("rejects empty input without persisting or health-checking", async () => {
-    mockGetStoredServerUrl.mockResolvedValue(null);
-    initApp(container);
-    await flush();
+    await renderFirstLaunchForm();
 
     const form = container.querySelector<HTMLFormElement>("#url-form");
     form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -138,9 +150,8 @@ describe("first launch (F1)", () => {
   it("persists a valid URL and hands off to the health-check", async () => {
     mockGetStoredServerUrl.mockResolvedValue(null);
     mockSetStoredServerUrl.mockResolvedValue(undefined);
+    await renderFirstLaunchForm();
     mockCheckHealth.mockResolvedValue({ ok: true });
-    initApp(container);
-    await flush();
 
     fillAndSubmit(container, "http://localhost:8080");
     await flush();
@@ -193,8 +204,7 @@ describe("first launch (F1)", () => {
   it("falls back to the form with an error when saving the URL fails", async () => {
     mockGetStoredServerUrl.mockResolvedValue(null);
     mockSetStoredServerUrl.mockRejectedValue(new Error("permission denied"));
-    initApp(container);
-    await flush();
+    await renderFirstLaunchForm();
 
     fillAndSubmit(container, "http://localhost:8080");
     await flush();
@@ -220,9 +230,8 @@ describe("first launch (F1)", () => {
         resolveSetStored = resolve;
       }),
     );
+    await renderFirstLaunchForm();
     mockCheckHealth.mockResolvedValue({ ok: true });
-    initApp(container);
-    await flush();
 
     fillAndSubmit(container, "http://localhost:8080");
     await flush();
@@ -235,6 +244,80 @@ describe("first launch (F1)", () => {
 
     expect(mockSetStoredServerUrl).toHaveBeenCalledTimes(1);
     expect(mockCheckHealth).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("finds a local server on first launch", () => {
+  const LOCAL_URL = "http://localhost:7811/";
+
+  it("connects to a server answering on the default local port and saves it", async () => {
+    mockGetStoredServerUrl.mockResolvedValue(null);
+    mockSetStoredServerUrl.mockResolvedValue(undefined);
+    mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container);
+    await flush();
+    await flush();
+
+    expect(mockCheckHealth).toHaveBeenCalledWith("http://localhost:7811");
+    expect(mockSetStoredServerUrl).toHaveBeenCalledWith(LOCAL_URL);
+    expect(navigateSpy).toHaveBeenCalledWith(LOCAL_URL);
+  });
+
+  it("stores nothing and shows the empty form with no error when nothing answers", async () => {
+    mockGetStoredServerUrl.mockResolvedValue(null);
+    mockCheckHealth.mockResolvedValue({ ok: false, reason: "connection refused" });
+
+    initApp(container);
+    await flush();
+
+    const input = container.querySelector<HTMLInputElement>("#url-input");
+    expect(input).not.toBeNull();
+    expect(input?.value).toBe("");
+    expect(container.querySelector(".error")).toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(mockSetStoredServerUrl).not.toHaveBeenCalled();
+    expect(navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows a neutral status while looking, without naming the address", async () => {
+    mockGetStoredServerUrl.mockResolvedValue(null);
+    mockCheckHealth.mockReturnValue(new Promise(() => {}));
+
+    initApp(container);
+    await flush();
+
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toContain(
+      "Looking for a Cerebrum server on this computer",
+    );
+    expect(container.textContent).not.toContain("localhost:7811");
+    expect(container.querySelector("#url-input")).toBeNull();
+  });
+
+  it("does not probe when a URL is already stored", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("https://notes.example.test/");
+    mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container);
+    await flush();
+
+    expect(mockCheckHealth).toHaveBeenCalledTimes(1);
+    expect(mockCheckHealth).toHaveBeenCalledWith("https://notes.example.test/");
+  });
+
+  it("lets a build-time default win over the probe", async () => {
+    vi.stubEnv("VITE_DEFAULT_SERVER_URL", "https://notes.example.test");
+    mockGetStoredServerUrl.mockResolvedValue(null);
+    mockSetStoredServerUrl.mockResolvedValue(undefined);
+    mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container);
+    await flush();
+    await flush();
+
+    expect(mockCheckHealth).not.toHaveBeenCalledWith("http://localhost:7811");
+    expect(navigateSpy).toHaveBeenCalledWith("https://notes.example.test/");
   });
 });
 
@@ -255,7 +338,7 @@ describe("auto-connect to a configured default (VITE_DEFAULT_SERVER_URL)", () =>
     expect(navigateSpy).toHaveBeenCalledWith("http://localhost:8080/");
   });
 
-  it("still renders the empty form when no default is configured (regression: no default should not auto-submit anything)", async () => {
+  it("still renders the empty form when no default is configured and nothing answers locally (regression: no default should not auto-submit anything)", async () => {
     vi.stubEnv("VITE_DEFAULT_SERVER_URL", "");
     mockGetStoredServerUrl.mockResolvedValue(null);
 
@@ -263,7 +346,10 @@ describe("auto-connect to a configured default (VITE_DEFAULT_SERVER_URL)", () =>
     await flush();
 
     expect(container.querySelector("#url-form")).not.toBeNull();
-    expect(mockCheckHealth).not.toHaveBeenCalled();
+    // Only the local probe ran; nothing was submitted or stored.
+    expect(mockCheckHealth).toHaveBeenCalledTimes(1);
+    expect(mockCheckHealth).toHaveBeenCalledWith("http://localhost:7811");
+    expect(mockSetStoredServerUrl).not.toHaveBeenCalled();
   });
 
   it("does not auto-connect when a URL is already stored, even if a default is also configured", async () => {

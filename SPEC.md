@@ -255,10 +255,12 @@ API calls.
   capability file grants no `remote` origin access to that
   user-configured URL — it's arbitrary input, not a trusted origin, so
   it never gets native Tauri IPC access.
-- Packaging: `.deb` and `.rpm` for Linux x86_64 and one universal
-  `.dmg` for macOS, all built by the release workflow and attached to
-  each GitHub Release. No installer signing or notarization, no
-  auto-update, no Windows build (personal-use scope). See
+- Packaging: `.deb` and `.rpm` for Linux x86_64, one universal `.dmg`
+  for macOS and an NSIS setup `.exe` for Windows x64, all built by the
+  release workflow and attached to each GitHub Release. A smoke-test
+  workflow installs and launches the Windows build against a stand-in
+  server on every desktop pull request. No installer signing or
+  notarization, no auto-update (personal-use scope). See
   [Feature roadmap](#9-feature-roadmap-user-stories).
 
 ## 8. Deployment
@@ -440,13 +442,13 @@ history.
 - [x] lockout after repeated failed logins (atomic, race-safe counter),
       with timing-attack-resistant rejection (dummy Argon2 hash paid
       even on the locked-out/unknown-user paths).
-- [x] a native desktop app (Linux and macOS, `desktop/`) as an alternative to a
+- [x] a native desktop app (Linux, macOS and Windows, `desktop/`) as an alternative to a
       browser tab -- a Tauri v2 window pointed at a configured server URL,
       not a second deployment. Reuses the existing self-hosted server and
       cookie login unchanged; see [§7 Tech stack](#7-tech-stack) for the
       CORS/capability decisions this required. Personal use only for now:
-      no installer signing or notarization, no auto-update, no Windows
-      build (see [Known gaps](#10-known-gaps--future-work)).
+      no installer signing or notarization, no auto-update (see
+      [Known gaps](#10-known-gaps--future-work)).
 
 ### Editing experience
 
@@ -624,14 +626,17 @@ how consistently each was cited as high-value across that research.
   unless it's fenced as a code block — the same appears-everywhere
   trade-off already noted for templates, extended here rather than
   given its own exclusion mechanism.
-- **The desktop app (`desktop/`) is Linux and macOS only, personal-use
-  scope.** The release workflow builds a `.deb`, an `.rpm` and a
-  universal `.dmg` and attaches them to each GitHub Release, with build
+- **The desktop app (`desktop/`) is personal-use scope.** The release
+  workflow builds a `.deb`, an `.rpm`, a universal `.dmg` and a Windows
+  setup `.exe` and attaches them to each GitHub Release, with build
   provenance attestations. Nothing is signed with a publisher identity:
   the macOS app is ad-hoc signed and not notarized, so Gatekeeper blocks
-  its first launch until the user allows it in Privacy & Security (the
-  README has the steps); notarization needs a paid Apple Developer ID.
-  No auto-update, no app store or package repository, no Windows build.
+  its first launch until the user allows it in Privacy & Security, and
+  the Windows installer is unsigned, so SmartScreen warns once (the
+  README has both steps); fixing either needs a paid identity. The
+  Windows build is verified only by the CI smoke test (install, launch,
+  health check, page load), not by hand on Windows 10 or 11. No
+  auto-update, no app store or package repository.
   A navigation-failure gap is
   also accepted: the health-check and the subsequent navigation are two
   separate steps, so a server that drops in the narrow window between
@@ -644,7 +649,7 @@ how consistently each was cited as high-value across that research.
   touch targets, full-screen modals) and installs to a phone's home
   screen as a PWA over a browser-trusted origin. Native shells (Tauri
   Android/iOS, Capacitor) are deferred, not rejected -- same personal-use,
-  additive-later stance as the desktop app's missing Windows build above. Offline
+  additive-later stance as the desktop app's missing signing above. Offline
   *editing* on mobile is out of scope: the shell and last-synced vault
   cache for reading, but the app stays a thin client to one server,
   consistent with the "No CRDT / offline-first sync" bullet above.

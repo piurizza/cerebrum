@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -87,17 +87,40 @@ def write_note(
             raise NoteAlreadyExistsError(path)
         if must_exist and not file_path.exists():
             raise NoteNotFoundError(path)
+        return _render_and_write(file_path, path, raw_content)
 
-        parsed = parse_note(path, raw_content)
 
-        now = datetime.now(UTC)
-        if parsed.created is None:
-            parsed.created = now
-        parsed.updated = now
+def modify_note(vault_root: Path, path: str, change: Callable[[str], str]) -> Note:
+    """Apply `change` to an existing note's raw content and save the result.
 
-        rendered = render_note(parsed)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(rendered, encoding="utf-8")
+    The read and the write happen under the same `file_lock` critical
+    section, so a concurrent writer to the same path cannot land between
+    them and be silently overwritten -- the guarantee a client gets by
+    calling read_note() and then write_note() itself does not hold.
+    Exceptions raised by `change` propagate unchanged and leave the file
+    untouched.
+    """
+    file_path = resolve_note_path(vault_root, path)
+    with file_lock(file_path):
+        try:
+            raw_content = file_path.read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise NoteNotFoundError(path) from exc
+        return _render_and_write(file_path, path, change(raw_content))
+
+
+def _render_and_write(file_path: Path, path: str, raw_content: str) -> Note:
+    """Parse, stamp `created`/`updated` and save. Callers hold `file_path`'s lock."""
+    parsed = parse_note(path, raw_content)
+
+    now = datetime.now(UTC)
+    if parsed.created is None:
+        parsed.created = now
+    parsed.updated = now
+
+    rendered = render_note(parsed)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(rendered, encoding="utf-8")
 
     return Note(
         path=path,

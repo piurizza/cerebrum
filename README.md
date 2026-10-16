@@ -196,8 +196,8 @@ To build a `.deb`: `make build-desktop` (needs `webkit2gtk4.1-devel` and
 
 An MCP server is mounted at `/api/mcp`, reachable through the same
 frontend-published port and nginx proxy as the REST API (no separate port).
-Remote clients (e.g. Claude Desktop) can read, search, create, and update
-notes over it.
+Remote clients (e.g. Claude Desktop) can read, search, create, update,
+append to, edit, and delete notes over it.
 
 Every call is authenticated. Generate a personal API token in
 **Settings** (it starts with `cbm_pat_`) and give it to your MCP client

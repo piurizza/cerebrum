@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -528,3 +529,252 @@ def test_create_note_concurrent_calls_for_same_new_path_only_one_succeeds(
             assert f"content-{loser_id}" not in final_content
     finally:
         get_settings.cache_clear()
+
+
+@pytest.fixture
+def mcp_with_vault(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[FastMCP]:
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    get_settings.cache_clear()
+    try:
+        yield _mcp_server(db)
+    finally:
+        get_settings.cache_clear()
+
+
+def _call(
+    mcp: FastMCP, tool: str, args: dict[str, str], *, raise_on_error: bool = True
+) -> CallToolResult:
+    async def run() -> CallToolResult:
+        async with Client(mcp) as client:
+            return await client.call_tool(tool, args, raise_on_error=raise_on_error)
+
+    return asyncio.run(run())
+
+
+def test_append_to_note_adds_text_at_the_end_and_keeps_frontmatter(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    _write_note(vault, "a.md", "---\ntitle: A\ntags:\n  - kept\n---\nfirst\n")
+
+    result = _call(
+        mcp_with_vault, "append-to-note", {"path": "a.md", "content": "## Log\nsecond"}
+    )
+
+    assert result.data.title == "A"
+    assert result.data.tags == ["kept"]
+    assert result.data.content.endswith("first\n\n## Log\nsecond\n")
+    assert (vault / "a.md").read_text(encoding="utf-8") == result.data.content
+
+
+def test_append_to_note_on_missing_note_fails_without_creating_it(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    result = _call(
+        mcp_with_vault,
+        "append-to-note",
+        {"path": "missing.md", "content": "x"},
+        raise_on_error=False,
+    )
+
+    assert result.is_error
+    assert "missing.md" in result.content[0].text
+    assert not (vault / "missing.md").exists()
+
+
+def test_append_to_note_with_blank_content_fails_and_leaves_note_unchanged(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    _write_note(vault, "a.md", "---\ntitle: A\n---\nbody\n")
+    before = (vault / "a.md").read_text(encoding="utf-8")
+
+    result = _call(
+        mcp_with_vault,
+        "append-to-note",
+        {"path": "a.md", "content": "\n  \n"},
+        raise_on_error=False,
+    )
+
+    assert result.is_error
+    assert (vault / "a.md").read_text(encoding="utf-8") == before
+
+
+def test_edit_note_replaces_a_unique_passage(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    _write_note(vault, "a.md", "---\ntitle: A\n---\n## One\nold text\n## Two\nkeep\n")
+
+    result = _call(
+        mcp_with_vault,
+        "edit-note",
+        {"path": "a.md", "old_text": "old text", "new_text": "new text"},
+    )
+
+    assert "## One\nnew text\n## Two\nkeep\n" in result.data.content
+    assert "old text" not in (vault / "a.md").read_text(encoding="utf-8")
+
+
+def test_edit_note_can_insert_before_an_anchor(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    _write_note(vault, "a.md", "---\ntitle: A\n---\n## Intro\n\n## Sources\nlink\n")
+
+    result = _call(
+        mcp_with_vault,
+        "edit-note",
+        {
+            "path": "a.md",
+            "old_text": "## Sources",
+            "new_text": "## Notes\nadded\n\n## Sources",
+        },
+    )
+
+    assert "## Intro\n\n## Notes\nadded\n\n## Sources\nlink\n" in result.data.content
+
+
+@pytest.mark.parametrize(
+    ("old_text", "expected_error"),
+    [
+        ("absent", "was not found"),
+        ("twice", "appears 2 times"),
+        ("", "old_text is empty"),
+    ],
+)
+def test_edit_note_without_exactly_one_match_fails_and_leaves_note_unchanged(
+    vault: Path, mcp_with_vault: FastMCP, old_text: str, expected_error: str
+) -> None:
+    _write_note(vault, "a.md", "---\ntitle: A\n---\ntwice and twice\n")
+    before = (vault / "a.md").read_text(encoding="utf-8")
+
+    result = _call(
+        mcp_with_vault,
+        "edit-note",
+        {"path": "a.md", "old_text": old_text, "new_text": "x"},
+        raise_on_error=False,
+    )
+
+    assert result.is_error
+    assert expected_error in result.content[0].text
+    assert (vault / "a.md").read_text(encoding="utf-8") == before
+
+
+def test_edit_note_on_missing_note_fails(mcp_with_vault: FastMCP) -> None:
+    result = _call(
+        mcp_with_vault,
+        "edit-note",
+        {"path": "missing.md", "old_text": "a", "new_text": "b"},
+        raise_on_error=False,
+    )
+
+    assert result.is_error
+    assert "missing.md" in result.content[0].text
+
+
+def test_edit_and_append_results_are_searchable(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    _write_note(vault, "a.md", "---\ntitle: A\n---\nbody\n")
+
+    _call(mcp_with_vault, "append-to-note", {"path": "a.md", "content": "zebracorn"})
+    _call(
+        mcp_with_vault,
+        "edit-note",
+        {"path": "a.md", "old_text": "body", "new_text": "quokka"},
+    )
+
+    for word in ("zebracorn", "quokka"):
+        hits = _call(mcp_with_vault, "search-notes", {"query": word})
+        assert [item.path for item in hits.data] == ["a.md"]
+
+
+def test_delete_note_removes_file_attachments_and_index_entry(
+    vault: Path, db: sqlite3.Connection, mcp_with_vault: FastMCP
+) -> None:
+    _write_note(vault, "dir/a.md", "---\ntitle: A\n---\nbody\n")
+    attachments = vault / "dir" / "a.attachments"
+    attachments.mkdir()
+    (attachments / "image.png").write_bytes(b"\x89PNG")
+    upsert_note(db, vault, "dir/a.md")
+
+    result = _call(mcp_with_vault, "delete-note", {"path": "dir/a.md"})
+
+    assert "dir/a.md" in result.content[0].text
+    assert not (vault / "dir" / "a.md").exists()
+    assert not attachments.exists()
+    assert _call(mcp_with_vault, "list-notes", {}).data == []
+
+
+def test_delete_note_on_missing_note_fails(mcp_with_vault: FastMCP) -> None:
+    result = _call(
+        mcp_with_vault, "delete-note", {"path": "missing.md"}, raise_on_error=False
+    )
+
+    assert result.is_error
+    assert "missing.md" in result.content[0].text
+
+
+def test_delete_note_on_invalid_path_fails_without_touching_the_vault(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    _write_note(vault, "keep.txt", "not a note")
+
+    result = _call(
+        mcp_with_vault, "delete-note", {"path": "keep.txt"}, raise_on_error=False
+    )
+
+    assert result.is_error
+    assert (vault / "keep.txt").exists()
+
+
+def test_delete_note_succeeds_even_when_index_sync_fails(
+    vault: Path, mcp_with_vault: FastMCP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_note(vault, "a.md", "---\ntitle: A\n---\nbody\n")
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("index boom")
+
+    monkeypatch.setattr("cerebrum.mcp.notes_tools.remove_note_from_index", _boom)
+
+    result = _call(mcp_with_vault, "delete-note", {"path": "a.md"})
+
+    assert not result.is_error
+    assert not (vault / "a.md").exists()
+
+
+def _append_marker(mcp: FastMCP, barrier: threading.Barrier, marker: str) -> None:
+    async def run() -> None:
+        async with Client(mcp) as client:
+            barrier.wait(timeout=5)
+            await client.call_tool(
+                "append-to-note", {"path": "log.md", "content": marker}
+            )
+
+    asyncio.run(run())
+
+
+def test_concurrent_appends_to_the_same_note_are_never_lost(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    """The read and the write of an append share one file_lock critical
+    section. If they were two separate steps (get-note, then update-note,
+    as a client had to do before), concurrent appends would read the same
+    old content and all but one marker would be overwritten."""
+    workers = 8
+    for attempt in range(5):
+        _write_note(vault, "log.md", "---\ntitle: Log\n---\nstart\n")
+        barrier = threading.Barrier(workers, timeout=5)
+        markers = [f"marker-{attempt}-{i}" for i in range(workers)]
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(_append_marker, mcp_with_vault, barrier, marker)
+                for marker in markers
+            ]
+            for future in futures:
+                future.result(timeout=20)
+
+        final = (vault / "log.md").read_text(encoding="utf-8")
+        missing = [marker for marker in markers if marker not in final]
+        assert not missing, f"attempt {attempt}: lost appends {missing}"

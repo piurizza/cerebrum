@@ -1,4 +1,7 @@
-FROM node:22-alpine AS build
+# The build stage's output is static JS/CSS/HTML, identical for every CPU
+# architecture, so it runs natively on the build machine even when the image
+# is built for another one (the release builds arm64 too), not under emulation.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./

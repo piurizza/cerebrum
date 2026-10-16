@@ -110,3 +110,82 @@ jobs:
 
       - name: Check generated API types are current
         run: make check-api-types
+
+  installer:
+    # Runs deploy/install.sh the way a user would, against images built from
+    # this commit, on both architectures the release publishes. The two
+    # CEREBRUM_* testing hooks swap the download and the pull for local
+    # files; everything else (secrets, permissions, startup, health wait,
+    # rerun) is the real path.
+    name: Installer (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    # An explicit bash adds pipefail, so `install.sh | tee` fails with the installer.
+    defaults:
+      run:
+        shell: bash
+    env:
+      CEREBRUM_INSTALL_DIR: ${{ github.workspace }}/../cerebrum-server
+      CEREBRUM_COMPOSE_SOURCE: ${{ github.workspace }}/docker-compose.yml
+      CEREBRUM_SKIP_PULL: "1"
+      CEREBRUM_VERSION: ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same script on both architectures; ShellCheck is preinstalled on the
+      # x86_64 image.
+      - name: Lint the installer
+        if: matrix.arch == 'x86_64'
+        run: shellcheck --shell=sh deploy/install.sh
+
+      - name: Build the images from this commit
+        run: |
+          docker build -t ghcr.io/piurizza/cerebrum-backend:ci ./backend
+          docker build -t ghcr.io/piurizza/cerebrum-frontend:ci ./frontend
+
+      - name: Refuses to run as root
+        run: |
+          if sudo -E sh deploy/install.sh > root.log 2>&1; then
+            echo "installer ran as root"; exit 1
+          fi
+          grep -q "don't run the installer as root" root.log
+          test ! -e "$CEREBRUM_INSTALL_DIR"
+
+      - name: Fresh install
+        run: sh deploy/install.sh | tee fresh.log
+
+      - name: Check the fresh install
+        run: |
+          curl -fsS http://127.0.0.1:7811/api/health
+          test "$(stat -c %a "$CEREBRUM_INSTALL_DIR/.env")" = 600
+          test "$(stat -c %U "$CEREBRUM_INSTALL_DIR/vault")" = "$(id -un)"
+          grep -q "paste this as the Invite token" fresh.log
+          token=$(sed -n 's/^AUTH_SETUP_TOKEN=//p' "$CEREBRUM_INSTALL_DIR/.env")
+          curl -fsS -o /dev/null -X POST http://127.0.0.1:7811/api/auth/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"ci\",\"password\":\"ci installer password 123\",\"token\":\"$token\"}"
+
+      - name: Rerun keeps secrets and prints no token
+        run: |
+          before=$(sha256sum "$CEREBRUM_INSTALL_DIR/.env")
+          sh deploy/install.sh | tee rerun.log
+          test "$before" = "$(sha256sum "$CEREBRUM_INSTALL_DIR/.env")"
+          if grep -q "Invite token" rerun.log; then
+            echo "the rerun printed the invite token"; exit 1
+          fi
+          curl -fsS http://127.0.0.1:7811/api/health
+
+      - name: Backend logs on failure
+        if: failure()
+        run: docker compose --project-directory "$CEREBRUM_INSTALL_DIR" logs --no-color --tail 50 || true

@@ -270,11 +270,30 @@ API calls.
 - `frontend/Dockerfile`: multi-stage — `node:20-alpine` builds the static
   bundle, `nginx:alpine` serves it and reverse-proxies `/api/` to the
   `backend` service on the compose network.
-- Root `docker-compose.yml` wires `backend` + `frontend`. The vault is
-  **bind-mounted** from the host
+- Root `docker-compose.yml` wires `backend` + `frontend` from the
+  published images only (`linux/amd64` and `linux/arm64`); building from
+  source adds `docker-compose.build.yml` (`make up`). The same file is
+  each release's `compose.yaml` download, with the default version pinned
+  to that release. The vault is **bind-mounted** from the host
   (`${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault`), not stored in an
   anonymous Docker volume, so notes persist on the host filesystem
   independent of the containers — consistent with "no vendor lock-in."
+- Both published ports bind to `CEREBRUM_BIND_ADDRESS`, default
+  `127.0.0.1`: a fresh install is reachable only from its own machine.
+  Phone or LAN use is an explicit opt-in (`0.0.0.0` or one interface's
+  address, plus `CEREBRUM_TLS_SAN`), because plain HTTP on every network
+  would expose the login page and the MCP endpoint to any network a
+  laptop joins.
+- `deploy/install.sh` is the no-clone install, attached to every release
+  with a build attestation: it refuses to run as root, checks Docker and
+  the ports, writes `.env` (both secrets, owner-only) and the vault folder
+  on a fresh install, pulls, starts and waits for the health check, then
+  prints the first-account token once. Rerunning it is the update path:
+  it replaces `compose.yaml` with its release's copy and never touches
+  `.env` or the vault. Each install is a separate Compose project named
+  after its folder (default `~/cerebrum-server`), so it never shares
+  containers with another install or a source checkout. CI runs it on
+  x86_64 and arm64 against images built from the commit.
 - `frontend` also serves HTTPS (`CEREBRUM_HTTPS_PORT`, default `7812`),
   self-signed, generated on first start by `frontend/docker-entrypoint.sh`
   and persisted in a `cerebrum_tls_certs` volume. Required for offline
@@ -309,6 +328,7 @@ API calls.
 | `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
 | `CEREBRUM_PORT` | compose | `7811` | host port for the frontend (HTTP) |
 | `CEREBRUM_HTTPS_PORT` | compose | `7812` | host port for the frontend's self-signed HTTPS listener; required for offline mode |
+| `CEREBRUM_BIND_ADDRESS` | compose | `127.0.0.1` | interface both ports listen on; `0.0.0.0` or a LAN address to use Cerebrum from a phone or other devices (set `CEREBRUM_TLS_SAN` too) |
 | `CEREBRUM_TLS_SAN` | compose | *(unset)* | extra Subject Alternative Names for the self-signed cert, comma-separated (e.g. `IP:192.168.1.14`) — set to your LAN IP/hostname to use offline mode from another device |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 | `CEREBRUM_DAILY_NOTE_FOLDER` | backend | `daily` | vault-relative folder the "Today" button creates daily notes in. Served to clients by `GET /api/vault-settings`, so changing it needs only a backend restart. Leading/trailing slashes are trimmed, a blank value means the default, and `.`/`..` segments fail startup. Docker Compose falls back to the former build-time name `VITE_DAILY_NOTE_FOLDER` |

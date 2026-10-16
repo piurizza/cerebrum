@@ -2,11 +2,11 @@ services:
   backend:
     # Prebuilt image published on every release (see
     # .github/workflows/release.yml); `docker compose pull` fetches it.
-    # `build:` stays for running from source -- `make up` and
-    # `docker compose up --build` build locally under this same name.
+    # Building from source lives in docker-compose.build.yml (`make up`),
+    # so this file works on its own -- it is also the release's compose.yaml
+    # download, with the default version pinned to that release.
     # CEREBRUM_VERSION pins a release (e.g. 0.1.0); default is the latest.
     image: ghcr.io/piurizza/cerebrum-backend:${CEREBRUM_VERSION:-latest}
-    build: ./backend
     restart: unless-stopped
     # Run as the host user that owns the vault, not root -- on native Linux
     # Docker every note the backend creates in the bind-mounted vault would
@@ -49,7 +49,6 @@ services:
   frontend:
     # Same as the backend's `image:` above.
     image: ghcr.io/piurizza/cerebrum-frontend:${CEREBRUM_VERSION:-latest}
-    build: ./frontend
     restart: unless-stopped
     environment:
       # Extra Subject Alternative Names for the self-signed HTTPS cert
@@ -57,9 +56,13 @@ services:
       # the operator to set explicitly, matching WATCHFILES_FORCE_POLLING
       # above: not something to auto-detect and guess at.
       CEREBRUM_TLS_SAN: ${CEREBRUM_TLS_SAN:-}
+    # Reachable only from this machine unless CEREBRUM_BIND_ADDRESS opens it
+    # (0.0.0.0 for every network, or one interface's address). Plain HTTP on
+    # every network would expose the login page and the MCP endpoint to
+    # whatever Wi-Fi a laptop joins.
     ports:
-      - "${CEREBRUM_PORT:-7811}:80"
-      - "${CEREBRUM_HTTPS_PORT:-7812}:443"
+      - "${CEREBRUM_BIND_ADDRESS:-127.0.0.1}:${CEREBRUM_PORT:-7811}:80"
+      - "${CEREBRUM_BIND_ADDRESS:-127.0.0.1}:${CEREBRUM_HTTPS_PORT:-7812}:443"
     volumes:
       # Persists the self-signed cert across restarts -- without this it
       # would regenerate (and need re-trusting in the browser) on every

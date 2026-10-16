@@ -90,6 +90,11 @@ jobs:
           ref: ${{ needs.target.outputs.tag }}
           persist-credentials: false
 
+      # arm64 too, so the images run on Apple Silicon Macs and ARM servers
+      # (Raspberry Pi, ARM VPS), not only x86_64. QEMU emulates the other
+      # architecture on the x86_64 runner.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -112,6 +117,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./${{ matrix.component }}
+          platforms: linux/amd64,linux/arm64
           push: true
           pull: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -285,3 +291,56 @@ jobs:
         run: |
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             src-tauri/target/release/bundle/nsis/*-setup.exe
+
+  # The no-clone installer (deploy/install.sh) and the compose file it
+  # downloads, pinned to this release. Runs after the images exist, so the
+  # `latest` download link never points at a compose file whose images are
+  # still being built. Attested like every other release asset.
+  install-assets:
+    needs: [target, images]
+    if: needs.target.outputs.tag != '' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.target.outputs.tag }}
+          persist-credentials: false
+
+      # Releases older than the installer have nothing to publish; a manual
+      # run against one of them must not fail.
+      - id: present
+        run: |
+          if [ -f deploy/install.sh ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Pin the release into the installer and its compose file
+        if: steps.present.outputs.present == 'true'
+        env:
+          TAG: ${{ needs.target.outputs.tag }}
+        run: |
+          version="${TAG#v}"
+          mkdir -p dist
+          sed "s/CEREBRUM_VERSION:-latest/CEREBRUM_VERSION:-${version}/g" docker-compose.yml > dist/compose.yaml
+          # Only the assignment: the installer's sentinel comparison must keep the placeholder.
+          sed "s/^RELEASE_TAG=\"__CEREBRUM_RELEASE_TAG__\"$/RELEASE_TAG=\"${TAG}\"/" deploy/install.sh > dist/install.sh
+          # Fail loudly rather than publish a file that still says "latest".
+          test "$(grep -c "CEREBRUM_VERSION:-${version}}" dist/compose.yaml)" -eq 2
+          grep -q "^RELEASE_TAG=\"${TAG}\"$" dist/install.sh
+          test "$(grep -c "__CEREBRUM_RELEASE_TAG__" dist/install.sh)" -eq 1
+
+      - if: steps.present.outputs.present == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/compose.yaml
+            dist/install.sh
+
+      - name: Attach the installer to the release
+        if: steps.present.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.target.outputs.tag }}
+        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/compose.yaml dist/install.sh

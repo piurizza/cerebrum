@@ -19,9 +19,9 @@ making architectural changes.
 ## Requirements
 
 **To run the prebuilt images** (the usual way; see
-[Run with Docker](#run-with-docker)): Docker with the Compose v2 plugin
-(`docker compose`), on x86_64 -- the published images are x86_64 only for
-now. Nothing is compiled, so building needs no extra memory or disk. Ports
+[Install](#install)): Docker with the Compose v2 plugin
+(`docker compose`), on x86_64 or arm64 (Apple Silicon Macs, Raspberry Pi
+and other ARM machines). Nothing is compiled, so building needs no extra memory or disk. Ports
 7811 (HTTP) and 7812 (HTTPS) must be free, or set other ones in `.env`.
 
 | Resource | Requirement | Measured |
@@ -43,8 +43,8 @@ from 23.0, plus:
 | Time | — | 26 s with an empty build cache |
 
 Measured on Fedora 44, x86_64 (Intel Core i7-10750H, 12 threads), Docker
-Engine 29.9.1, with the 51-note vault above. arm64 (e.g. a Raspberry Pi)
-is untested.
+Engine 29.9.1, with the 51-note vault above. The arm64 images build and
+run on Apple Silicon, and CI installs on arm64; a Raspberry Pi is untested.
 
 **On Linux, prefer Docker Engine over Docker Desktop.** Docker Desktop
 runs containers inside a VM, and on Fedora 44 that VM (Docker Desktop
@@ -86,7 +86,49 @@ dependencies, and (in a git repo) installs pre-commit hooks.
     cd backend && uv run cerebrum        # http://localhost:8000
     cd frontend && npm run dev           # http://localhost:5173 (proxies /api to :8000)
 
-## Run with Docker
+## Install
+
+On macOS or Linux, with Docker running:
+
+    curl -fsSL https://github.com/piurizza/cerebrum/releases/latest/download/install.sh | sh
+
+It installs into `~/cerebrum-server`, generates the secrets, starts
+Cerebrum at http://localhost:7811 and prints a one-time token: open the
+page, choose **Register** and paste it as the **Invite token** to create
+your account. It writes nothing outside that folder and refuses to run as
+root.
+
+To read the script first, download it, check that this repository's
+release workflow built it, then run it:
+
+    curl -fsSLO https://github.com/piurizza/cerebrum/releases/latest/download/install.sh
+    gh attestation verify install.sh --owner piurizza
+    sh install.sh
+
+**To update**, run the same command again. It fetches the new release's
+`compose.yaml`, pulls the images and restarts; your notes and `.env` are
+never touched.
+
+**Options** for a fresh install, set in front of `sh`, e.g.
+`curl -fsSL <url> | CEREBRUM_PORT=7821 CEREBRUM_HTTPS_PORT=7822 sh`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CEREBRUM_INSTALL_DIR` | `~/cerebrum-server` | where to install |
+| `CEREBRUM_PORT` / `CEREBRUM_HTTPS_PORT` | `7811` / `7812` | HTTP and HTTPS ports |
+| `CEREBRUM_BIND_ADDRESS` | `127.0.0.1` | `127.0.0.1` means this machine only; `0.0.0.0` or a LAN address lets your phone and other computers reach it |
+| `CEREBRUM_TLS_SAN` | *(empty)* | extra HTTPS certificate names, e.g. `IP:192.168.1.14`, needed for offline mode on another device |
+
+**From your phone or other computers:** by default Cerebrum answers only
+on the machine it runs on. Pass `CEREBRUM_BIND_ADDRESS=0.0.0.0` and
+`CEREBRUM_TLS_SAN=IP:<this machine's LAN address>` on the first install
+(the HTTPS certificate is made once, at first start), then see
+[Install on a phone](#install-on-a-phone-pwa).
+
+**Windows** has no install script yet: follow
+[Install by hand](#install-by-hand) in a terminal, with Docker Desktop.
+
+## Install by hand
 
 Each release publishes prebuilt images to GitHub's container registry
 (`ghcr.io/piurizza/cerebrum-backend` and `-frontend`), so running
@@ -99,7 +141,9 @@ Cerebrum needs no Node or Python and no build:
     docker compose up -d    # http://localhost:7811
 
 `docker compose pull && docker compose up -d` again updates to the latest
-release. To stay on one release, set `CEREBRUM_VERSION=0.1.0` (for
+release. **Upgrading from 0.2 or earlier:** the ports now listen on this
+machine only. If you open Cerebrum from other devices, add
+`CEREBRUM_BIND_ADDRESS=0.0.0.0` to `.env` and run `docker compose up -d`. To stay on one release, set `CEREBRUM_VERSION=0.1.0` (for
 example) in `.env`. Each image carries a GitHub build attestation, which
 `gh attestation verify oci://ghcr.io/piurizza/cerebrum-backend:latest
 --owner piurizza` checks.
@@ -135,8 +179,9 @@ The frontend also serves HTTPS on `https://localhost:7812` (override via
 start. Offline mode (see [SPEC.md](SPEC.md#7-tech-stack)) needs this --
 a service worker only registers in a secure context, which plain HTTP
 only satisfies for `localhost`, not a LAN IP. To use offline mode from a
-phone or another device on your network: set `CEREBRUM_TLS_SAN` in your
-`.env` to your LAN IP (e.g. `IP:192.168.1.14`) before first start, then
+phone or another device on your network: set `CEREBRUM_BIND_ADDRESS=0.0.0.0`
+and set `CEREBRUM_TLS_SAN` in your `.env` to your LAN IP
+(e.g. `IP:192.168.1.14`) before first start, then
 visit the `https://` URL on that device once and accept the one-time
 "not trusted" browser warning -- expected for a self-signed cert,
 click through it ("Advanced" / "Proceed anyway", wording varies by
@@ -192,7 +237,9 @@ origin for a self-hosted deployment:
       docker compose cp <name>.ts.net.key frontend:/etc/nginx/certs/cerebrum.key
       docker compose restart frontend
 
-  Then open `https://<name>.ts.net:7812` on the phone (any tailnet
+  Set `CEREBRUM_BIND_ADDRESS=0.0.0.0` in `.env` (and `docker compose up -d`)
+  so other devices can reach the ports at all, then open
+  `https://<name>.ts.net:7812` on the phone (any tailnet
   device, from anywhere). Tailscale certs last 90 days — re-run
   `tailscale cert` and re-copy to renew (a monthly cron is enough; the
   `--operator` step above means the cron doesn't need root either).
@@ -266,7 +313,7 @@ as a bearer token. Tokens can be revoked from the same page, and a
 deactivated account's tokens stop working immediately.
 
 **If you expose this beyond your own machine, use HTTPS** -- the bundled
-`https://` port (see [Run with Docker](#run-with-docker)) or a
+`https://` port (see [Install by hand](#install-by-hand)) or a
 Tailscale / reverse-proxy setup (see [Install on a phone](#install-on-a-phone-pwa)),
 so the token never travels in plain text.
 

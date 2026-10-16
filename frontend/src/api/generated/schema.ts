@@ -286,6 +286,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Vault Settings
+         * @description Server-side vault conventions the web app needs, already normalized
+         *     by `Settings` (no leading/trailing slashes, never empty).
+         */
+        get: operations["get_vault_settings_api_vault_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/register": {
         parameters: {
             query?: never;
@@ -568,6 +589,13 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VaultSettings */
+        VaultSettings: {
+            /** Daily Note Folder */
+            daily_note_folder: string;
+            /** Templates Folder */
+            templates_folder: string;
         };
     };
     responses: never;
@@ -1068,6 +1096,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vault_settings_api_vault_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VaultSettings"];
                 };
             };
         };

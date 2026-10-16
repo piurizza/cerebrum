@@ -6,6 +6,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { OfflineProvider } from "./context/OfflineContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import "./index.css";
+import { loadVaultSettings } from "./lib/vaultSettings";
 import { syncVault } from "./offline/sync";
 
 // The service worker is now registered by `ReloadPrompt` (mounted in
@@ -46,6 +47,10 @@ import { syncVault } from "./offline/sync";
 // a fast, harmless failed fetch, not a real cost worth an early-exit
 // optimization that can silently disable the feature.
 void syncVault();
+// The server's vault folder settings (lib/vaultSettings.ts) load the same
+// way, for the same reasons: fire-and-forget, never throws, re-fired by
+// `AuthContext.login()`, and harmlessly 401s on a fresh /login load.
+void loadVaultSettings();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

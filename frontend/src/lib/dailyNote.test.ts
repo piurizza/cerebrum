@@ -3,8 +3,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDailyNoteDefaultBody, getTodayNotePath } from "./dailyNote";
 
+// The folder comes from the server via `vaultSettings.ts` (its own tests
+// cover loading, storage and normalization); here it's just a value.
+const folders = vi.hoisted(() => ({
+  dailyNoteFolder: "daily",
+  templatesFolder: "templates",
+}));
+vi.mock("./vaultSettings", () => ({ vaultFolders: () => folders }));
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  folders.dailyNoteFolder = "daily";
 });
 
 describe("getTodayNotePath", () => {
@@ -17,29 +26,9 @@ describe("getTodayNotePath", () => {
     expect(getTodayNotePath(new Date(2026, 0, 5))).toBe("daily/2026-01-05.md");
   });
 
-  it("falls back to the default folder when VITE_DAILY_NOTE_FOLDER is unset", () => {
-    vi.stubEnv("VITE_DAILY_NOTE_FOLDER", undefined);
-    expect(getTodayNotePath(new Date(2026, 7, 11))).toBe("daily/2026-08-11.md");
-  });
-
-  it("falls back to the default folder when VITE_DAILY_NOTE_FOLDER is an empty string", () => {
-    // The `||`-not-`??` fix (KTD1): an explicitly-empty env value (a
-    // plausible .env typo) must not produce a leading-slash path.
-    vi.stubEnv("VITE_DAILY_NOTE_FOLDER", "");
-    expect(getTodayNotePath(new Date(2026, 7, 11))).toBe("daily/2026-08-11.md");
-  });
-
-  it("uses a custom VITE_DAILY_NOTE_FOLDER value, trimming a trailing slash", () => {
-    vi.stubEnv("VITE_DAILY_NOTE_FOLDER", "journal/");
-    expect(getTodayNotePath(new Date(2026, 7, 11))).toBe("journal/2026-08-11.md");
-  });
-
-  it("trims a leading slash too, not just a trailing one", () => {
-    // Regression guard: a leading slash alone (e.g. VITE_DAILY_NOTE_FOLDER=
-    // "/journal") used to survive untrimmed, producing an absolute-looking
-    // path the backend's vault-root join would reject outright.
-    vi.stubEnv("VITE_DAILY_NOTE_FOLDER", "/journal/");
-    expect(getTodayNotePath(new Date(2026, 7, 11))).toBe("journal/2026-08-11.md");
+  it("uses the folder the server is configured with", () => {
+    folders.dailyNoteFolder = "journal/daily";
+    expect(getTodayNotePath(new Date(2026, 7, 11))).toBe("journal/daily/2026-08-11.md");
   });
 
   it("computes the local calendar date, not the UTC one, at a local/UTC day boundary", () => {

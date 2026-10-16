@@ -11,6 +11,7 @@ from cerebrum.api import (
     search,
     tasks,
     tokens,
+    vault_settings,
 )
 from cerebrum.api.deps import get_current_identity
 
@@ -49,3 +50,5 @@ api_router.include_router(attachments.router)
 api_router.include_router(tasks.router)
 # `/account` shares no path prefix with any router above either.
 api_router.include_router(account.router)
+# `/vault-settings` shares no path prefix with any router above either.
+api_router.include_router(vault_settings.router)

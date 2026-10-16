@@ -4,8 +4,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeNoteMeta } from "../test/factories";
 import { hasRelevantTemplate, listTemplateOptions, templatesFolder } from "./templates";
 
+// The folder comes from the server via `vaultSettings.ts` (its own tests
+// cover loading, storage and normalization); here it's just a value.
+const folders = vi.hoisted(() => ({
+  dailyNoteFolder: "daily",
+  templatesFolder: "templates",
+}));
+vi.mock("./vaultSettings", () => ({ vaultFolders: () => folders }));
+
 afterEach(() => {
-  vi.unstubAllEnvs();
+  folders.templatesFolder = "templates";
 });
 
 describe("listTemplateOptions", () => {
@@ -75,8 +83,8 @@ describe("listTemplateOptions", () => {
     expect(names).toEqual(["Alpha", "Zeta", "Beta", "Gamma", "Delta"]);
   });
 
-  it("falls back to the default folder and trims slashes from a custom VITE_TEMPLATES_FOLDER", () => {
-    vi.stubEnv("VITE_TEMPLATES_FOLDER", "/journal-templates/");
+  it("lists templates from the folder the server is configured with", () => {
+    folders.templatesFolder = "journal-templates";
     const notes = [makeNoteMeta("journal-templates/Meeting.md")];
     expect(listTemplateOptions(notes, "")).toEqual([
       {
@@ -113,7 +121,8 @@ describe("hasRelevantTemplate", () => {
 });
 
 describe("templatesFolder", () => {
-  it("falls back to 'templates' when unset", () => {
-    expect(templatesFolder()).toBe("templates");
+  it("returns the folder the server is configured with", () => {
+    folders.templatesFolder = "meta/templates";
+    expect(templatesFolder()).toBe("meta/templates");
   });
 });

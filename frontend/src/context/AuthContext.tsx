@@ -21,6 +21,7 @@ import {
   markSessionEstablished,
   wasSessionEstablished,
 } from "../lib/sessionEstablished";
+import { loadVaultSettings } from "../lib/vaultSettings";
 import { syncVault } from "../offline/sync";
 
 // This context deliberately does NOT track `isAdmin`, and only tracks
@@ -198,8 +199,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // refresh-token cookie exists, so its internal 401-retry (through the
     // same `navigator.locks`-guarded refreshAccessToken() this component
     // uses) succeeds. Firing it again here closes the one path that
-    // never gets a working attempt.
+    // never gets a working attempt. The server's vault folder settings
+    // have the same gap and the same fix.
     void syncVault();
+    void loadVaultSettings();
   }, []);
 
   const logout = useCallback(() => {

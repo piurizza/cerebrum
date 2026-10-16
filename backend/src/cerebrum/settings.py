@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # JWTs and setup tokens are only as strong as the secret they're signed/
@@ -12,6 +12,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # left to deployers, since a short or missing secret fails silently at
 # request time (any string "works") instead of loudly at startup.
 _MIN_AUTH_SECRET_BYTES = 32
+
+# Defaults for the vault folder settings below, also what a blank value
+# falls back to.
+_DEFAULT_DAILY_NOTE_FOLDER = "daily"
+_DEFAULT_TEMPLATES_FOLDER = "templates"
 
 
 class Settings(BaseSettings):
@@ -43,7 +48,38 @@ class Settings(BaseSettings):
 
     max_attachment_size_bytes: int = 10_000_000
 
+    # Vault-relative folders the web app uses: "Today" creates daily notes
+    # in the first, the "+ New note" template picker lists notes under the
+    # second. Served to clients by `GET /api/vault-settings` -- read at
+    # runtime, not baked into the frontend build, so prebuilt images and
+    # the desktop app (which bundles its own copy of the frontend) follow
+    # whatever the server is configured with.
+    cerebrum_daily_note_folder: str = _DEFAULT_DAILY_NOTE_FOLDER
+    cerebrum_templates_folder: str = _DEFAULT_TEMPLATES_FOLDER
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    @field_validator("cerebrum_daily_note_folder", "cerebrum_templates_folder")
+    @classmethod
+    def _normalize_vault_folder(cls, value: str, info: ValidationInfo) -> str:
+        """Trim whitespace and leading/trailing slashes, and fall back to
+        the default when nothing is left -- a leading slash would otherwise
+        make every path built from the folder absolute. `.` and `..`
+        segments fail startup loudly instead of producing paths that every
+        note write then rejects."""
+        folder = value.strip().strip("/")
+        if not folder:
+            return (
+                _DEFAULT_DAILY_NOTE_FOLDER
+                if info.field_name == "cerebrum_daily_note_folder"
+                else _DEFAULT_TEMPLATES_FOLDER
+            )
+        if any(segment in ("", ".", "..") for segment in folder.split("/")):
+            raise ValueError(
+                f"{info.field_name} must be a plain vault-relative folder like "
+                f"'daily' or 'journal/daily', got {value!r}"
+            )
+        return folder
 
     @model_validator(mode="after")
     def _require_strong_auth_secrets(self) -> Settings:

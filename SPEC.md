@@ -147,6 +147,23 @@ All endpoints under `/api`.
 | GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |
 | GET | `/api/tasks` | Every open (unchecked) markdown checkbox across the vault, joined with its note's title, ordered by note path then line; read-only |
 
+The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated with a personal API token:
+
+| Tool | Purpose |
+|---|---|
+| `list-notes` | Every note's metadata from the index |
+| `get-note` | One note's raw markdown + parsed metadata |
+| `search-notes` | Full-text search, same semantics as `/api/search` |
+| `get-graph` | The whole link graph, including unresolved links |
+| `get-backlinks` | Notes that link to a note |
+| `create-note` | Create a note; fails if one exists at the path |
+| `update-note` | Replace a whole existing note |
+| `append-to-note` | Add markdown at the end of an existing note, keeping the rest |
+| `edit-note` | Replace one passage (`old_text` must match exactly once, frontmatter included) |
+| `delete-note` | Delete a note and its attachments folder; links to it stay, as unresolved links |
+
+`append-to-note` and `edit-note` read and write under the same per-file lock (`modify_note` in `notes/service.py`), so a concurrent write to the same note can't be lost between the read and the write; a client calling `get-note` and then `update-note` has no such guarantee.
+
 `{path:path}` uses FastAPI's path converter since relative vault paths
 contain `/`. Clients must URL-encode path segments appropriately — this is
 an easy source of bugs and worth double-checking when writing frontend

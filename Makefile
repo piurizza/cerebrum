@@ -96,6 +96,10 @@ clean:
 	rm -rf desktop/dist desktop/node_modules/.vite desktop/src-tauri/target
 
 up:
+	@# The backend runs as CEREBRUM_UID, not root (docker-compose.yml). Native
+	@# Docker creates a missing bind-mount source as root, which that user then
+	@# can't write to -- so create the vault first, as you.
+	@vault=$$(sed -n 's/^CEREBRUM_VAULT_HOST_PATH=//p' .env 2>/dev/null | tail -n 1); mkdir -p "$${vault:-./vault}"
 	docker compose up --build
 
 down:

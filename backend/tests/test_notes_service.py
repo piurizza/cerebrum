@@ -149,6 +149,30 @@ def test_move_note_retargets_other_notes_incoming_links(vault: Path) -> None:
     assert "for details" in linker.content
 
 
+def test_saves_moves_and_retargets_keep_unmanaged_frontmatter(vault: Path) -> None:
+    obsidian_frontmatter = "---\naliases: [Bee]\ncssclasses: [wide]\n---\n"
+    write_note(vault, "linker.md", f"{obsidian_frontmatter}See [B](b.md).")
+    write_note(vault, "b.md", f"{obsidian_frontmatter}See [L](linker.md).")
+
+    move_note(vault, "b.md", "folder/b.md")
+
+    for path in ("linker.md", "folder/b.md"):
+        content = read_note(vault, path).content
+        assert "aliases:\n- Bee" in content
+        assert "cssclasses:\n- wide" in content
+        assert "title:" not in content
+    assert "[B](folder/b.md)" in read_note(vault, "linker.md").content
+
+
+def test_move_note_with_new_title_writes_the_title(vault: Path) -> None:
+    write_note(vault, "b.md", "---\naliases: [Bee]\n---\nBody.")
+
+    note, _ = move_note(vault, "b.md", "b.md", title="Renamed")
+
+    assert "title: Renamed" in note.content
+    assert "aliases:\n- Bee" in note.content
+
+
 def test_move_note_preserves_link_fragment(vault: Path) -> None:
     write_note(vault, "linker.md", "See [B](b.md#section).")
     write_note(vault, "b.md", "content")
@@ -529,3 +553,81 @@ def test_delete_note_without_attachment_dir_does_not_raise(vault: Path) -> None:
     delete_note(vault, "a.md")
 
     assert not attachment_dir_for_note(vault, "a.md").exists()
+
+
+def test_rename_rewrites_wikilinks_keeping_their_parts(vault: Path) -> None:
+    write_note(vault, "linker.md", "[[Old]] [[Old|x]] ![[Old#H]] [[old.md]] `[[Old]]`")
+    write_note(vault, "Old.md", "content")
+
+    _, retargeted = move_note(vault, "Old.md", "New.md")
+
+    assert retargeted == ["linker.md"]
+    assert (
+        "[[New]] [[New|x]] ![[New#H]] [[New.md]] `[[Old]]`"
+        in read_note(vault, "linker.md").content
+    )
+
+
+def test_move_that_keeps_a_wikilink_resolving_leaves_the_file_alone(
+    vault: Path,
+) -> None:
+    write_note(vault, "linker.md", "See [[Note]].")
+    write_note(vault, "a/Note.md", "content")
+    before = (vault / "linker.md").read_bytes()
+
+    _, retargeted = move_note(vault, "a/Note.md", "b/Note.md")
+
+    assert not retargeted
+    assert (vault / "linker.md").read_bytes() == before
+
+
+def test_rename_into_a_shared_name_uses_the_shortest_unique_path(
+    vault: Path,
+) -> None:
+    write_note(vault, "linker.md", "See [[Old]].")
+    write_note(vault, "a/Old.md", "content")
+    write_note(vault, "b/Note.md", "other")
+
+    move_note(vault, "a/Old.md", "a/Note.md")
+
+    assert "See [[a/Note]]." in read_note(vault, "linker.md").content
+
+
+def test_wikilink_to_a_different_same_named_note_is_untouched(vault: Path) -> None:
+    write_note(vault, "x/linker.md", "See [[Note]].")
+    write_note(vault, "x/Note.md", "mine")
+    write_note(vault, "a/Note.md", "moving")
+
+    _, retargeted = move_note(vault, "a/Note.md", "b/Note.md")
+
+    assert not retargeted
+    assert "See [[Note]]." in read_note(vault, "x/linker.md").content
+
+
+def test_move_does_not_capture_links_to_another_same_named_note(
+    vault: Path,
+) -> None:
+    # `[[Note]]` resolves to `mid/Note.md` (the shortest path). Moving
+    # the deeper note to the vault root would make it win instead, so the
+    # link is pinned to the note it meant.
+    write_note(vault, "linker.md", "See [[Note]].")
+    write_note(vault, "mid/Note.md", "meant")
+    write_note(vault, "deep/er/Note.md", "moving")
+
+    _, retargeted = move_note(vault, "deep/er/Note.md", "Note.md")
+
+    assert retargeted == ["linker.md"]
+    assert "See [[mid/Note]]." in read_note(vault, "linker.md").content
+
+
+def test_move_rewrites_the_moved_notes_own_wikilinks_when_needed(
+    vault: Path,
+) -> None:
+    write_note(vault, "a/X.md", "Uses [[Y]] and [[Z]].")
+    write_note(vault, "a/Y.md", "same folder as X")
+    write_note(vault, "b/Y.md", "where X is going")
+    write_note(vault, "Z.md", "unique")
+
+    note, _ = move_note(vault, "a/X.md", "b/X.md")
+
+    assert "Uses [[a/Y]] and [[Z]]." in note.content

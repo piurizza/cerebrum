@@ -4,6 +4,7 @@ import {
   resetVaultFoldersForTests,
   VAULT_SETTINGS_KEY,
   vaultFolders,
+  vaultLinkFormat,
 } from "./vaultSettings";
 
 const { mockGetVaultSettings } = vi.hoisted(() => ({ mockGetVaultSettings: vi.fn() }));
@@ -94,5 +95,33 @@ describe("loadVaultSettings", () => {
 
     expect(vaultFolders().dailyNoteFolder).toBe("journal");
     expect(window.localStorage.getItem(VAULT_SETTINGS_KEY)).toContain("journal");
+  });
+});
+
+describe("vaultLinkFormat", () => {
+  it("is markdown until the server says otherwise", () => {
+    expect(vaultLinkFormat()).toBe("markdown");
+  });
+
+  it("follows the server and remembers it", async () => {
+    mockGetVaultSettings.mockResolvedValue({
+      daily_note_folder: "daily",
+      templates_folder: "templates",
+      link_format: "wikilink",
+    });
+
+    await loadVaultSettings();
+
+    expect(vaultLinkFormat()).toBe("wikilink");
+    resetVaultFoldersForTests();
+    expect(vaultLinkFormat()).toBe("wikilink");
+  });
+
+  it("treats a missing or unknown stored value as markdown", () => {
+    window.localStorage.setItem(
+      VAULT_SETTINGS_KEY,
+      JSON.stringify({ link_format: "Wikilink" }),
+    );
+    expect(vaultLinkFormat()).toBe("markdown");
   });
 });

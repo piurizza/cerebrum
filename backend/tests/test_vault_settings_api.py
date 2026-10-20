@@ -16,6 +16,12 @@ def _folders(**overrides: str) -> tuple[str, str]:
     return settings.cerebrum_daily_note_folder, settings.cerebrum_templates_folder
 
 
+def _link_format(value: str) -> str:
+    overrides = {"cerebrum_link_format": value}
+    settings = Settings(**_VALID_AUTH, **overrides)  # type: ignore[arg-type]
+    return settings.cerebrum_link_format
+
+
 def test_vault_settings_returns_defaults(authenticated_client: TestClient) -> None:
     response = authenticated_client.get("/api/vault-settings")
 
@@ -23,6 +29,7 @@ def test_vault_settings_returns_defaults(authenticated_client: TestClient) -> No
     assert response.json() == {
         "daily_note_folder": "daily",
         "templates_folder": "templates",
+        "link_format": "markdown",
     }
 
 
@@ -33,6 +40,7 @@ def test_vault_settings_follows_server_environment(
     # is enough for a new environment to take effect.
     monkeypatch.setenv("CEREBRUM_DAILY_NOTE_FOLDER", "/journal/daily/")
     monkeypatch.setenv("CEREBRUM_TEMPLATES_FOLDER", "meta/templates")
+    monkeypatch.setenv("CEREBRUM_LINK_FORMAT", "wikilink")
     get_settings.cache_clear()
 
     response = authenticated_client.get("/api/vault-settings")
@@ -40,6 +48,7 @@ def test_vault_settings_follows_server_environment(
     assert response.json() == {
         "daily_note_folder": "journal/daily",
         "templates_folder": "meta/templates",
+        "link_format": "wikilink",
     }
 
 
@@ -58,3 +67,18 @@ def test_blank_folder_falls_back_to_default(blank: str) -> None:
 def test_folder_with_dot_or_empty_segments_fails_startup(bad: str) -> None:
     with pytest.raises(ValidationError, match="plain vault-relative folder"):
         _folders(cerebrum_daily_note_folder=bad)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("markdown", "markdown"), (" WikiLink ", "wikilink"), ("", "markdown")],
+)
+def test_link_format_ignores_case_and_blank_means_markdown(
+    value: str, expected: str
+) -> None:
+    assert _link_format(value) == expected
+
+
+def test_unknown_link_format_fails_startup() -> None:
+    with pytest.raises(ValidationError, match="'markdown' or 'wikilink'"):
+        _link_format("obsidian")

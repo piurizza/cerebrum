@@ -1,7 +1,8 @@
 import { type Completion, CompletionContext } from "@codemirror/autocomplete";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { resetVaultFoldersForTests, VAULT_SETTINGS_KEY } from "../../lib/vaultSettings";
 import { makeNoteMeta } from "../../test/factories";
 import type { NoteMeta } from "../../types/note";
 import { noteLinkCompletionSource } from "./noteLinkCompletion";
@@ -129,5 +130,81 @@ describe("noteLinkCompletionSource", () => {
     } finally {
       view.destroy();
     }
+  });
+
+  describe("in wikilink mode", () => {
+    function useLinkFormat(linkFormat: string) {
+      window.localStorage.setItem(
+        VAULT_SETTINGS_KEY,
+        JSON.stringify({ link_format: linkFormat }),
+      );
+      resetVaultFoldersForTests();
+    }
+
+    afterEach(() => {
+      window.localStorage.clear();
+      resetVaultFoldersForTests();
+    });
+
+    function pick(notes: NoteMeta[], label: string, doc = "[[") {
+      const source = noteLinkCompletionSource(notes, "notes/current.md");
+      const state = EditorState.create({ doc });
+      const result = source(new CompletionContext(state, 2, false));
+      const view = new EditorView({ state, parent: document.createElement("div") });
+      try {
+        const option = result?.options.find((o) => o.label === label);
+        applyCompletion(option, view, result?.from ?? 0, 2);
+        return view.state.doc.toString();
+      } finally {
+        view.destroy();
+      }
+    }
+
+    it("inserts [[name]] when the title is the file name", () => {
+      useLinkFormat("wikilink");
+      expect(pick([makeNoteMeta("notes/My Note.md", "My Note")], "My Note")).toBe(
+        "[[My Note]]",
+      );
+    });
+
+    it("adds the title as an alias when it differs from the file name", () => {
+      useLinkFormat("wikilink");
+      expect(pick([makeNoteMeta("notes/my-note.md", "My Note")], "My Note")).toBe(
+        "[[my-note|My Note]]",
+      );
+    });
+
+    it("adds the folder when another note shares the file name", () => {
+      useLinkFormat("wikilink");
+      const notes = [
+        makeNoteMeta("a/Note.md", "Note A"),
+        makeNoteMeta("b/Note.md", "Note B"),
+      ];
+      expect(pick(notes, "Note A")).toBe("[[a/Note|Note A]]");
+    });
+
+    it("consumes a trailing ]]", () => {
+      useLinkFormat("wikilink");
+      expect(pick([makeNoteMeta("B.md", "B")], "B", "[[]]")).toBe("[[B]]");
+    });
+
+    it("leaves out a title that can't be an alias", () => {
+      useLinkFormat("wikilink");
+      expect(pick([makeNoteMeta("draft.md", "Plan [v2]")], "Plan [v2]")).toBe(
+        "[[draft]]",
+      );
+    });
+
+    it("falls back to a markdown link for a file name a wikilink can't hold", () => {
+      useLinkFormat("wikilink");
+      expect(pick([makeNoteMeta("notes/a|b.md", "A or B")], "A or B")).toBe(
+        "[A or B](a|b.md)",
+      );
+    });
+
+    it("treats an unknown stored format as markdown", () => {
+      useLinkFormat("obsidian");
+      expect(pick([makeNoteMeta("notes/b.md", "B")], "B")).toBe("[B](b.md)");
+    });
   });
 });

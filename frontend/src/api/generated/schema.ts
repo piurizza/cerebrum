@@ -222,6 +222,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/attachments/find": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find Attachment
+         * @description Locate the image an Obsidian-style embed (`![[cat.png]]`) in the
+         *     note at `from` refers to, anywhere in the vault outside hidden
+         *     folders. Returns its vault-relative path, servable by the route
+         *     below.
+         */
+        get: operations["find_attachment_api_attachments_find_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/attachments/{path}": {
         parameters: {
             query?: never;
@@ -296,7 +319,8 @@ export interface paths {
         /**
          * Get Vault Settings
          * @description Server-side vault conventions the web app needs, already normalized
-         *     by `Settings` (no leading/trailing slashes, never empty).
+         *     by `Settings` (no leading/trailing slashes, never empty), and the link
+         *     form the editor's `[[` picker inserts.
          */
         get: operations["get_vault_settings_api_vault_settings_get"];
         put?: never;
@@ -413,6 +437,11 @@ export interface components {
             last_used_at: string | null;
             /** Revoked */
             revoked: boolean;
+        };
+        /** AttachmentLocation */
+        AttachmentLocation: {
+            /** Path */
+            path: string;
         };
         /**
          * AttachmentUploadResponse
@@ -596,6 +625,11 @@ export interface components {
             daily_note_folder: string;
             /** Templates Folder */
             templates_folder: string;
+            /**
+             * Link Format
+             * @enum {string}
+             */
+            link_format: "markdown" | "wikilink";
         };
     };
     responses: never;
@@ -1003,6 +1037,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttachmentUploadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    find_attachment_api_attachments_find_get: {
+        parameters: {
+            query: {
+                name: string;
+                from?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentLocation"];
                 };
             };
             /** @description Validation Error */

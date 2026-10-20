@@ -60,6 +60,20 @@ _WHOLE_DOCUMENT_WARNING = (
 )
 
 
+_LINK_GUIDANCE = {
+    "markdown": (
+        "Link to other notes with markdown links to their path relative to "
+        "this note, e.g. [Shown text](other-note.md). [[wikilinks]] also work."
+    ),
+    "wikilink": (
+        "Link to other notes with wikilinks by file name, not title: "
+        "[[file-name]] or [[file-name|Shown text]]; add a folder only when "
+        "two notes share a name ([[folder/file-name]]). Markdown links to a "
+        ".md path also work."
+    ),
+}
+
+
 def _invalid_path_error(path: str) -> ToolError:
     return ToolError(f"'{path}' is not a valid note path")
 
@@ -68,6 +82,8 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
     """Register the note tools against `mcp`, closing over `app` (KTD8) to
     reach the shared index connection and vault path the same way REST
     routes do."""
+    # Read once at registration: changing the setting needs a restart.
+    link_guidance = _LINK_GUIDANCE[get_settings().cerebrum_link_format]
 
     @mcp.tool(
         name="list-notes",
@@ -122,7 +138,7 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
             "(e.g. 'projects/cerebrum.md'). Fails with a clear error if a "
             "note already exists there (including one that's currently "
             "malformed) -- use update-note to change an existing one "
-            f"instead. {_WHOLE_DOCUMENT_WARNING}"
+            f"instead. {_WHOLE_DOCUMENT_WARNING} {link_guidance}"
         ),
         annotations=_CREATE_ANNOTATIONS,
     )
@@ -138,7 +154,7 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
             "Call this to replace an existing note's content by its "
             "vault-relative path. Fails with a clear error if no note "
             "exists there -- use create-note for a new one instead. "
-            f"{_WHOLE_DOCUMENT_WARNING}"
+            f"{_WHOLE_DOCUMENT_WARNING} {link_guidance}"
         ),
         annotations=_UPDATE_ANNOTATIONS,
     )
@@ -156,7 +172,7 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
             "markdown, added after a blank line. The rest of the note, "
             "frontmatter included, is kept as it is, and a concurrent edit "
             "to the same note cannot be lost. Fails if no note exists at "
-            "`path` or `content` is empty."
+            f"`path` or `content` is empty. {link_guidance}"
         ),
         annotations=_APPEND_ANNOTATIONS,
     )
@@ -179,7 +195,7 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
             "verbatim and include enough surrounding text to make it unique. "
             "To insert, use a nearby line as `old_text` and repeat it in "
             "`new_text`. Fails without changing anything if `old_text` is "
-            "empty, missing, or appears more than once."
+            f"empty, missing, or appears more than once. {link_guidance}"
         ),
         annotations=_EDIT_ANNOTATIONS,
     )

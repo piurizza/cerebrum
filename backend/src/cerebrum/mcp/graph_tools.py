@@ -22,7 +22,8 @@ def register_graph_tools(mcp: FastMCP, app: FastAPI) -> None:
         name="get-graph",
         description=(
             "Call this to see the whole-vault link graph: every note as a "
-            "node, every markdown link between notes as an edge. Includes "
+            "node, every link between notes (markdown link or [[wikilink]]) "
+            "as an edge. Includes "
             "'ghost' nodes for links that target a note that doesn't exist "
             "yet. Returns the whole vault unscoped, not centered on any one "
             f"note. {INDEX_LAG_WARNING}"

@@ -6,6 +6,7 @@ import type {
   LoginResponse,
 } from "../types/auth";
 import type {
+  AttachmentLocation,
   AttachmentUploadResult,
   GraphResponse,
   Note,
@@ -472,6 +473,18 @@ export function uploadAttachment(
       body: file,
     },
   );
+}
+
+// Finds the image an Obsidian-style embed (`![[cat.png]]`) in `fromNote`
+// refers to, anywhere in the vault: the server picks among same-named
+// images the way wikilinks pick among notes. Rejects with a 404 `ApiError`
+// when nothing matches.
+export function findAttachment(
+  name: string,
+  fromNote: string,
+): Promise<AttachmentLocation> {
+  const query = `name=${encodeURIComponent(name)}&from=${encodeURIComponent(fromNote)}`;
+  return request<AttachmentLocation>(`/attachments/find?${query}`);
 }
 
 // Fetches an attachment's raw image bytes through `GET

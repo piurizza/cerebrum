@@ -875,6 +875,15 @@ a {
   padding: 0.35rem 0.6rem;
 }
 
+/* A [[wikilink]] or ![[embed]] that matches nothing in the vault: shown,
+   but visibly not a link. */
+.markdown-preview__unresolved {
+  color: var(--text-muted);
+  text-decoration: underline dashed;
+  text-underline-offset: 0.2em;
+  cursor: help;
+}
+
 .note-editor-actions {
   display: flex;
   align-items: center;

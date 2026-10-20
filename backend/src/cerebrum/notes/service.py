@@ -14,7 +14,14 @@ from cerebrum.attachments.service import (
 )
 from cerebrum.notes.file_lock import file_lock
 from cerebrum.notes.models import Note
-from cerebrum.notes.parser import parse_note, rebase_links, render_note, retarget_links
+from cerebrum.notes.parser import (
+    parse_note,
+    rebase_links,
+    render_note,
+    retarget_links,
+    retarget_wikilinks,
+)
+from cerebrum.notes.wikilinks import NoteMove
 
 logger = logging.getLogger(__name__)
 
@@ -155,15 +162,19 @@ def _retarget_other_notes(
     vault_root: Path, old_target: str, new_target: str
 ) -> list[str]:
     """Repoint every OTHER note's links that targeted `old_target` so they
-    resolve to `new_target` instead. Returns the vault-relative paths of
-    the notes that were actually rewritten."""
+    resolve to `new_target` instead, and rewrite any of their wikilinks
+    the move would otherwise send to a different note (see
+    `retarget_wikilinks`). Returns the vault-relative paths of the notes
+    that were actually rewritten."""
     retargeted: list[str] = []
+    note_paths = list(iter_note_paths(vault_root))
+    move = NoteMove.from_paths_after(old_target, new_target, note_paths)
     # Resolved once -- `vault_root` is invariant across the loop below, so
     # resolving it fresh on every iteration (as passing the raw `vault_root`
     # into `resolve_note_path` per-note would do) is redundant work
     # repeated once per note in the vault.
     vault_root_resolved = vault_root.resolve()
-    for other_path in iter_note_paths(vault_root):
+    for other_path in note_paths:
         if other_path == new_target:
             continue
         other_file = vault_root / other_path
@@ -190,6 +201,7 @@ def _retarget_other_notes(
                 new_body = retarget_links(
                     other_parsed.body, other_path, old_target, new_target
                 )
+                new_body = retarget_wikilinks(new_body, other_path, other_path, move)
                 if new_body == other_parsed.body:
                     continue
                 other_parsed.body = new_body
@@ -234,6 +246,20 @@ def _rebase_attachment_references(body: str, old_path: str, new_path: str) -> st
         return body
     pattern = re.compile(rf"(?<![\w-]){re.escape(old_stem)}\.attachments/")
     return pattern.sub(f"{new_stem}.attachments/", body)
+
+
+def _rebase_own_links(vault_root: Path, body: str, old_path: str, new_path: str) -> str:
+    """A moved note's own links, rewritten so they still reach the notes
+    they reached before the move: relative markdown links always (they're
+    relative to the note's folder), wikilinks only where the new folder
+    changes which same-named note they resolve to."""
+    body = rebase_links(body, old_path, new_path)
+    if "[[" not in body:
+        return body
+    move = NoteMove.from_paths_after(
+        old_path, new_path, list(iter_note_paths(vault_root))
+    )
+    return retarget_wikilinks(body, old_path, new_path, move)
 
 
 @contextmanager
@@ -314,12 +340,13 @@ def move_note(
                 if rewritten_body != parsed.body:
                     parsed.body = rewritten_body
                     changed = True
-            rebased_body = rebase_links(parsed.body, path, new_path)
+            rebased_body = _rebase_own_links(vault_root, parsed.body, path, new_path)
             if rebased_body != parsed.body:
                 parsed.body = rebased_body
                 changed = True
         if title is not None and title != parsed.title:
             parsed.title = title
+            parsed.title_in_frontmatter = True
             changed = True
 
         if changed:
@@ -408,7 +435,7 @@ def retarget_note_links(
             if rewritten_body != parsed.body:
                 parsed.body = rewritten_body
                 changed = True
-        rebased_body = rebase_links(parsed.body, old_path, new_path)
+        rebased_body = _rebase_own_links(vault_root, parsed.body, old_path, new_path)
         if rebased_body != parsed.body:
             parsed.body = rebased_body
             changed = True

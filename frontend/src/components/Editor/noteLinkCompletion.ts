@@ -4,6 +4,8 @@ import type {
   CompletionResult,
 } from "@codemirror/autocomplete";
 import { relativeLinkPath } from "../../lib/noteContent";
+import { vaultLinkFormat } from "../../lib/vaultSettings";
+import { NoteLookup } from "../../lib/wikilinks";
 import type { NoteMeta } from "../../types/note";
 
 const TRIGGER_PATTERN = /\[\[[^[\]]*/;
@@ -11,10 +13,15 @@ const MAX_RESULTS = 20;
 
 /**
  * CodeMirror completion source: typing `[[` opens a note picker, refined
- * by whatever's typed after it. Always inserts a standard markdown link
- * `[title](relative/path.md)` -- never wikilink syntax (see SPEC.md
- * Product vision) -- with the path relative to `currentPath`'s own
- * directory, matching the backend's link-resolution rule.
+ * by whatever's typed after it. Inserts the link form the server is set
+ * to (`vaultLinkFormat()`, read when the pick is made):
+ *
+ * - `markdown` (the default): `[title](relative/path.md)`, with the path
+ *   relative to `currentPath`'s own directory, matching the backend's
+ *   link-resolution rule.
+ * - `wikilink`: `[[name]]`, by file name -- or the shortest part of its
+ *   path that no other note shares -- with `|title` added when the title
+ *   isn't the file name, so the preview shows the title.
  */
 export function noteLinkCompletionSource(notes: NoteMeta[], currentPath: string) {
   return (context: CompletionContext): CompletionResult | null => {
@@ -38,8 +45,9 @@ export function noteLinkCompletionSource(notes: NoteMeta[], currentPath: string)
       label: note.title,
       detail: note.path,
       apply(view, _completion, from, to) {
-        const linkPath = relativeLinkPath(currentPath, note.path);
-        const linkText = `[${note.title}](${linkPath})`;
+        const linkText =
+          (vaultLinkFormat() === "wikilink" && wikilinkTo(note, notes)) ||
+          `[${note.title}](${relativeLinkPath(currentPath, note.path)})`;
         const afterCursor = view.state.doc.sliceString(to, to + 2);
         const end = afterCursor === "]]" ? to + 2 : to;
         view.dispatch({
@@ -51,4 +59,24 @@ export function noteLinkCompletionSource(notes: NoteMeta[], currentPath: string)
 
     return { from: match.from, options, filter: false };
   };
+}
+
+// Characters a wikilink can't carry: brackets end it, `|` starts the
+// alias, `#` the heading.
+const WIKILINK_UNSAFE_TARGET = /[[\]|#]/;
+const WIKILINK_UNSAFE_ALIAS = /[[\]|]/;
+
+/** `[[name]]` or `[[name|title]]` for `note`, or null when its path can't
+ * be written as a wikilink (the caller falls back to a markdown link). A
+ * title that can't be an alias is left out. */
+function wikilinkTo(note: NoteMeta, notes: NoteMeta[]): string | null {
+  const target = new NoteLookup(notes.map((n) => n.path)).shortestUnambiguousTarget(
+    note.path,
+  );
+  if (WIKILINK_UNSAFE_TARGET.test(target)) return null;
+  const fileName = note.path.slice(note.path.lastIndexOf("/") + 1).replace(/\.md$/, "");
+  if (note.title === fileName || WIKILINK_UNSAFE_ALIAS.test(note.title)) {
+    return `[[${target}]]`;
+  }
+  return `[[${target}|${note.title}]]`;
 }

@@ -810,3 +810,18 @@ def test_pending_rename_cache_remove_by_path_no_entry_is_a_no_op() -> None:
     cache.remove_by_path("unrelated.md")
 
     assert cache.pop_unambiguous_match("hash-a") == "old.md"
+
+
+def test_apply_watch_batch_rename_rewrites_wikilinks(
+    vault: Path, db: sqlite3.Connection, pending_renames: PendingRenameCache
+) -> None:
+    write_note(vault, "linker.md", "See [[Old|the old note]].")
+    (vault / "Old.md").write_text("shared body", encoding="utf-8")
+    upsert_note(db, vault, "linker.md")
+    upsert_note(db, vault, "Old.md")
+
+    (vault / "Old.md").rename(vault / "New.md")
+    apply_watch_batch(db, vault, {"Old.md", "New.md"}, pending_renames)
+
+    assert "See [[New|the old note]]." in read_note(vault, "linker.md").content
+    assert [note.path for note in get_backlinks(db, "New.md")] == ["linker.md"]

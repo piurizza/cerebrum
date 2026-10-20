@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cerebrum.index.db import write_lock
-from cerebrum.notes.models import ParsedLink
+from cerebrum.notes.models import ParsedLink, ParsedWikilink
 from cerebrum.notes.parser import parse_note
 from cerebrum.notes.service import iter_note_paths, retarget_note_links
+from cerebrum.notes.wikilinks import target_name_key
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,9 @@ logger = logging.getLogger(__name__)
 # check below). SQLite's PRAGMA user_version is a single integer stored
 # in the database file header for exactly this purpose; a database that
 # predates this constant (including a brand-new one, which starts at 0)
-# reads back 0 and gets one forced full rescan.
-_SCHEMA_BACKFILL_VERSION = 1
+# reads back 0 and gets one forced full rescan. Version 2 adds the
+# `wikilinks` table.
+_SCHEMA_BACKFILL_VERSION = 2
 
 
 @dataclass
@@ -117,6 +119,17 @@ def _dedupe_links(links: list[ParsedLink]) -> list[ParsedLink]:
     return deduped
 
 
+def _dedupe_wikilinks(wikilinks: list[ParsedWikilink]) -> list[ParsedWikilink]:
+    seen: set[tuple[str, str | None]] = set()
+    deduped: list[ParsedWikilink] = []
+    for link in wikilinks:
+        key = (link.target, link.link_text)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(link)
+    return deduped
+
+
 def upsert_note(
     conn: sqlite3.Connection,
     vault_root: Path,
@@ -162,11 +175,20 @@ def upsert_note(
         )
 
         conn.execute("DELETE FROM links WHERE source_path = ?", (path,))
+        conn.execute("DELETE FROM wikilinks WHERE source_path = ?", (path,))
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
         conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
         conn.executemany(
             "INSERT INTO links (source_path, target_path, link_text) VALUES (?, ?, ?)",
             [(path, link.target_path, link.link_text) for link in links],
+        )
+        conn.executemany(
+            "INSERT INTO wikilinks (source_path, target, name_key, link_text) "
+            "VALUES (?, ?, ?, ?)",
+            [
+                (path, link.target, target_name_key(link.target), link.link_text)
+                for link in _dedupe_wikilinks(parsed.wikilinks)
+            ],
         )
         conn.execute(
             "INSERT INTO notes_fts (path, title, body) VALUES (?, ?, ?)",
@@ -182,6 +204,7 @@ def remove_note(conn: sqlite3.Connection, path: str) -> None:
     with write_lock, conn:
         conn.execute("DELETE FROM notes WHERE path = ?", (path,))
         conn.execute("DELETE FROM links WHERE source_path = ?", (path,))
+        conn.execute("DELETE FROM wikilinks WHERE source_path = ?", (path,))
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
         conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
 

@@ -109,6 +109,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** The vault's notes, or an empty list outside a `NotesProvider` -- for
+ * components that only enrich their output with the note list (the
+ * preview's wikilinks) and should still render without one. */
+export function useNotesIfLoaded(): NoteMeta[] {
+  return useContext(NotesContext)?.notes ?? [];
+}
+
 export function useNotes(): NotesContextValue {
   const context = useContext(NotesContext);
   if (!context) {

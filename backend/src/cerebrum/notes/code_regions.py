@@ -4,16 +4,15 @@ can skip them: a note can legitimately document `- [ ] task` or
 
 from __future__ import annotations
 
+import bisect
 import re
 from collections.abc import Iterator
 
 _FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
-# A run of backticks, then the shortest content up to an equal-length run
-# that isn't part of a longer one. CommonMark lets a code span continue
-# onto the next line of the same paragraph, but never across a blank line.
-_INLINE_CODE_PATTERN = re.compile(
-    r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", re.DOTALL
-)
+_BACKTICK_RUN = re.compile(r"`+")
+# CommonMark lets a code span continue onto the next line of the same
+# paragraph, but never across a blank line.
+_BLANK_LINE = re.compile(r"\n[ \t]*\n")
 
 
 def iter_lines_with_fence_state(body: str) -> Iterator[tuple[int, str, bool]]:
@@ -75,4 +74,34 @@ def code_ranges(body: str) -> list[tuple[int, int]]:
 
 
 def _inline_code_ranges(body: str, start: int, end: int) -> list[tuple[int, int]]:
-    return [match.span() for match in _INLINE_CODE_PATTERN.finditer(body, start, end)]
+    ranges: list[tuple[int, int]] = []
+    paragraph_start = start
+    for blank in _BLANK_LINE.finditer(body, start, end):
+        ranges.extend(_code_spans(body, paragraph_start, blank.start()))
+        paragraph_start = blank.end()
+    ranges.extend(_code_spans(body, paragraph_start, end))
+    return ranges
+
+
+def _code_spans(body: str, start: int, end: int) -> list[tuple[int, int]]:
+    """Code spans in one paragraph: a run of backticks up to the next run
+    of exactly the same length. Pairs runs by length with a binary search
+    rather than a backtracking regex, so a paragraph full of unmatched
+    runs of different lengths stays linear-ish instead of taking seconds."""
+    runs = [match.span() for match in _BACKTICK_RUN.finditer(body, start, end)]
+    runs_by_length: dict[int, list[int]] = {}
+    for index, (run_start, run_end) in enumerate(runs):
+        runs_by_length.setdefault(run_end - run_start, []).append(index)
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(runs):
+        run_start, run_end = runs[index]
+        same_length = runs_by_length[run_end - run_start]
+        position = bisect.bisect_right(same_length, index)
+        if position == len(same_length):
+            index += 1
+            continue
+        closer = same_length[position]
+        spans.append((run_start, runs[closer][1]))
+        index = closer + 1
+    return spans

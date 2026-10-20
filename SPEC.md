@@ -119,7 +119,14 @@ When a note is renamed or moved (in the app or on disk), every wikilink
 keeps pointing at the note it pointed at before: one that would now miss
 it, or would now be captured by the moved note, is rewritten to the
 shortest target that reaches the right note, keeping its alias, heading
-and `!`. Links that still resolve are left exactly as written.
+and `!`. Links that still resolve are left exactly as written. A folder
+renamed on disk is replayed one note at a time, so a link may gain its
+folder (`[[Spec]]` -> `[[B/Spec]]`) while still reaching the same note.
+Exceptions, where the link is left as written: a note moved into a hidden
+folder (no wikilink can reach it there; links naming it work again once
+it comes back, and a note leaving a hidden folder takes them back), and a
+target whose path holds `#`, `|`, `[` or `]`, which a wikilink can't
+carry.
 
 ## 4. Index/cache architecture
 

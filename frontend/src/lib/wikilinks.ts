@@ -113,7 +113,7 @@ export function nameKey(text: string): string {
   return text.normalize("NFC").toLowerCase();
 }
 
-function isHiddenPath(path: string): boolean {
+export function isHiddenPath(path: string): boolean {
   return path.split("/").some((part) => part.startsWith("."));
 }
 

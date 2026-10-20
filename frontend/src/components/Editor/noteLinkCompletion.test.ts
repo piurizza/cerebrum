@@ -202,6 +202,13 @@ describe("noteLinkCompletionSource", () => {
       );
     });
 
+    it("falls back to a markdown link for a note in a hidden folder", () => {
+      useLinkFormat("wikilink");
+      expect(pick([makeNoteMeta(".trash/old.md", "Old")], "Old")).toBe(
+        "[Old](../.trash/old.md)",
+      );
+    });
+
     it("treats an unknown stored format as markdown", () => {
       useLinkFormat("obsidian");
       expect(pick([makeNoteMeta("notes/b.md", "B")], "B")).toBe("[B](b.md)");

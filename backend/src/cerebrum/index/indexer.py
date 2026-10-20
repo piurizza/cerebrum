@@ -387,12 +387,13 @@ def _hash_new_arrivals(vault_root: Path, new_arrivals: set[str]) -> dict[str, st
 def _apply_retarget(
     conn: sqlite3.Connection,
     vault_root: Path,
-    old_path: str,
-    new_path: str,
+    pair: tuple[str, str],
     *,
     remove_old: bool,
+    pending_moves: dict[str, str] | None = None,
 ) -> bool:
-    """Calls `retarget_note_links(old_path, new_path)` and, on success,
+    """Calls `retarget_note_links(old_path, new_path)` for `pair` (with
+    `pending_moves`, see `_apply_pairs`) and, on success,
     indexes `new_path` and every retargeted note as independent,
     individually-guarded operations (R7); on failure, logs and leaves the
     caller to fall back to independent delete/create handling.
@@ -405,8 +406,11 @@ def _apply_retarget(
 
     Returns whether the pair was applied.
     """
+    old_path, new_path = pair
     try:
-        _, retargeted = retarget_note_links(vault_root, old_path, new_path)
+        _, retargeted = retarget_note_links(
+            vault_root, old_path, new_path, pending_moves
+        )
     except Exception as exc:  # noqa: BLE001 -- pair falls back to independent ops
         logger.warning(
             "failed to retarget links for rename %s -> %s; falling back to "
@@ -432,13 +436,25 @@ def _apply_pairs(
     `_apply_retarget` (removing `old_path`'s row, since it hasn't been
     removed yet).
 
+    The pairs are applied one at a time, each treating the batch's later
+    pairs as not moved yet -- every file of a renamed folder is already at
+    its new path on disk, and without this, wikilink resolution would see
+    a vault no single step of the move ever produced.
+
     Returns the `old_path`/`new_path` sets that were actually applied as
     renames, so the caller can exclude them from independent handling.
     """
     paired_old: set[str] = set()
     paired_new: set[str] = set()
-    for old_path, new_path in pairs:
-        if _apply_retarget(conn, vault_root, old_path, new_path, remove_old=True):
+    for index, (old_path, new_path) in enumerate(pairs):
+        pending = {later_new: later_old for later_old, later_new in pairs[index + 1 :]}
+        if _apply_retarget(
+            conn,
+            vault_root,
+            (old_path, new_path),
+            remove_old=True,
+            pending_moves=pending,
+        ):
             paired_old.add(old_path)
             paired_new.add(new_path)
 
@@ -470,7 +486,7 @@ def _maybe_cross_window_pair(
     old_path = pending_renames.pop_unambiguous_match(content_hash)
     if old_path is None:
         return False
-    return _apply_retarget(conn, vault_root, old_path, new_path, remove_old=False)
+    return _apply_retarget(conn, vault_root, (old_path, new_path), remove_old=False)
 
 
 @dataclass

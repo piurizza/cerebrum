@@ -37,7 +37,8 @@ def register_graph_tools(mcp: FastMCP, app: FastAPI) -> None:
         name="get-backlinks",
         description=(
             "Call this to find every note that links to a given note, by its "
-            "vault-relative path. Returns their metadata, not their content. "
+            "vault-relative path, with a markdown link or a [[wikilink]]. "
+            "Returns their metadata, not their content. "
             f"{INDEX_LAG_WARNING}"
         ),
         annotations=_READ_ONLY_ANNOTATIONS,

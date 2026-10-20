@@ -222,3 +222,17 @@ def test_find_requires_authentication(client: TestClient) -> None:
     response = client.get("/api/attachments/find", params={"name": "cat.png"})
 
     assert response.status_code == 401
+
+
+def test_find_picks_the_image_next_to_the_linking_note(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    for folder in ("a", "b"):
+        (vault / folder).mkdir()
+        (vault / folder / "cat.png").write_bytes(_PNG_BYTES)
+
+    response = authenticated_client.get(
+        "/api/attachments/find", params={"name": "cat.png", "from": "b/idea.md"}
+    )
+
+    assert response.json() == {"path": "b/cat.png"}

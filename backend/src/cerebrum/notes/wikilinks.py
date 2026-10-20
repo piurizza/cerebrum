@@ -15,7 +15,7 @@ from __future__ import annotations
 import bisect
 import re
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -121,6 +121,16 @@ def _parse_inner(inner: str, embed: bool, span: tuple[int, int]) -> Wikilink | N
     )
 
 
+# Characters a wikilink target can't carry: brackets end the link, `|`
+# starts the alias, `#` the heading.
+_UNSAFE_TARGET_CHARACTERS = frozenset("[]|#")
+
+
+def is_writable_target(target: str) -> bool:
+    """Whether `target` can be written inside `[[...]]` and read back."""
+    return not _UNSAFE_TARGET_CHARACTERS.intersection(target)
+
+
 def is_attachment_target(target: str) -> bool:
     return PurePosixPath(target).suffix.lower() in ATTACHMENT_EXTENSIONS
 
@@ -193,15 +203,15 @@ class NoteLookup:
         parts = target.split("/")
         if any(part in (".", "..", "") for part in parts):
             return None
-        candidates = self._by_name.get(name_key(parts[-1]), [])
+        same_name = self._by_name.get(name_key(parts[-1]), [])
+        candidates = same_name
         if anchored or len(parts) > 1:
             wanted = name_key(target)
-            exact = [p for p in candidates if name_key(_strip_md(p)) == wanted]
-            candidates = exact
-            if not anchored and not exact:
+            candidates = [p for p in same_name if name_key(_strip_md(p)) == wanted]
+            if not anchored and not candidates:
                 candidates = [
                     p
-                    for p in self._by_name.get(name_key(parts[-1]), [])
+                    for p in same_name
                     if name_key(_strip_md(p)).endswith(f"/{wanted}")
                 ]
         if not candidates:
@@ -233,19 +243,35 @@ class NoteLookup:
 @dataclass(frozen=True)
 class NoteMove:
     """One note moving from `old_path` to `new_path`, with the vault's
-    notes on either side of the move."""
+    notes on either side of the move.
+
+    `pending` maps the current path of every note that has already moved
+    on disk but whose move hasn't been applied to links yet (later pairs
+    of the same watcher batch, e.g. the other notes of a renamed folder)
+    back to where it was. Those notes are treated as not moved yet, so a
+    folder rename replays as a sequence of single moves, each seeing a
+    consistent vault."""
 
     old_path: str
     new_path: str
     before: NoteLookup
     after: NoteLookup
+    pending: Mapping[str, str]
 
     @classmethod
     def from_paths_after(
-        cls, old_path: str, new_path: str, paths_after: Sequence[str]
+        cls,
+        old_path: str,
+        new_path: str,
+        paths_after: Sequence[str],
+        pending: Mapping[str, str] | None = None,
     ) -> NoteMove:
-        """Build from the vault's note paths as they are after the move."""
-        paths_before = [old_path if path == new_path else path for path in paths_after]
-        return cls(
-            old_path, new_path, NoteLookup(paths_before), NoteLookup(paths_after)
-        )
+        """Build from the vault's note paths as they are on disk now."""
+        pending = dict(pending or {})
+        after = [pending.get(path, path) for path in paths_after]
+        before = [old_path if path == new_path else path for path in after]
+        return cls(old_path, new_path, NoteLookup(before), NoteLookup(after), pending)
+
+    def logical_path(self, disk_path: str) -> str:
+        """Where the note at `disk_path` is as far as this move knows."""
+        return self.pending.get(disk_path, disk_path)

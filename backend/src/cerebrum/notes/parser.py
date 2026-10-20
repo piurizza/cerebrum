@@ -16,7 +16,12 @@ from cerebrum.notes.models import (
     ParsedTask,
     ParsedWikilink,
 )
-from cerebrum.notes.wikilinks import NoteMove, extract_wikilinks
+from cerebrum.notes.wikilinks import (
+    NoteMove,
+    extract_wikilinks,
+    is_hidden_path,
+    is_writable_target,
+)
 
 _LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)\s]+)\)")
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
@@ -193,6 +198,12 @@ def retarget_wikilinks(
     A link that still does is left exactly as written; one that doesn't
     gets the shortest target that reaches it, keeping its embed marker,
     heading and alias. Unresolved links stay unresolved.
+
+    A link is left as written when no wikilink can reach its note: one now
+    in a hidden folder (it resolves again when the note comes back, and a
+    note leaving a hidden folder takes back the links naming it), or one
+    whose path holds a character a wikilink can't carry (`#`, `|`, `[`,
+    `]`).
     """
     pieces: list[str] = []
     last = 0
@@ -202,10 +213,22 @@ def retarget_wikilinks(
         was = move.before.resolve(source_before, link.target)
         if was is None:
             continue
-        expected = move.new_path if was == move.old_path else was
+        if was == move.old_path:
+            expected = move.new_path
+        elif is_hidden_path(move.old_path):
+            # A note coming back from a hidden folder (e.g. restored from
+            # .trash) takes back the links that name it: while it was
+            # hidden they could only fall through to a same-named note.
+            continue
+        else:
+            expected = was
         if move.after.resolve(source_after, link.target) == expected:
             continue
+        if is_hidden_path(expected):
+            continue
         target = move.after.shortest_unambiguous_target(expected)
+        if not is_writable_target(target):
+            continue
         if link.target.lower().endswith(".md"):
             target += ".md"
         pieces.extend((body[last : link.start], link.render(target)))

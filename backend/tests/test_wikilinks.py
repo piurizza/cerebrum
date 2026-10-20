@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -95,4 +96,26 @@ def test_parse_note_keeps_only_note_wikilinks() -> None:
     assert [(link.target, link.link_text) for link in parsed.wikilinks] == [
         ("B", "Bee"),
         ("C", None),
+    ]
+
+
+def test_unmatched_backtick_runs_do_not_slow_parsing_down() -> None:
+    # Many unmatched runs of different lengths in one paragraph made the
+    # old backtracking pattern take seconds on a ~180 KB note.
+    body = " ".join("`" * length for length in range(1, 600)) + " [[A]]"
+
+    started = time.perf_counter()
+    links = extract_wikilinks(body)
+
+    assert time.perf_counter() - started < 1
+    assert [link.target for link in links] == ["A"]
+
+
+def test_code_span_rules() -> None:
+    body = "``a ` b`` [[In]] `x` [[Out]]\n\n`open\n\n[[After blank]]` `"
+
+    assert [link.target for link in extract_wikilinks(body)] == [
+        "In",
+        "Out",
+        "After blank",
     ]

@@ -631,3 +631,26 @@ def test_move_rewrites_the_moved_notes_own_wikilinks_when_needed(
     note, _ = move_note(vault, "a/X.md", "b/X.md")
 
     assert "Uses [[a/Y]] and [[Z]]." in note.content
+
+
+def test_move_into_a_hidden_folder_leaves_wikilinks_as_written(vault: Path) -> None:
+    # A note in .trash/ can't be linked to; keeping `[[Note]]` means the
+    # link works again as soon as the note is restored.
+    write_note(vault, "Other.md", "See [[Note]].")
+    write_note(vault, "Note.md", "root")
+    write_note(vault, "sub/Note.md", "sub")
+
+    move_note(vault, "Note.md", ".trash/Note.md")
+    move_note(vault, ".trash/Note.md", "Note.md")
+
+    assert "See [[Note]]." in read_note(vault, "Other.md").content
+
+
+def test_rewrite_never_writes_a_target_a_wikilink_cannot_hold(vault: Path) -> None:
+    write_note(vault, "Index.md", "See [[A/Spec]].")
+    write_note(vault, "A/Spec.md", "moving")
+    write_note(vault, "A/B/Spec.md", "other")
+
+    move_note(vault, "A/Spec.md", "C#/Spec.md")
+
+    assert "See [[A/Spec]]." in read_note(vault, "Index.md").content

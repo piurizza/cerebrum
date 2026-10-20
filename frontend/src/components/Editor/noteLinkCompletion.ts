@@ -5,7 +5,7 @@ import type {
 } from "@codemirror/autocomplete";
 import { relativeLinkPath } from "../../lib/noteContent";
 import { vaultLinkFormat } from "../../lib/vaultSettings";
-import { NoteLookup } from "../../lib/wikilinks";
+import { isHiddenPath, NoteLookup } from "../../lib/wikilinks";
 import type { NoteMeta } from "../../types/note";
 
 const TRIGGER_PATTERN = /\[\[[^[\]]*/;
@@ -66,10 +66,12 @@ export function noteLinkCompletionSource(notes: NoteMeta[], currentPath: string)
 const WIKILINK_UNSAFE_TARGET = /[[\]|#]/;
 const WIKILINK_UNSAFE_ALIAS = /[[\]|]/;
 
-/** `[[name]]` or `[[name|title]]` for `note`, or null when its path can't
- * be written as a wikilink (the caller falls back to a markdown link). A
- * title that can't be an alias is left out. */
+/** `[[name]]` or `[[name|title]]` for `note`, or null when no wikilink can
+ * reach it -- its path holds a character a wikilink can't carry, or it's
+ * in a hidden folder, which wikilinks never match (the caller falls back to
+ * a markdown link). A title that can't be an alias is left out. */
 function wikilinkTo(note: NoteMeta, notes: NoteMeta[]): string | null {
+  if (isHiddenPath(note.path)) return null;
   const target = new NoteLookup(notes.map((n) => n.path)).shortestUnambiguousTarget(
     note.path,
   );

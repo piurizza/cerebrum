@@ -172,7 +172,10 @@ export function NotePathHeader({
             />
           </label>
           <button type="submit" className="btn btn-primary" disabled={renaming}>
-            {renaming ? "Renaming..." : "Rename"}
+            {/* "Confirm", not "Rename": after "Choose location" -> "Select"
+                the move still has to be confirmed here, and a second button
+                also labelled "Rename" read as already done. */}
+            {renaming ? "Saving..." : "Confirm"}
           </button>
           <button type="button" className="btn" onClick={cancelRename}>
             Cancel

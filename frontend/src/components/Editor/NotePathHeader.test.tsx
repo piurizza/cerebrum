@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 // NotePathHeader reads `notes`/`refreshNotes` from NotesContext (used by
@@ -39,5 +39,25 @@ describe("NotePathHeader offline gating (R3)", () => {
 
     expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+  });
+});
+
+describe("NotePathHeader rename form", () => {
+  it("asks to Confirm the rename, not to Rename again", () => {
+    render(
+      <NotePathHeader
+        path="notes/example.md"
+        title="Example"
+        created={null}
+        updated={null}
+        onRenamed={vi.fn()}
+        onDeleted={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
   });
 });

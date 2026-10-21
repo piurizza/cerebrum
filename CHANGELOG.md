@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/piurizza/cerebrum/compare/v0.3.0...v0.4.0) (2026-10-21)
+
+
+### Features
+
+* understand [[wikilinks]] and optionally write them ([#61](https://github.com/piurizza/cerebrum/issues/61)) ([54a8015](https://github.com/piurizza/cerebrum/commit/54a80154d3dd70cbd1654fb13f665ec3b986f6f0))
+
+
+### Bug Fixes
+
+* label the rename form's final button Confirm ([#62](https://github.com/piurizza/cerebrum/issues/62)) ([95fc893](https://github.com/piurizza/cerebrum/commit/95fc893550ba33ecbdfec0a91c62d160c139f96d))
+
 ## [0.3.0](https://github.com/piurizza/cerebrum/compare/v0.2.0...v0.3.0) (2026-10-16)
 
 

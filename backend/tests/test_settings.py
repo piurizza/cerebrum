@@ -132,7 +132,8 @@ def test_watcher_settings_read_from_environment(
 def _state_paths(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[Path, Path]:
     monkeypatch.setenv("CEREBRUM_VAULT_PATH", "/notes")
     for name in ("CEREBRUM_INDEX_PATH", "CEREBRUM_AUTH_DB_PATH"):
-        monkeypatch.delenv(name, raising=False)
+        # Blank, not unset: an unset variable would let backend/.env decide.
+        monkeypatch.setenv(name, "")
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     _set_valid_auth_env(monkeypatch)
@@ -174,3 +175,15 @@ def test_blank_index_and_accounts_db_paths_mean_the_default(
         Path("/notes/.cerebrum/index.sqlite3"),
         Path("/notes/.cerebrum/auth.sqlite3"),
     )
+
+
+def test_index_and_accounts_db_must_be_different_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The index is safe to delete; the accounts database is not.
+    with pytest.raises(ValidationError, match="must be different files"):
+        _state_paths(
+            monkeypatch,
+            CEREBRUM_INDEX_PATH="/state/cerebrum.sqlite3",
+            CEREBRUM_AUTH_DB_PATH="/state/cerebrum.sqlite3",
+        )

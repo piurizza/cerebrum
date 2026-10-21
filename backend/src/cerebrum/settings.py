@@ -111,6 +111,18 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
+    def _keep_index_and_accounts_apart(self) -> Settings:
+        """The index is a disposable cache (deleting it is always safe);
+        the accounts database is not. Sharing one file would make that
+        advice delete every account."""
+        if self.index_path.resolve() == self.auth_db_path.resolve():
+            raise ValueError(
+                "CEREBRUM_INDEX_PATH and CEREBRUM_AUTH_DB_PATH must be different "
+                f"files, both are {self.index_path}"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_strong_auth_secrets(self) -> Settings:
         for field_name in ("auth_jwt_secret", "auth_setup_token"):
             secret: SecretStr = getattr(self, field_name)

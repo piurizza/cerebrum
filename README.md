@@ -188,9 +188,12 @@ To keep both out of the vault (for example when the vault is a checkout
 another tool owns), set `CEREBRUM_INDEX_PATH` and `CEREBRUM_AUTH_DB_PATH`
 to paths under `/data/cerebrum` and enable the data mount in
 `docker-compose.yml`. Back up that folder too: it holds the accounts. On an
-existing install, move the accounts database first. Setting
-`CEREBRUM_AUTH_DB_PATH` without moving it starts an empty accounts
-database, and `AUTH_SETUP_TOKEN` works again for anyone who has it:
+existing install, move the accounts database first. Cerebrum refuses to
+start if the variable points at a missing file while the old one is still
+in the vault, because starting would create an empty accounts database and
+make `AUTH_SETUP_TOKEN` work again for anyone who has it. With the default
+folders (adjust `vault` and `data` if you changed
+`CEREBRUM_VAULT_HOST_PATH` or `CEREBRUM_DATA_HOST_PATH`):
 
     docker compose down
     mkdir -p data                    # as yourself, so the backend can write

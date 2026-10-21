@@ -62,9 +62,32 @@ async def _run_backstop_rescan(
             logger.warning("backstop rescan iteration failed: %s", exc)
 
 
+def _refuse_unmoved_accounts_db(settings: Settings) -> None:
+    """Stop startup when CEREBRUM_AUTH_DB_PATH points at a file that doesn't
+    exist yet while the accounts database is still at its default place in
+    the vault -- the variable was set before the file was moved. Starting
+    anyway would create an empty accounts database and make
+    AUTH_SETUP_TOKEN usable again by anyone who has it."""
+    if settings.cerebrum_auth_db_path is None:
+        return
+    default = settings.cerebrum_vault_path / ".cerebrum" / "auth.sqlite3"
+    configured = settings.cerebrum_auth_db_path
+    if configured.exists() or not default.exists():
+        return
+    if configured.resolve() == default.resolve():
+        return
+    raise RuntimeError(
+        f"CEREBRUM_AUTH_DB_PATH points at {configured}, which doesn't exist, "
+        f"but the accounts database is still at {default}. Stop Cerebrum, move "
+        "auth.sqlite3 (with its -wal and -shm files) there, then start again "
+        "-- see 'Accounts and the index' in the README."
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    _refuse_unmoved_accounts_db(settings)
     async with AsyncExitStack() as stack:
         settings.cerebrum_vault_path.mkdir(parents=True, exist_ok=True)
         app.state.db = connect(settings.index_path)

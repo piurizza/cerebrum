@@ -18,6 +18,20 @@ CREATE TABLE IF NOT EXISTS links (
 CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);
 CREATE INDEX IF NOT EXISTS idx_links_source ON links(source_path);
 
+-- `[[wikilinks]]` as written. Unlike `links`, a row has no target path:
+-- what a wikilink points at depends on every other note in the vault, so
+-- it is resolved when read (see graph/service.py). `name_key` is the
+-- normalized note name it names, so backlinks can find candidates cheaply.
+CREATE TABLE IF NOT EXISTS wikilinks (
+    source_path TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    name_key    TEXT NOT NULL,
+    link_text   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_wikilinks_name ON wikilinks(name_key);
+CREATE INDEX IF NOT EXISTS idx_wikilinks_source ON wikilinks(source_path);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     path UNINDEXED,
     title,

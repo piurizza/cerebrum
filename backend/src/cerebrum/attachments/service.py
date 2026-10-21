@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 from collections.abc import AsyncIterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+from cerebrum.notes.wikilinks import closest_path, is_hidden_path, name_key
 from cerebrum.settings import Settings
 
 # content_type -> filename extension used when writing an attachment to
@@ -16,6 +18,14 @@ _EXTENSION_BY_CONTENT_TYPE = {
     "image/gif": ".gif",
     "image/webp": ".webp",
 }
+
+
+# Images served from anywhere in the vault, not just `*.attachments/`
+# folders, so notes imported from Obsidian (which keeps pasted images in
+# any folder) can show them. An allowlist on purpose: the vault also holds
+# the accounts database (`.cerebrum/auth.sqlite3`). SVG is left out
+# because it can carry scripts.
+_VAULT_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
 
 
 class InvalidAttachmentPathError(Exception):
@@ -72,19 +82,69 @@ def resolve_attachment_path(vault_root: Path, attachment_path: str) -> Path:
     path.
 
     Mirrors `notes/service.py`'s `resolve_note_path` traversal-safety
-    logic exactly, except the suffix check is replaced with a check that
-    the path's parent directory name ends in `.attachments`. This is the
-    validation boundary for untrusted input (e.g. the GET route) -- unlike
-    `attachment_dir_for_note`, it makes no assumption the caller already
-    validated `attachment_path`.
+    logic exactly, except the suffix check is replaced with: the file is
+    in a folder whose name ends in `.attachments`, or it is an image
+    (`_VAULT_IMAGE_EXTENSIONS`) outside any hidden (dot-prefixed) folder.
+    Both checks run on the path *after* symlinks are resolved, so a link
+    named `cat.png` that points at `.cerebrum/auth.sqlite3` is refused.
+    This is the validation boundary for untrusted input (e.g. the GET
+    route) -- unlike `attachment_dir_for_note`, it makes no assumption the
+    caller already validated `attachment_path`.
     """
     vault_resolved = vault_root.resolve()
     candidate = (vault_resolved / attachment_path).resolve()
-    if candidate != vault_resolved and vault_resolved not in candidate.parents:
+    if candidate == vault_resolved or vault_resolved not in candidate.parents:
         raise InvalidAttachmentPathError(attachment_path)
-    if not candidate.parent.name.endswith(".attachments"):
-        raise InvalidAttachmentPathError(attachment_path)
-    return candidate
+    if candidate.parent.name.endswith(".attachments"):
+        return candidate
+    relative = candidate.relative_to(vault_resolved).as_posix()
+    if _is_vault_image(relative):
+        return candidate
+    raise InvalidAttachmentPathError(attachment_path)
+
+
+def _is_vault_image(relative_path: str) -> bool:
+    return PurePosixPath(
+        relative_path
+    ).suffix.lower() in _VAULT_IMAGE_EXTENSIONS and not is_hidden_path(relative_path)
+
+
+def find_vault_image(vault_root: Path, name: str, from_note: str) -> str | None:
+    """The vault-relative path of the image an embed like `![[cat.png]]`
+    or `![[assets/cat.png]]` written in `from_note` means, or None.
+
+    Matches the file name (or the end of the path, for a name with
+    folders) ignoring case, and picks among several matches the way
+    wikilinks do (`closest_path`). Hidden folders and symlinks are never
+    entered or matched, so every result is servable by
+    `resolve_attachment_path`.
+    """
+    name = name.strip().strip("/")
+    if not name or not _is_vault_image(name):
+        return None
+    parts = name.split("/")
+    if any(part in (".", "..", "") for part in parts):
+        return None
+    wanted_file = name_key(parts[-1])
+    wanted = name_key(name)
+    vault_resolved = vault_root.resolve()
+    matches: list[str] = []
+    for directory, folders, files in os.walk(vault_resolved):
+        # os.walk doesn't descend into symlinked folders by default.
+        folders[:] = [folder for folder in folders if not folder.startswith(".")]
+        for file_name in files:
+            if name_key(file_name) != wanted_file:
+                continue
+            file_path = Path(directory) / file_name
+            if file_path.is_symlink():
+                continue
+            relative = file_path.relative_to(vault_resolved).as_posix()
+            key = name_key(relative)
+            if key == wanted or key.endswith(f"/{wanted}"):
+                matches.append(relative)
+    if not matches:
+        return None
+    return closest_path(matches, from_note)
 
 
 async def save_attachment(

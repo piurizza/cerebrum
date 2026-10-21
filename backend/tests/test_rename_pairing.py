@@ -810,3 +810,61 @@ def test_pending_rename_cache_remove_by_path_no_entry_is_a_no_op() -> None:
     cache.remove_by_path("unrelated.md")
 
     assert cache.pop_unambiguous_match("hash-a") == "old.md"
+
+
+def test_apply_watch_batch_rename_rewrites_wikilinks(
+    vault: Path, db: sqlite3.Connection, pending_renames: PendingRenameCache
+) -> None:
+    write_note(vault, "linker.md", "See [[Old|the old note]].")
+    (vault / "Old.md").write_text("shared body", encoding="utf-8")
+    upsert_note(db, vault, "linker.md")
+    upsert_note(db, vault, "Old.md")
+
+    (vault / "Old.md").rename(vault / "New.md")
+    apply_watch_batch(db, vault, {"Old.md", "New.md"}, pending_renames)
+
+    assert "See [[New|the old note]]." in read_note(vault, "linker.md").content
+    assert [note.path for note in get_backlinks(db, "New.md")] == ["linker.md"]
+
+
+@pytest.mark.parametrize("reverse_pairs", [False, True])
+def test_folder_rename_on_disk_keeps_wikilinks_on_the_same_notes(
+    vault: Path,
+    db: sqlite3.Connection,
+    pending_renames: PendingRenameCache,
+    monkeypatch: pytest.MonkeyPatch,
+    reverse_pairs: bool,
+) -> None:
+    # `[[Spec]]` in A/Index.md means A/Spec.md (same folder), not the
+    # root Spec.md. Renaming the folder moves both notes at once; each
+    # rename pair must not see the other already moved.
+    write_note(vault, "Spec.md", "root spec")
+    write_note(vault, "A/Spec.md", "folder spec")
+    write_note(vault, "A/Index.md", "See [[Spec]].")
+    write_note(vault, "linker.md", "Folder: [[A/Spec]].")
+    rebuild_index(db, vault)
+    if reverse_pairs:
+        real_match = indexer._match_unambiguous_pairs  # pylint: disable=protected-access
+        monkeypatch.setattr(
+            indexer,
+            "_match_unambiguous_pairs",
+            lambda old, new: list(reversed(real_match(old, new))),
+        )
+
+    (vault / "A").rename(vault / "B")
+    apply_watch_batch(
+        db,
+        vault,
+        {"A/Spec.md", "A/Index.md", "B/Spec.md", "B/Index.md"},
+        pending_renames,
+    )
+
+    # Both links must still mean the folder's own Spec.md, never the root
+    # one. (Replaying the pairs one at a time may spell `[[Spec]]` with
+    # its folder; any spelling that resolves there is right.)
+    assert "Folder: [[B/Spec]]." in read_note(vault, "linker.md").content
+    assert [note.path for note in get_backlinks(db, "Spec.md")] == []
+    assert [note.path for note in get_backlinks(db, "B/Spec.md")] == [
+        "B/Index.md",
+        "linker.md",
+    ]

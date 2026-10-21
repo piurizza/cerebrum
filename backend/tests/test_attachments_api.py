@@ -178,3 +178,61 @@ def test_upload_does_not_modify_note_content(authenticated_client: TestClient) -
 
     after = authenticated_client.get("/api/notes/idea.md").json()["content"]
     assert after == before
+
+
+def test_image_outside_attachments_is_served_and_found(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    (vault / "photos").mkdir()
+    (vault / "photos" / "cat.png").write_bytes(_PNG_BYTES)
+
+    found = authenticated_client.get(
+        "/api/attachments/find", params={"name": "cat.png", "from": "idea.md"}
+    )
+    assert found.status_code == 200
+    assert found.json() == {"path": "photos/cat.png"}
+
+    served = authenticated_client.get(f"/api/attachments/{found.json()['path']}")
+    assert served.status_code == 200
+    assert served.content == _PNG_BYTES
+
+
+@pytest.mark.parametrize(
+    "path", [".cerebrum/auth.sqlite3", ".cerebrum/index.sqlite3", "idea.md"]
+)
+def test_vault_internals_and_notes_are_never_served(
+    authenticated_client: TestClient, path: str
+) -> None:
+    _create_note(authenticated_client)
+
+    assert authenticated_client.get(f"/api/attachments/{path}").status_code == 404
+
+
+def test_find_returns_404_when_no_image_matches(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.get(
+        "/api/attachments/find", params={"name": "missing.png"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_find_requires_authentication(client: TestClient) -> None:
+    response = client.get("/api/attachments/find", params={"name": "cat.png"})
+
+    assert response.status_code == 401
+
+
+def test_find_picks_the_image_next_to_the_linking_note(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    for folder in ("a", "b"):
+        (vault / folder).mkdir()
+        (vault / folder / "cat.png").write_bytes(_PNG_BYTES)
+
+    response = authenticated_client.get(
+        "/api/attachments/find", params={"name": "cat.png", "from": "b/idea.md"}
+    )
+
+    assert response.json() == {"path": "b/cat.png"}

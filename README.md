@@ -3,7 +3,8 @@
 [![CI](https://github.com/piurizza/cerebrum/actions/workflows/ci.yml/badge.svg)](https://github.com/piurizza/cerebrum/actions/workflows/ci.yml)
 
 A self-hosted second brain: notes are plain `.md` files on disk, cross-referenced
-with standard markdown links, with a visual graph of how they connect.
+with standard markdown links (Obsidian `[[wikilinks]]` work too), with a visual
+graph of how they connect.
 
 See [SPEC.md](SPEC.md) for the full design — storage model, note/frontmatter
 format, API surface, graph data model, and tech stack rationale. Read it before
@@ -310,12 +311,28 @@ command line tools and both Rust targets
 Windows, run `npm run tauri build -- --bundles nsis` in `desktop/`
 (needs the Visual Studio C++ build tools).
 
+## Links between notes
+
+Type `[[` in the editor to link to another note. By default Cerebrum writes
+standard markdown links (`[My note](my-note.md)`), which any markdown
+viewer understands. It also reads Obsidian-style `[[wikilinks]]` (including
+`[[note|shown text]]`, `[[note#heading]]` and image embeds like
+`![[photo.png]]`), so a vault imported from Obsidian shows up linked in the
+graph, backlinks and preview, and its links survive renames.
+
+To have the editor and MCP agents *write* wikilinks too, set
+`CEREBRUM_LINK_FORMAT=wikilink` in `.env` and restart. Existing links are
+never converted. See [SPEC.md](SPEC.md#wikilinks) for how a wikilink picks
+between notes with the same name.
+
 ## MCP server
 
 An MCP server is mounted at `/api/mcp`, reachable through the same
 frontend-published port and nginx proxy as the REST API (no separate port).
 Remote clients (e.g. Claude Desktop) can read, search, create, update,
-append to, edit, and delete notes over it.
+append to, edit, and delete notes over it. The note-writing tools tell the
+agent which link form this vault uses (see
+[Links between notes](#links-between-notes)).
 
 Every call is authenticated. Generate a personal API token in
 **Settings** (it starts with `cbm_pat_`) and give it to your MCP client

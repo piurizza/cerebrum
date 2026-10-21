@@ -6,10 +6,16 @@ from pathlib import Path
 
 import pytest
 
+from cerebrum.graph.models import GraphEdge
 from cerebrum.graph.service import get_backlinks, get_graph
 from cerebrum.index import indexer
 from cerebrum.index.db import list_notes, search_notes
-from cerebrum.index.indexer import rebuild_index, remove_note, upsert_note
+from cerebrum.index.indexer import (
+    _SCHEMA_BACKFILL_VERSION,
+    rebuild_index,
+    remove_note,
+    upsert_note,
+)
 from cerebrum.notes.service import write_note
 
 
@@ -155,7 +161,7 @@ def test_rebuild_index_force_backfills_tasks_after_schema_version_reset(
     unchanged) and clearing its task rows the way an old database would
     never have had them."""
     write_note(vault, "a.md", "- [ ] Existing task\n")
-    rebuild_index(db, vault)  # first pass: fresh db, user_version -> 1
+    rebuild_index(db, vault)  # first pass: fresh db, user_version -> current
 
     db.execute("PRAGMA user_version = 0")
     db.execute("DELETE FROM tasks WHERE source_path = 'a.md'")
@@ -165,7 +171,7 @@ def test_rebuild_index_force_backfills_tasks_after_schema_version_reset(
     rebuild_index(db, vault)
 
     assert [row["text"] for row in _task_rows(db, "a.md")] == ["Existing task"]
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert db.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_BACKFILL_VERSION
 
 
 def test_rebuild_index_skips_version_bump_when_backfill_has_a_failure(
@@ -179,7 +185,7 @@ def test_rebuild_index_skips_version_bump_when_backfill_has_a_failure(
     of permanently losing that one note's tasks."""
     write_note(vault, "a.md", "- [ ] Task A\n")
     write_note(vault, "b.md", "- [ ] Task B\n")
-    rebuild_index(db, vault)  # user_version -> 1, both notes indexed
+    rebuild_index(db, vault)  # user_version -> current, both notes indexed
 
     db.execute("PRAGMA user_version = 0")
     db.execute("DELETE FROM tasks")
@@ -206,7 +212,7 @@ def test_rebuild_index_skips_version_bump_when_backfill_has_a_failure(
     rebuild_index(db, vault)  # retried on the next pass, now succeeds
 
     assert [row["text"] for row in _task_rows(db, "b.md")] == ["Task B"]
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert db.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_BACKFILL_VERSION
 
 
 def test_rebuild_index_resumes_mtime_skip_after_schema_backfill(
@@ -216,7 +222,7 @@ def test_rebuild_index_resumes_mtime_skip_after_schema_backfill(
     once user_version is current, an unchanged note's mtime should skip
     upsert_note again, same as before the tasks feature existed."""
     write_note(vault, "a.md", "content")
-    rebuild_index(db, vault)  # user_version -> 1
+    rebuild_index(db, vault)  # user_version -> current
 
     calls: list[str] = []
     original_upsert = indexer.upsert_note
@@ -535,3 +541,99 @@ def test_concurrent_graph_reads_with_writes_do_not_raise(
         thread.join()
 
     assert outcomes == [None, None, None, None]
+
+
+def _index(vault: Path, db: sqlite3.Connection, notes: dict[str, str]) -> None:
+    for path, content in notes.items():
+        write_note(vault, path, content)
+        upsert_note(db, vault, path)
+
+
+def _edges(db: sqlite3.Connection) -> set[tuple[str, str]]:
+    return {(edge.source, edge.target) for edge in get_graph(db).edges}
+
+
+def test_wikilink_becomes_a_graph_edge_and_a_backlink(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    _index(vault, db, {"a.md": "See [[B|the B note]].", "folder/B.md": "content"})
+
+    assert _edges(db) == {("a.md", "folder/B.md")}
+    assert [note.path for note in get_backlinks(db, "folder/B.md")] == ["a.md"]
+
+
+def test_same_named_notes_each_get_only_their_own_wikilink_backlinks(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    _index(
+        vault,
+        db,
+        {
+            "x/B.md": "x",
+            "y/B.md": "y",
+            "x/linker.md": "[[B]]",
+            "y/linker.md": "[[B]]",
+            "z/qualified.md": "[[y/B]]",
+        },
+    )
+
+    assert [note.path for note in get_backlinks(db, "x/B.md")] == ["x/linker.md"]
+    assert [note.path for note in get_backlinks(db, "y/B.md")] == [
+        "y/linker.md",
+        "z/qualified.md",
+    ]
+
+
+def test_markdown_link_and_wikilink_to_one_note_are_one_edge(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    _index(vault, db, {"a.md": "[B](b.md) and [[b]] and [[B#Part]]", "b.md": "x"})
+
+    assert get_graph(db).edges == [GraphEdge(source="a.md", target="b.md")]
+    assert [note.path for note in get_backlinks(db, "b.md")] == ["a.md"]
+
+
+def test_unresolved_wikilink_is_a_ghost_until_the_note_exists(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    _index(vault, db, {"a.md": "[[Missing]] and ![[photo.png]] and [[#Top]]"})
+
+    graph = get_graph(db)
+    assert {(edge.source, edge.target) for edge in graph.edges} == {
+        ("a.md", "Missing.md")
+    }
+    ghost = next(node for node in graph.nodes if node.path == "Missing.md")
+    assert ghost.exists is False
+
+    # Creating the note resolves the link without reindexing `a.md`.
+    _index(vault, db, {"notes/missing.md": "now here"})
+
+    assert _edges(db) == {("a.md", "notes/missing.md")}
+    assert [note.path for note in get_backlinks(db, "notes/missing.md")] == ["a.md"]
+
+
+def test_removing_a_note_removes_its_wikilinks(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    _index(vault, db, {"a.md": "[[B]]", "B.md": "x"})
+
+    remove_note(db, "a.md")
+
+    assert db.execute("SELECT COUNT(*) FROM wikilinks").fetchone()[0] == 0
+    assert get_backlinks(db, "B.md") == []
+
+
+def test_rebuild_index_backfills_wikilinks_from_an_older_index(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "a.md", "[[B]]")
+    write_note(vault, "B.md", "x")
+    rebuild_index(db, vault)
+    # An index built before wikilinks existed: no rows, older version.
+    db.execute("DELETE FROM wikilinks")
+    db.execute("PRAGMA user_version = 1")
+
+    rebuild_index(db, vault)
+
+    assert _edges(db) == {("a.md", "B.md")}
+    assert db.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_BACKFILL_VERSION

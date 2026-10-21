@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -8,6 +8,7 @@ from cerebrum.attachments.service import (
     AttachmentTooLargeError,
     InvalidAttachmentPathError,
     UnsupportedAttachmentTypeError,
+    find_vault_image,
     resolve_attachment_path,
     save_attachment,
 )
@@ -88,6 +89,27 @@ async def upload_attachment(
     return AttachmentUploadResponse(path=relative_path)
 
 
+class AttachmentLocation(BaseModel):
+    path: str
+
+
+# Declared before the catch-all `/{path:path}` route, which would
+# otherwise match `/find` as a file name.
+@router.get("/find", response_model=AttachmentLocation)
+def find_attachment(
+    name: str, from_note: str = Query("", alias="from")
+) -> AttachmentLocation:
+    """Locate the image an Obsidian-style embed (`![[cat.png]]`) in the
+    note at `from` refers to, anywhere in the vault outside hidden
+    folders. Returns its vault-relative path, servable by the route
+    below."""
+    settings = get_settings()
+    found = find_vault_image(settings.cerebrum_vault_path, name, from_note)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return AttachmentLocation(path=found)
+
+
 @router.get("/{path:path}")
 def get_attachment(path: str) -> FileResponse:
     settings = get_settings()
@@ -98,8 +120,9 @@ def get_attachment(path: str) -> FileResponse:
     if not resolved.is_file():
         raise HTTPException(status_code=404, detail="Attachment not found")
 
-    # media_type is inferred from the server-assigned extension
-    # (.png/.jpg/.gif/.webp -- see _EXTENSION_BY_CONTENT_TYPE in
-    # attachments/service.py). nosniff blocks a browser from
-    # second-guessing that Content-Type via content sniffing.
+    # media_type is inferred from the file's extension: server-assigned
+    # inside `*.attachments/` (see _EXTENSION_BY_CONTENT_TYPE in
+    # attachments/service.py), an image extension anywhere else. nosniff
+    # blocks a browser from second-guessing that Content-Type via content
+    # sniffing.
     return FileResponse(resolved, headers={"X-Content-Type-Options": "nosniff"})

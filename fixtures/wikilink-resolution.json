@@ -1,0 +1,56 @@
+{
+  "description": "Shared wikilink cases. The backend (backend/tests/test_wikilinks.py) and the preview (frontend/src/lib/wikilinks.test.ts) both run every case, so the two resolvers can't drift apart.",
+  "parse": [
+    { "name": "plain", "text": "[[Note]]", "expected": [{ "embed": false, "target": "Note", "heading": null, "alias": null }] },
+    { "name": "alias", "text": "[[Note|Shown]]", "expected": [{ "embed": false, "target": "Note", "heading": null, "alias": "Shown" }] },
+    { "name": "heading", "text": "[[Note#Part two]]", "expected": [{ "embed": false, "target": "Note", "heading": "Part two", "alias": null }] },
+    { "name": "heading and alias", "text": "[[Note#H|Shown]]", "expected": [{ "embed": false, "target": "Note", "heading": "H", "alias": "Shown" }] },
+    { "name": "block reference", "text": "[[Note#^abc123]]", "expected": [{ "embed": false, "target": "Note", "heading": "^abc123", "alias": null }] },
+    { "name": "embed", "text": "![[Note]]", "expected": [{ "embed": true, "target": "Note", "heading": null, "alias": null }] },
+    { "name": "with .md", "text": "[[Note.md]]", "expected": [{ "embed": false, "target": "Note.md", "heading": null, "alias": null }] },
+    { "name": "folder", "text": "[[folder/Note]]", "expected": [{ "embed": false, "target": "folder/Note", "heading": null, "alias": null }] },
+    { "name": "escaped pipe in a table", "text": "| [[a\\|b]] | x |", "expected": [{ "embed": false, "target": "a", "heading": null, "alias": "b" }] },
+    { "name": "empty alias kept", "text": "[[Note|]]", "expected": [{ "embed": false, "target": "Note", "heading": null, "alias": "" }] },
+    { "name": "same-note heading", "text": "[[#Heading]]", "expected": [{ "embed": false, "target": "", "heading": "Heading", "alias": null }] },
+    { "name": "spaces trimmed", "text": "[[ Note ]]", "expected": [{ "embed": false, "target": "Note", "heading": null, "alias": null }] },
+    { "name": "two links", "text": "see [[A]] and ![[b.png]]", "expected": [
+      { "embed": false, "target": "A", "heading": null, "alias": null },
+      { "embed": true, "target": "b.png", "heading": null, "alias": null }
+    ] },
+    { "name": "empty", "text": "[[]] and [[ ]]", "expected": [] },
+    { "name": "unclosed", "text": "[[Note", "expected": [] },
+    { "name": "across lines", "text": "[[No\nte]]", "expected": [] }
+  ],
+  "resolve": [
+    { "name": "unique name", "notes": ["a/Note.md", "b/Other.md"], "source": "b/Other.md", "target": "Note", "expected": "a/Note.md" },
+    { "name": "ignores case", "notes": ["a/Note.md"], "source": "x.md", "target": "nOTE", "expected": "a/Note.md" },
+    { "name": "optional .md", "notes": ["a/Note.md"], "source": "x.md", "target": "Note.md", "expected": "a/Note.md" },
+    { "name": "accented name, composed vs decomposed", "notes": ["Perché.md"], "source": "x.md", "target": "Perché", "expected": "Perché.md" },
+    { "name": "dotted note name", "notes": ["Release 1.2.md"], "source": "x.md", "target": "Release 1.2", "expected": "Release 1.2.md" },
+    { "name": "file name, not title", "notes": ["my-note.md"], "source": "x.md", "target": "My Note", "expected": null },
+    { "name": "same folder wins", "notes": ["Note.md", "x/Note.md", "x/Source.md"], "source": "x/Source.md", "target": "Note", "expected": "x/Note.md" },
+    { "name": "root wins from a third folder", "notes": ["Note.md", "x/Note.md", "y/Source.md"], "source": "y/Source.md", "target": "Note", "expected": "Note.md" },
+    { "name": "fewest folders wins", "notes": ["a/b/Note.md", "abcdef/Note.md"], "source": "s.md", "target": "Note", "expected": "abcdef/Note.md" },
+    { "name": "then fewest characters", "notes": ["abcdef/Note.md", "ab/Note.md"], "source": "s.md", "target": "Note", "expected": "ab/Note.md" },
+    { "name": "then alphabetical", "notes": ["b/Note.md", "a/Note.md"], "source": "s.md", "target": "Note", "expected": "a/Note.md" },
+    { "name": "folder: exact path first", "notes": ["x/a/Note.md", "a/Note.md"], "source": "s.md", "target": "a/Note", "expected": "a/Note.md" },
+    { "name": "folder: end of path", "notes": ["x/a/Note.md", "y/Note.md"], "source": "s.md", "target": "a/Note", "expected": "x/a/Note.md" },
+    { "name": "folder: ignores case", "notes": ["x/Alpha/Note.md"], "source": "s.md", "target": "alpha/NOTE", "expected": "x/Alpha/Note.md" },
+    { "name": "folder: no partial folder name", "notes": ["xa/Note.md"], "source": "s.md", "target": "a/Note", "expected": null },
+    { "name": "root-anchored", "notes": ["Note.md", "x/Note.md", "x/Source.md"], "source": "x/Source.md", "target": "/Note", "expected": "Note.md" },
+    { "name": "root-anchored needs the exact path", "notes": ["x/Note.md"], "source": "s.md", "target": "/Note", "expected": null },
+    { "name": "missing", "notes": ["a/Note.md"], "source": "s.md", "target": "Missing", "expected": null },
+    { "name": "hidden folders are never candidates", "notes": [".trash/Note.md"], "source": "s.md", "target": "Note", "expected": null },
+    { "name": "hidden duplicate ignored", "notes": [".trash/Note.md", "z/Note.md"], "source": "s.md", "target": "Note", "expected": "z/Note.md" },
+    { "name": "relative targets unsupported", "notes": ["Note.md", "a/s.md"], "source": "a/s.md", "target": "../Note", "expected": null },
+    { "name": "empty target is the note itself", "notes": ["a/s.md"], "source": "a/s.md", "target": "", "expected": "a/s.md" }
+  ],
+  "shortest": [
+    { "name": "unique name", "notes": ["a/Note.md", "b/Other.md"], "path": "a/Note.md", "expected": "Note" },
+    { "name": "shared name", "notes": ["a/Note.md", "b/Note.md"], "path": "a/Note.md", "expected": "a/Note" },
+    { "name": "shared folder and name", "notes": ["x/a/Note.md", "y/a/Note.md"], "path": "x/a/Note.md", "expected": "x/a/Note" },
+    { "name": "path that ends another path", "notes": ["a/Note.md", "x/a/Note.md"], "path": "a/Note.md", "expected": "a/Note" },
+    { "name": "root note with a shared name", "notes": ["Note.md", "x/Note.md"], "path": "Note.md", "expected": "/Note" },
+    { "name": "hidden duplicate ignored", "notes": [".trash/Note.md", "a/Note.md"], "path": "a/Note.md", "expected": "Note" }
+  ]
+}

@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cerebrum.index.db import write_lock
-from cerebrum.notes.models import ParsedLink
+from cerebrum.notes.models import ParsedLink, ParsedWikilink
 from cerebrum.notes.parser import parse_note
 from cerebrum.notes.service import iter_note_paths, retarget_note_links
+from cerebrum.notes.wikilinks import target_name_key
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,9 @@ logger = logging.getLogger(__name__)
 # check below). SQLite's PRAGMA user_version is a single integer stored
 # in the database file header for exactly this purpose; a database that
 # predates this constant (including a brand-new one, which starts at 0)
-# reads back 0 and gets one forced full rescan.
-_SCHEMA_BACKFILL_VERSION = 1
+# reads back 0 and gets one forced full rescan. Version 2 adds the
+# `wikilinks` table.
+_SCHEMA_BACKFILL_VERSION = 2
 
 
 @dataclass
@@ -117,6 +119,17 @@ def _dedupe_links(links: list[ParsedLink]) -> list[ParsedLink]:
     return deduped
 
 
+def _dedupe_wikilinks(wikilinks: list[ParsedWikilink]) -> list[ParsedWikilink]:
+    seen: set[tuple[str, str | None]] = set()
+    deduped: list[ParsedWikilink] = []
+    for link in wikilinks:
+        key = (link.target, link.link_text)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(link)
+    return deduped
+
+
 def upsert_note(
     conn: sqlite3.Connection,
     vault_root: Path,
@@ -162,11 +175,20 @@ def upsert_note(
         )
 
         conn.execute("DELETE FROM links WHERE source_path = ?", (path,))
+        conn.execute("DELETE FROM wikilinks WHERE source_path = ?", (path,))
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
         conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
         conn.executemany(
             "INSERT INTO links (source_path, target_path, link_text) VALUES (?, ?, ?)",
             [(path, link.target_path, link.link_text) for link in links],
+        )
+        conn.executemany(
+            "INSERT INTO wikilinks (source_path, target, name_key, link_text) "
+            "VALUES (?, ?, ?, ?)",
+            [
+                (path, link.target, target_name_key(link.target), link.link_text)
+                for link in _dedupe_wikilinks(parsed.wikilinks)
+            ],
         )
         conn.execute(
             "INSERT INTO notes_fts (path, title, body) VALUES (?, ?, ?)",
@@ -182,6 +204,7 @@ def remove_note(conn: sqlite3.Connection, path: str) -> None:
     with write_lock, conn:
         conn.execute("DELETE FROM notes WHERE path = ?", (path,))
         conn.execute("DELETE FROM links WHERE source_path = ?", (path,))
+        conn.execute("DELETE FROM wikilinks WHERE source_path = ?", (path,))
         conn.execute("DELETE FROM notes_fts WHERE path = ?", (path,))
         conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
 
@@ -364,12 +387,13 @@ def _hash_new_arrivals(vault_root: Path, new_arrivals: set[str]) -> dict[str, st
 def _apply_retarget(
     conn: sqlite3.Connection,
     vault_root: Path,
-    old_path: str,
-    new_path: str,
+    pair: tuple[str, str],
     *,
     remove_old: bool,
+    pending_moves: dict[str, str] | None = None,
 ) -> bool:
-    """Calls `retarget_note_links(old_path, new_path)` and, on success,
+    """Calls `retarget_note_links(old_path, new_path)` for `pair` (with
+    `pending_moves`, see `_apply_pairs`) and, on success,
     indexes `new_path` and every retargeted note as independent,
     individually-guarded operations (R7); on failure, logs and leaves the
     caller to fall back to independent delete/create handling.
@@ -382,8 +406,11 @@ def _apply_retarget(
 
     Returns whether the pair was applied.
     """
+    old_path, new_path = pair
     try:
-        _, retargeted = retarget_note_links(vault_root, old_path, new_path)
+        _, retargeted = retarget_note_links(
+            vault_root, old_path, new_path, pending_moves
+        )
     except Exception as exc:  # noqa: BLE001 -- pair falls back to independent ops
         logger.warning(
             "failed to retarget links for rename %s -> %s; falling back to "
@@ -409,13 +436,25 @@ def _apply_pairs(
     `_apply_retarget` (removing `old_path`'s row, since it hasn't been
     removed yet).
 
+    The pairs are applied one at a time, each treating the batch's later
+    pairs as not moved yet -- every file of a renamed folder is already at
+    its new path on disk, and without this, wikilink resolution would see
+    a vault no single step of the move ever produced.
+
     Returns the `old_path`/`new_path` sets that were actually applied as
     renames, so the caller can exclude them from independent handling.
     """
     paired_old: set[str] = set()
     paired_new: set[str] = set()
-    for old_path, new_path in pairs:
-        if _apply_retarget(conn, vault_root, old_path, new_path, remove_old=True):
+    for index, (old_path, new_path) in enumerate(pairs):
+        pending = {later_new: later_old for later_old, later_new in pairs[index + 1 :]}
+        if _apply_retarget(
+            conn,
+            vault_root,
+            (old_path, new_path),
+            remove_old=True,
+            pending_moves=pending,
+        ):
             paired_old.add(old_path)
             paired_new.add(new_path)
 
@@ -447,7 +486,7 @@ def _maybe_cross_window_pair(
     old_path = pending_renames.pop_unambiguous_match(content_hash)
     if old_path is None:
         return False
-    return _apply_retarget(conn, vault_root, old_path, new_path, remove_old=False)
+    return _apply_retarget(conn, vault_root, (old_path, new_path), remove_old=False)
 
 
 @dataclass

@@ -70,6 +70,36 @@ def test_render_note_roundtrips_through_parse_note() -> None:
     assert reparsed.body.strip() == "Body text."
 
 
+def test_render_note_keeps_frontmatter_keys_it_does_not_manage() -> None:
+    raw = (
+        "---\n"
+        "title: Imported\n"
+        "aliases: [First name, Second name]\n"
+        "cssclasses: [wide]\n"
+        "rating: 4\n"
+        "---\n"
+        "Body.\n"
+    )
+
+    reparsed = parse_note("note.md", render_note(parse_note("note.md", raw)))
+
+    assert reparsed.extra_metadata == {
+        "aliases": ["First name", "Second name"],
+        "cssclasses": ["wide"],
+        "rating": 4,
+    }
+    assert reparsed.title == "Imported"
+
+
+def test_render_note_does_not_add_a_title_the_file_did_not_have() -> None:
+    parsed = parse_note("Some Note.md", "---\naliases: [x]\n---\nBody.\n")
+
+    rendered = render_note(parsed)
+
+    assert "title:" not in rendered
+    assert parse_note("Some Note.md", rendered).title == "Some Note"
+
+
 def test_render_note_separates_frontmatter_from_empty_body() -> None:
     # Regression: an empty/whitespace-only body used to render with NO
     # newline at all after the closing "---" (frontmatter.dumps() strips

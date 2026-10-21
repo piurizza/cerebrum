@@ -131,22 +131,23 @@ def test_get_graph_and_get_backlinks_roundtrip_a_linked_fixture_vault(
 ) -> None:
     _write_note(vault, "a.md", "---\ntitle: A\n---\nlinks to [B](b.md)")
     _write_note(vault, "b.md", "---\ntitle: B\n---\nno outgoing links")
-    upsert_note(db, vault, "a.md")
-    upsert_note(db, vault, "b.md")
+    _write_note(vault, "c.md", "---\ntitle: C\n---\nlinks to [[b]]")
+    for path in ("a.md", "b.md", "c.md"):
+        upsert_note(db, vault, path)
     mcp = _mcp_server(db)
 
     async def run() -> None:
         async with Client(mcp) as client:
             graph_result = await client.call_tool("get-graph", {})
             node_paths = {node.path for node in graph_result.data.nodes}
-            assert node_paths == {"a.md", "b.md"}
-            assert any(
-                edge.source == "a.md" and edge.target == "b.md"
-                for edge in graph_result.data.edges
-            )
+            assert node_paths == {"a.md", "b.md", "c.md"}
+            assert {(edge.source, edge.target) for edge in graph_result.data.edges} == {
+                ("a.md", "b.md"),
+                ("c.md", "b.md"),
+            }
 
             backlinks_result = await client.call_tool("get-backlinks", {"path": "b.md"})
-            assert [item.path for item in backlinks_result.data] == ["a.md"]
+            assert [item.path for item in backlinks_result.data] == ["a.md", "c.md"]
 
     asyncio.run(run())
 
@@ -778,3 +779,32 @@ def test_concurrent_appends_to_the_same_note_are_never_lost(
         final = (vault / "log.md").read_text(encoding="utf-8")
         missing = [marker for marker in markers if marker not in final]
         assert not missing, f"attempt {attempt}: lost appends {missing}"
+
+
+@pytest.mark.parametrize(
+    ("link_format", "preferred", "also"),
+    [
+        ("markdown", "[Shown text](other-note.md)", "[[wikilinks]] also work"),
+        ("wikilink", "[[file-name|Shown text]]", "Markdown links to a .md path"),
+    ],
+)
+def test_note_writing_tools_say_which_link_form_to_write(
+    db: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    link_format: str,
+    preferred: str,
+    also: str,
+) -> None:
+    monkeypatch.setenv("CEREBRUM_LINK_FORMAT", link_format)
+    get_settings.cache_clear()
+    mcp = _mcp_server(db)
+
+    async def run() -> None:
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            for name in ("create-note", "update-note", "append-to-note", "edit-note"):
+                description = tools[name].description or ""
+                assert preferred in description
+                assert also in description
+
+    asyncio.run(run())

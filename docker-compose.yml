@@ -32,6 +32,9 @@ services:
       # baked into the frontend build, so an existing .env keeps working.
       CEREBRUM_DAILY_NOTE_FOLDER: ${CEREBRUM_DAILY_NOTE_FOLDER:-${VITE_DAILY_NOTE_FOLDER:-daily}}
       CEREBRUM_TEMPLATES_FOLDER: ${CEREBRUM_TEMPLATES_FOLDER:-${VITE_TEMPLATES_FOLDER:-templates}}
+      # `markdown` or `wikilink`: the link form the editor's `[[` picker
+      # inserts and MCP tools ask agents to write. Both are always read.
+      CEREBRUM_LINK_FORMAT: ${CEREBRUM_LINK_FORMAT:-markdown}
     volumes:
       - ${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault
     healthcheck:

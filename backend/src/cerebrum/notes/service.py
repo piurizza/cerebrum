@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -14,7 +14,14 @@ from cerebrum.attachments.service import (
 )
 from cerebrum.notes.file_lock import file_lock
 from cerebrum.notes.models import Note
-from cerebrum.notes.parser import parse_note, rebase_links, render_note, retarget_links
+from cerebrum.notes.parser import (
+    parse_note,
+    rebase_links,
+    render_note,
+    retarget_links,
+    retarget_wikilinks,
+)
+from cerebrum.notes.wikilinks import NoteMove
 
 logger = logging.getLogger(__name__)
 
@@ -152,18 +159,25 @@ def delete_note(vault_root: Path, path: str) -> None:
 
 
 def _retarget_other_notes(
-    vault_root: Path, old_target: str, new_target: str
+    vault_root: Path,
+    old_target: str,
+    new_target: str,
+    pending_moves: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Repoint every OTHER note's links that targeted `old_target` so they
-    resolve to `new_target` instead. Returns the vault-relative paths of
-    the notes that were actually rewritten."""
+    resolve to `new_target` instead, and rewrite any of their wikilinks
+    the move would otherwise send to a different note (see
+    `retarget_wikilinks`). `pending_moves` is as in `NoteMove`. Returns
+    the vault-relative paths of the notes that were actually rewritten."""
     retargeted: list[str] = []
+    note_paths = list(iter_note_paths(vault_root))
+    move = NoteMove.from_paths_after(old_target, new_target, note_paths, pending_moves)
     # Resolved once -- `vault_root` is invariant across the loop below, so
     # resolving it fresh on every iteration (as passing the raw `vault_root`
     # into `resolve_note_path` per-note would do) is redundant work
     # repeated once per note in the vault.
     vault_root_resolved = vault_root.resolve()
-    for other_path in iter_note_paths(vault_root):
+    for other_path in note_paths:
         if other_path == new_target:
             continue
         other_file = vault_root / other_path
@@ -190,6 +204,8 @@ def _retarget_other_notes(
                 new_body = retarget_links(
                     other_parsed.body, other_path, old_target, new_target
                 )
+                source = move.logical_path(other_path)
+                new_body = retarget_wikilinks(new_body, source, source, move)
                 if new_body == other_parsed.body:
                     continue
                 other_parsed.body = new_body
@@ -234,6 +250,26 @@ def _rebase_attachment_references(body: str, old_path: str, new_path: str) -> st
         return body
     pattern = re.compile(rf"(?<![\w-]){re.escape(old_stem)}\.attachments/")
     return pattern.sub(f"{new_stem}.attachments/", body)
+
+
+def _rebase_own_links(
+    vault_root: Path,
+    body: str,
+    moved: tuple[str, str],
+    pending_moves: Mapping[str, str] | None = None,
+) -> str:
+    """A moved note's own links, rewritten so they still reach the notes
+    they reached before the move: relative markdown links always (they're
+    relative to the note's folder), wikilinks only where the new folder
+    changes which same-named note they resolve to."""
+    old_path, new_path = moved
+    body = rebase_links(body, old_path, new_path)
+    if "[[" not in body:
+        return body
+    move = NoteMove.from_paths_after(
+        old_path, new_path, list(iter_note_paths(vault_root)), pending_moves
+    )
+    return retarget_wikilinks(body, old_path, new_path, move)
 
 
 @contextmanager
@@ -314,12 +350,13 @@ def move_note(
                 if rewritten_body != parsed.body:
                     parsed.body = rewritten_body
                     changed = True
-            rebased_body = rebase_links(parsed.body, path, new_path)
+            rebased_body = _rebase_own_links(vault_root, parsed.body, (path, new_path))
             if rebased_body != parsed.body:
                 parsed.body = rebased_body
                 changed = True
         if title is not None and title != parsed.title:
             parsed.title = title
+            parsed.title_in_frontmatter = True
             changed = True
 
         if changed:
@@ -349,7 +386,10 @@ def move_note(
 
 
 def retarget_note_links(
-    vault_root: Path, old_path: str, new_path: str
+    vault_root: Path,
+    old_path: str,
+    new_path: str,
+    pending_moves: Mapping[str, str] | None = None,
 ) -> tuple[Note, list[str]]:
     """Repoint links for a note that has already been relocated on disk
     from `old_path` to `new_path` (e.g. an external `mv` detected by the
@@ -361,6 +401,9 @@ def retarget_note_links(
     to the same absolute targets (they're relative to its own folder,
     which already changed on disk), and repoints every OTHER note's
     links that targeted `old_path` so they resolve to `new_path` instead.
+    `pending_moves` maps notes the same batch also moved on disk, but
+    whose moves are applied after this one, back to their old paths (see
+    `NoteMove`), so a renamed folder doesn't confuse wikilink resolution.
 
     Also relocates the note's attachment folder (`<stem>.attachments/`,
     sibling to the note file), if any, so it travels with the note --
@@ -408,7 +451,9 @@ def retarget_note_links(
             if rewritten_body != parsed.body:
                 parsed.body = rewritten_body
                 changed = True
-        rebased_body = rebase_links(parsed.body, old_path, new_path)
+        rebased_body = _rebase_own_links(
+            vault_root, parsed.body, (old_path, new_path), pending_moves
+        )
         if rebased_body != parsed.body:
             parsed.body = rebased_body
             changed = True
@@ -421,7 +466,7 @@ def retarget_note_links(
     # which acquires its own per-note locks, for the same cross-move AB-BA
     # deadlock reason `move_note` releases source/destination before its
     # own call to `_retarget_other_notes` (see that function's comment).
-    retargeted = _retarget_other_notes(vault_root, old_path, new_path)
+    retargeted = _retarget_other_notes(vault_root, old_path, new_path, pending_moves)
 
     return (
         Note(

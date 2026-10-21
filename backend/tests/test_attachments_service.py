@@ -12,6 +12,7 @@ from cerebrum.attachments.service import (
     UnsupportedAttachmentTypeError,
     attachment_dir_for_note,
     delete_attachment_dir,
+    find_vault_image,
     move_attachment_dir,
     resolve_attachment_path,
     save_attachment,
@@ -131,9 +132,103 @@ def test_resolve_attachment_path_rejects_vault_escape(vault: Path) -> None:
         resolve_attachment_path(vault, "../../etc/passwd")
 
 
-def test_resolve_attachment_path_rejects_non_attachments_parent(vault: Path) -> None:
+def test_resolve_attachment_path_rejects_non_image_outside_attachments(
+    vault: Path,
+) -> None:
     with pytest.raises(InvalidAttachmentPathError):
-        resolve_attachment_path(vault, "notes/some-file.png")
+        resolve_attachment_path(vault, "notes/some-file.txt")
+
+
+@pytest.mark.parametrize("path", ["photos/cat.png", "photos/CAT.PNG", "cat.jpg"])
+def test_resolve_attachment_path_accepts_images_anywhere(
+    vault: Path, path: str
+) -> None:
+    (vault / path).parent.mkdir(parents=True, exist_ok=True)
+    (vault / path).write_bytes(_PNG_BYTES)
+
+    assert resolve_attachment_path(vault, path) == (vault / path).resolve()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".cerebrum/auth.sqlite3",
+        ".cerebrum/index.sqlite3",
+        ".obsidian/x.png",
+        "notes/.hidden/x.png",
+        "notes/secret.txt",
+        "x.svg",
+        "../outside.png",
+        "",
+    ],
+)
+def test_resolve_attachment_path_refuses_hidden_and_non_image_files(
+    vault: Path, path: str
+) -> None:
+    with pytest.raises(InvalidAttachmentPathError):
+        resolve_attachment_path(vault, path)
+
+
+def test_resolve_attachment_path_refuses_image_named_symlink_to_hidden_file(
+    vault: Path,
+) -> None:
+    (vault / ".cerebrum").mkdir(exist_ok=True)
+    (vault / ".cerebrum" / "auth.sqlite3").write_bytes(b"secret")
+    (vault / "photos").mkdir()
+    (vault / "photos" / "cat.png").symlink_to(vault / ".cerebrum" / "auth.sqlite3")
+
+    with pytest.raises(InvalidAttachmentPathError):
+        resolve_attachment_path(vault, "photos/cat.png")
+
+
+def test_resolve_attachment_path_refuses_symlink_out_of_the_vault(
+    vault: Path, tmp_path: Path
+) -> None:
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(_PNG_BYTES)
+    (vault / "escape.png").symlink_to(outside)
+
+    with pytest.raises(InvalidAttachmentPathError):
+        resolve_attachment_path(vault, "escape.png")
+
+
+def _place(vault: Path, *paths: str) -> None:
+    for path in paths:
+        (vault / path).parent.mkdir(parents=True, exist_ok=True)
+        (vault / path).write_bytes(_PNG_BYTES)
+
+
+def test_find_vault_image_prefers_the_notes_folder_then_the_shortest_path(
+    vault: Path,
+) -> None:
+    _place(vault, "cat.png", "notes/cat.png", "deep/er/Cat.PNG")
+
+    assert find_vault_image(vault, "cat.png", "notes/idea.md") == "notes/cat.png"
+    assert find_vault_image(vault, "cat.png", "other/idea.md") == "cat.png"
+    assert find_vault_image(vault, "CAT.png", "deep/er/x.md") == "deep/er/Cat.PNG"
+
+
+def test_find_vault_image_matches_a_folder_qualified_name(vault: Path) -> None:
+    _place(vault, "cat.png", "x/assets/cat.png")
+
+    assert find_vault_image(vault, "assets/cat.png", "idea.md") == "x/assets/cat.png"
+
+
+def test_find_vault_image_ignores_hidden_folders_symlinks_and_non_images(
+    vault: Path, tmp_path: Path
+) -> None:
+    _place(vault, ".trash/cat.png", "dog.png")
+    outside = tmp_path / "linked"
+    _place(outside, "bird.png")
+    (vault / "linked").symlink_to(outside)
+    (vault / "fish.png").symlink_to(vault / "dog.png")
+
+    assert find_vault_image(vault, "cat.png", "idea.md") is None
+    assert find_vault_image(vault, "bird.png", "idea.md") is None
+    assert find_vault_image(vault, "fish.png", "idea.md") is None
+    assert find_vault_image(vault, "idea.md", "idea.md") is None
+    assert find_vault_image(vault, "../dog.png", "idea.md") is None
+    assert find_vault_image(vault, "missing.png", "idea.md") is None
 
 
 def test_resolve_attachment_path_accepts_valid_attachment(vault: Path) -> None:

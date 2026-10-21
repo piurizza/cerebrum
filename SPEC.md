@@ -12,10 +12,14 @@ with three non-negotiable properties:
 - **Every note is a plain `.md` file on disk.** The filesystem is the
   source of truth, not a database. You can always read, edit, back up, or
   migrate away from cerebrum with nothing more than a text editor.
-- **Notes cross-reference each other with standard markdown links**
-  (`[text](relative/path.md)`), not Obsidian's `[[wikilink]]` syntax. This
-  keeps notes readable and portable in any plain markdown renderer, at the
-  cost of slightly more verbose linking.
+- **Notes cross-reference each other with standard markdown links by
+  default** (`[text](relative/path.md)`). This keeps notes readable and
+  portable in any plain markdown renderer, at the cost of slightly more
+  verbose linking. Obsidian's `[[wikilinks]]` are understood everywhere
+  links matter (graph, backlinks, preview, renames), so an imported
+  Obsidian vault arrives linked, and a vault can opt into *writing* them
+  (`CEREBRUM_LINK_FORMAT=wikilink`). Existing links are never converted
+  between the two forms.
 - **The graph of links between notes is visualized and traversable**, like
   Obsidian's graph view — nodes are notes, edges are links.
 
@@ -66,6 +70,10 @@ See [Related Note](../other-folder/related-note.md) for more.
   clock skew across devices).
 - No `id`/`uid` field — **the note's path, relative to the vault root, is
   its canonical identity.**
+- Any other key (e.g. Obsidian's `aliases`, `cssclasses`, custom
+  properties) is kept as it is on every save, move and link rewrite. A
+  note without a `title` key keeps having none, so its title keeps
+  following the file name.
 
 ### Link resolution rule
 
@@ -78,6 +86,47 @@ untouched in the file but ignored for graph purposes.
 A link may point to a `.md` path that doesn't exist yet — this is a valid
 "broken link" / unresolved reference, same as Obsidian, and is preserved
 in the index (see below).
+
+### Wikilinks
+
+`[[Note]]`, `[[Note|shown text]]`, `[[Note#Heading]]`, `[[folder/Note]]`
+and `![[Note]]` are graph edges too, except inside code. A wikilink names
+a note by **file name** (never by title), ignoring case and a trailing
+`.md`:
+
+- When several notes share the name, the one in the linking note's
+  folder wins, then the shortest path (fewest folders, then fewest
+  characters), then alphabetical order.
+- A target with folders (`[[folder/Note]]`) must match the whole
+  vault-relative path, or its end. A leading `/` (`[[/Note]]`) means the
+  exact path from the vault root.
+- Notes in hidden folders (`.trash/`, `.obsidian/`) are never matched.
+  Relative targets (`[[../Note]]`) are unsupported and stay unresolved.
+- `[[#Heading]]` links within the same note; a heading opens the note at
+  its top.
+- A target ending in a file extension such as `.png` or `.pdf` is an
+  attachment, not a note: `![[photo.png]]` shows the image (found by name
+  anywhere in the vault outside hidden folders), and no graph edge is made.
+
+Because what a wikilink points at depends on every other note, the index
+stores wikilinks as written (`wikilinks` table) and resolves them when the
+graph or backlinks are read; an unresolved one is a ghost node named
+`<target>.md`. The backend (`notes/wikilinks.py`) and the preview
+(`frontend/src/lib/wikilinks.ts`) implement the same rules and both run
+the cases in `fixtures/wikilink-resolution.json`.
+
+When a note is renamed or moved (in the app or on disk), every wikilink
+keeps pointing at the note it pointed at before: one that would now miss
+it, or would now be captured by the moved note, is rewritten to the
+shortest target that reaches the right note, keeping its alias, heading
+and `!`. Links that still resolve are left exactly as written. A folder
+renamed on disk is replayed one note at a time, so a link may gain its
+folder (`[[Spec]]` -> `[[B/Spec]]`) while still reaching the same note.
+Exceptions, where the link is left as written: a note moved into a hidden
+folder (no wikilink can reach it there; links naming it work again once
+it comes back, and a note leaving a hidden folder takes them back), and a
+target whose path holds `#`, `|`, `[` or `]`, which a wikilink can't
+carry.
 
 ## 4. Index/cache architecture
 
@@ -102,6 +151,15 @@ CREATE TABLE links (
 );
 CREATE INDEX idx_links_target ON links(target_path);
 CREATE INDEX idx_links_source ON links(source_path);
+
+CREATE TABLE wikilinks (
+    source_path TEXT NOT NULL,
+    target      TEXT NOT NULL,      -- as written, resolved when read
+    name_key    TEXT NOT NULL,      -- normalized note name it names
+    link_text   TEXT
+);
+CREATE INDEX idx_wikilinks_name ON wikilinks(name_key);
+CREATE INDEX idx_wikilinks_source ON wikilinks(source_path);
 
 CREATE VIRTUAL TABLE notes_fts USING fts5(
     path UNINDEXED, title, body, tokenize='porter'
@@ -141,12 +199,15 @@ All endpoints under `/api`.
 | GET | `/api/notes/{path:path}` | Fetch one note: raw markdown + parsed metadata |
 | PUT | `/api/notes/{path:path}` | Create or update a note (body = raw markdown) |
 | DELETE | `/api/notes/{path:path}` | Delete a note file + its index rows |
-| POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's markdown links that pointed at it; `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
+| POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's links that pointed at it (markdown links always, wikilinks only where they would stop resolving to it -- see [Wikilinks](#wikilinks)); `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 | GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |
 | GET | `/api/tasks` | Every open (unchecked) markdown checkbox across the vault, joined with its note's title, ordered by note path then line; read-only |
-| GET | `/api/vault-settings` | `{ daily_note_folder, templates_folder }` -- the server's vault folder conventions (see `CEREBRUM_DAILY_NOTE_FOLDER` / `CEREBRUM_TEMPLATES_FOLDER` below); the web app loads it on start and on login and keeps the last copy for offline use |
+| GET | `/api/vault-settings` | `{ daily_note_folder, templates_folder, link_format }` -- the server's vault conventions (see `CEREBRUM_DAILY_NOTE_FOLDER` / `CEREBRUM_TEMPLATES_FOLDER` / `CEREBRUM_LINK_FORMAT` below); the web app loads it on start and on login and keeps the last copy for offline use |
+| POST | `/api/attachments?note_path=...` | Upload a pasted image (raw bytes) into the note's `<stem>.attachments/` folder |
+| GET | `/api/attachments/{path:path}` | Serve a file inside a `*.attachments/` folder, or an image (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) anywhere in the vault outside hidden folders. Checked after symlinks are resolved, so nothing under `.cerebrum/` (the accounts database, the index) or any other hidden folder, and no non-image file outside `*.attachments/`, is ever served |
+| GET | `/api/attachments/find?name=...&from=...` | Where the image an embed like `![[cat.png]]` in note `from` refers to is: `{ path }`, chosen like a wikilink among same-named images; 404 if none |
 
 The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated with a personal API token:
 
@@ -340,6 +401,7 @@ API calls.
 | `CEREBRUM_TLS_SAN` | compose | *(unset)* | extra Subject Alternative Names for the self-signed cert, comma-separated (e.g. `IP:192.168.1.14`) — set to your LAN IP/hostname to use offline mode from another device |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 | `CEREBRUM_DAILY_NOTE_FOLDER` | backend | `daily` | vault-relative folder the "Today" button creates daily notes in. Served to clients by `GET /api/vault-settings`, so changing it needs only a backend restart. Leading/trailing slashes are trimmed, a blank value means the default, and `.`/`..` segments fail startup. Docker Compose falls back to the former build-time name `VITE_DAILY_NOTE_FOLDER` |
+| `CEREBRUM_LINK_FORMAT` | backend | `markdown` | `markdown` or `wikilink`: the link form the editor's `[[` picker inserts and MCP note-writing tools ask agents to write. Both forms are always read. Served by `GET /api/vault-settings`, so changing it needs only a restart; case is ignored, a blank value means the default, anything else fails startup |
 | `CEREBRUM_TEMPLATES_FOLDER` | backend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Same handling as `CEREBRUM_DAILY_NOTE_FOLDER`; Compose falls back to the former `VITE_TEMPLATES_FOLDER`. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |
 | `VITE_DEFAULT_SERVER_URL` | desktop | `http://localhost:7811` | server URL the desktop app auto-connects to on first launch (or after its store is cleared) -- most deployments have exactly one server, so this skips the first manual URL entry; the user can always view/change the configured URL afterward via "Change server URL", so this is not a hard-coded target |
 
@@ -434,12 +496,16 @@ history.
 ### Cross-referencing
 
 - [x] see a rendered markdown preview with clickable links to other
-      notes, not just raw text in the editor
+      notes, not just raw text in the editor -- `[[wikilinks]]` included,
+      with unresolved ones visibly marked and not clickable
 - [x] insert a link to another note while writing, via an
       autocomplete/picker triggered while typing. The trigger UX is
-      Obsidian-flavored (`[[`, refined by whatever's typed after), but it
-      always inserts a standard markdown link (`[title](path.md)`) —
-      never wikilink syntax (see [Product vision](#1-product-vision)).
+      Obsidian-flavored (`[[`, refined by whatever's typed after). It
+      inserts a standard markdown link (`[title](path.md)`) by default,
+      or `[[name]]` / `[[name|title]]` when the server's
+      `CEREBRUM_LINK_FORMAT` is `wikilink` (see
+      [Product vision](#1-product-vision)); the name gets a folder only
+      when another note shares it.
       Backed by the already-loaded `notes` list (title/path substring
       match), not the full-text search endpoint -- title/filename
       matching is the right mental model for "which note do I mean," not

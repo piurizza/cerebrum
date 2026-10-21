@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -57,6 +58,11 @@ class Settings(BaseSettings):
     cerebrum_daily_note_folder: str = _DEFAULT_DAILY_NOTE_FOLDER
     cerebrum_templates_folder: str = _DEFAULT_TEMPLATES_FOLDER
 
+    # How this vault's notes link to each other: the form the editor's `[[`
+    # picker inserts and MCP tools ask agents to write. Both forms are
+    # always read; this only picks which one gets written.
+    cerebrum_link_format: Literal["markdown", "wikilink"] = "markdown"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @field_validator("cerebrum_daily_note_folder", "cerebrum_templates_folder")
@@ -80,6 +86,15 @@ class Settings(BaseSettings):
                 f"'daily' or 'journal/daily', got {value!r}"
             )
         return folder
+
+    @field_validator("cerebrum_link_format", mode="before")
+    @classmethod
+    def _normalize_link_format(cls, value: object) -> object:
+        """Ignore case and surrounding spaces; blank means the default.
+        Anything else that isn't `markdown` or `wikilink` fails startup."""
+        if isinstance(value, str):
+            return value.strip().lower() or "markdown"
+        return value
 
     @model_validator(mode="after")
     def _require_strong_auth_secrets(self) -> Settings:

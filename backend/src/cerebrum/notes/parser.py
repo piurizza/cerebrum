@@ -9,12 +9,24 @@ from pathlib import PurePosixPath
 import frontmatter
 import yaml
 
-from cerebrum.notes.models import ParsedLink, ParsedNote, ParsedTask
+from cerebrum.notes.code_regions import iter_lines_with_fence_state
+from cerebrum.notes.models import (
+    ParsedLink,
+    ParsedNote,
+    ParsedTask,
+    ParsedWikilink,
+)
+from cerebrum.notes.wikilinks import (
+    NoteMove,
+    extract_wikilinks,
+    is_hidden_path,
+    is_writable_target,
+)
 
 _LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)\s]+)\)")
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
 _TASK_LINE_PATTERN = re.compile(r"^[ \t]*[-*+] \[([ xX])\] (.*)$")
-_FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+_MANAGED_METADATA_KEYS = frozenset({"title", "tags", "created", "updated"})
 
 
 class InvalidNoteContentError(Exception):
@@ -68,48 +80,30 @@ def extract_links(source_path: str, body: str) -> list[ParsedLink]:
     return links
 
 
+def extract_note_wikilinks(body: str) -> list[ParsedWikilink]:
+    """The wikilinks in `body` that point at notes: not attachments
+    (`![[photo.png]]`) and not links within the note itself
+    (`[[#Heading]]`)."""
+    return [
+        ParsedWikilink(target=link.target, link_text=link.alias or None)
+        for link in extract_wikilinks(body)
+        if link.target and not link.is_attachment
+    ]
+
+
 def extract_tasks(body: str) -> list[ParsedTask]:
     """Extract every open/closed markdown checkbox line from `body`,
     skipping any that fall inside a fenced (```/~~~) code block -- a note
     can legitimately document checkbox syntax as an example, and that
-    example text is not a real task. This needs a per-line scan with
-    fence-tracking state, unlike `extract_links`'s single whole-body
-    `finditer`: a plain `re.MULTILINE` pattern has no way to know whether
-    the current line is inside a fence.
-
-    Tracks the opening fence's character (backtick or tilde) *and* run
-    length, not just whether one is open, mirroring CommonMark's own
-    fence-matching rule (a fence only closes on a marker of the same
-    character with length >= the opener's). A bare on/off toggle, or one
-    that ignores length, gets this wrong two ways: (1) a body that opens
-    with ``` and later contains a literal ~~~ line as content inside that
-    same block (e.g. documenting fence syntax) would close early and then
-    reopen on the real closing ```, wrongly fencing everything after; (2)
-    a longer fence (e.g. ````` `````) nesting a shorter same-character
-    example fence (```` ``` ````) -- precisely the idiom for documenting
-    "how to write a fenced code block" -- would have its inner markers
-    mistaken for the outer close/reopen, inverting which lines are really
-    fenced.
+    example text is not a real task. See `iter_lines_with_fence_state`
+    for the fence-matching rules.
     """
     tasks: list[ParsedTask] = []
-    fence_char: str | None = None
-    fence_length = 0
-    for line_number, line in enumerate(body.splitlines(), start=1):
-        fence_match = _FENCE_PATTERN.match(line)
-        if fence_match:
-            marker = fence_match.group(1)
-            char, length = marker[0], len(marker)
-            if fence_char is None:
-                fence_char, fence_length = char, length
-            elif char == fence_char and length >= fence_length:
-                fence_char, fence_length = None, 0
-            # Any other fence-looking line (different character, or the
-            # same character but a shorter run) doesn't close the open
-            # fence -- it's just content, per CommonMark.
+    lines = iter_lines_with_fence_state(body)
+    for line_number, (_, line, fenced) in enumerate(lines, start=1):
+        if fenced:
             continue
-        if fence_char is not None:
-            continue
-        match = _TASK_LINE_PATTERN.match(line)
+        match = _TASK_LINE_PATTERN.match(line.splitlines()[0])
         if match:
             tasks.append(
                 ParsedTask(
@@ -192,6 +186,59 @@ def retarget_links(
     return _rewrite_link_targets(body, resolver)
 
 
+def retarget_wikilinks(
+    body: str, source_before: str, source_after: str, move: NoteMove
+) -> str:
+    """Rewrite the wikilinks in `body` that `move` would otherwise break.
+
+    `source_before`/`source_after` are where this body's own note sits
+    either side of the move (they differ only for the moved note itself).
+    Every wikilink keeps pointing at the note it pointed at before the
+    move -- the moved note at its new path, any other note where it was.
+    A link that still does is left exactly as written; one that doesn't
+    gets the shortest target that reaches it, keeping its embed marker,
+    heading and alias. Unresolved links stay unresolved.
+
+    A link is left as written when no wikilink can reach its note: one now
+    in a hidden folder (it resolves again when the note comes back, and a
+    note leaving a hidden folder takes back the links naming it), or one
+    whose path holds a character a wikilink can't carry (`#`, `|`, `[`,
+    `]`).
+    """
+    pieces: list[str] = []
+    last = 0
+    for link in extract_wikilinks(body):
+        if not link.target or link.is_attachment:
+            continue
+        was = move.before.resolve(source_before, link.target)
+        if was is None:
+            continue
+        if was == move.old_path:
+            expected = move.new_path
+        elif is_hidden_path(move.old_path):
+            # A note coming back from a hidden folder (e.g. restored from
+            # .trash) takes back the links that name it: while it was
+            # hidden they could only fall through to a same-named note.
+            continue
+        else:
+            expected = was
+        if move.after.resolve(source_after, link.target) == expected:
+            continue
+        if is_hidden_path(expected):
+            continue
+        target = move.after.shortest_unambiguous_target(expected)
+        if not is_writable_target(target):
+            continue
+        if link.target.lower().endswith(".md"):
+            target += ".md"
+        pieces.extend((body[last : link.start], link.render(target)))
+        last = link.end
+    if not pieces:
+        return body
+    pieces.append(body[last:])
+    return "".join(pieces)
+
+
 def _parse_datetime(value: object) -> datetime | None:
     if value is None:
         return None
@@ -223,11 +270,21 @@ def parse_note(path: str, raw_content: str) -> ParsedNote:
         body=post.content,
         links=extract_links(path, post.content),
         tasks=extract_tasks(post.content),
+        wikilinks=extract_note_wikilinks(post.content),
+        extra_metadata={
+            key: value
+            for key, value in metadata.items()
+            if key not in _MANAGED_METADATA_KEYS
+        },
+        title_in_frontmatter="title" in metadata,
     )
 
 
 def render_note(parsed: ParsedNote) -> str:
-    metadata: dict[str, object] = {"title": parsed.title, "tags": parsed.tags}
+    metadata: dict[str, object] = dict(parsed.extra_metadata)
+    if parsed.title_in_frontmatter:
+        metadata["title"] = parsed.title
+    metadata["tags"] = parsed.tags
     if parsed.created is not None:
         metadata["created"] = parsed.created.isoformat()
     if parsed.updated is not None:

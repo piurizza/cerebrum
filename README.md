@@ -176,12 +176,31 @@ older version already ran the backend as root on native Linux Docker,
 hand the vault back to your user once:
 `sudo chown -R "$(id -u):$(id -g)" vault`.
 
+### Accounts and the index
+
 Accounts, sessions, and personal API tokens live in their own SQLite
-database (`auth.sqlite3`), stored alongside the search index under
-`<vault>/.cerebrum/` -- i.e. inside the same bind-mounted vault directory
-above, not a separate volume. Anyone already backing up the vault is
-already backing up accounts/sessions/tokens; no separate backup step is
-needed as long as `auth.sqlite3` stays under that mount.
+database (`auth.sqlite3`), stored by default alongside the search index
+under `<vault>/.cerebrum/` -- i.e. inside the same bind-mounted vault
+directory above, not a separate volume. Anyone already backing up the vault
+is already backing up accounts/sessions/tokens.
+
+To keep both out of the vault (for example when the vault is a checkout
+another tool owns), set `CEREBRUM_INDEX_PATH` and `CEREBRUM_AUTH_DB_PATH`
+to paths under `/data/cerebrum` and enable the data mount in
+`docker-compose.yml`. Back up that folder too: it holds the accounts. On an
+existing install, move the accounts database first. Setting
+`CEREBRUM_AUTH_DB_PATH` without moving it starts an empty accounts
+database, and `AUTH_SETUP_TOKEN` works again for anyone who has it:
+
+    docker compose down
+    mkdir -p data                    # as yourself, so the backend can write
+    mv vault/.cerebrum/auth.sqlite3* data/   # with its -wal and -shm files
+    # uncomment the data mount in docker-compose.yml, then in .env:
+    #   CEREBRUM_INDEX_PATH=/data/cerebrum/index.sqlite3
+    #   CEREBRUM_AUTH_DB_PATH=/data/cerebrum/auth.sqlite3
+    docker compose up -d
+
+The index needs no moving: it is rebuilt from the notes on startup.
 
 The frontend also serves HTTPS on `https://localhost:7812` (override via
 `CEREBRUM_HTTPS_PORT`), using a self-signed cert nginx generates on first

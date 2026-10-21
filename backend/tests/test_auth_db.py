@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from cerebrum.auth_db import connect
+from tests.mcp_test_support import issue_test_access_token, mcp_test_client
 
 
 def _auth_db_path(vault: Path) -> Path:
@@ -89,3 +90,22 @@ def test_invite_with_unknown_created_by_fails_fk_constraint(vault: Path) -> None
             )
     finally:
         conn.close()
+
+
+def test_app_keeps_accounts_where_cerebrum_auth_db_path_points(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    accounts_db = tmp_path / "state" / "auth.sqlite3"
+    monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", str(accounts_db))
+
+    with mcp_test_client(vault, monkeypatch) as client:
+        token = issue_test_access_token(client)
+        authed = client.get(
+            "/api/vault-settings", headers={"Authorization": f"Bearer {token}"}
+        )
+
+    assert authed.status_code == 200
+    assert accounts_db.is_file()
+    assert not _auth_db_path(vault).exists()

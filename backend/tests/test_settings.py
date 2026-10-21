@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -125,3 +127,50 @@ def test_watcher_settings_read_from_environment(
         assert settings.watcher_rename_pairing_window_seconds == 10
     finally:
         get_settings.cache_clear()
+
+
+def _state_paths(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[Path, Path]:
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", "/notes")
+    for name in ("CEREBRUM_INDEX_PATH", "CEREBRUM_AUTH_DB_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    _set_valid_auth_env(monkeypatch)
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        return settings.index_path, settings.auth_db_path
+    finally:
+        get_settings.cache_clear()
+
+
+def test_index_and_accounts_db_default_to_inside_the_vault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _state_paths(monkeypatch) == (
+        Path("/notes/.cerebrum/index.sqlite3"),
+        Path("/notes/.cerebrum/auth.sqlite3"),
+    )
+
+
+def test_index_and_accounts_db_paths_read_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _state_paths(
+        monkeypatch,
+        CEREBRUM_INDEX_PATH="/state/index.sqlite3",
+        CEREBRUM_AUTH_DB_PATH="/state/auth.sqlite3",
+    ) == (Path("/state/index.sqlite3"), Path("/state/auth.sqlite3"))
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_index_and_accounts_db_paths_mean_the_default(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    # Compose passes an unset `${VAR:-}` through as an empty string.
+    assert _state_paths(
+        monkeypatch, CEREBRUM_INDEX_PATH=blank, CEREBRUM_AUTH_DB_PATH=blank
+    ) == (
+        Path("/notes/.cerebrum/index.sqlite3"),
+        Path("/notes/.cerebrum/auth.sqlite3"),
+    )

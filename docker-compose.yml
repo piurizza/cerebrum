@@ -35,8 +35,18 @@ services:
       # `markdown` or `wikilink`: the link form the editor's `[[` picker
       # inserts and MCP tools ask agents to write. Both are always read.
       CEREBRUM_LINK_FORMAT: ${CEREBRUM_LINK_FORMAT:-markdown}
+      # Where the index and the accounts database live. Empty means inside
+      # the vault (`<vault>/.cerebrum/`). To keep them out of the vault, set
+      # both to paths under /data/cerebrum and enable the data mount below
+      # -- see "Accounts and the index" in the README before moving an
+      # existing accounts database.
+      CEREBRUM_INDEX_PATH: ${CEREBRUM_INDEX_PATH:-}
+      CEREBRUM_AUTH_DB_PATH: ${CEREBRUM_AUTH_DB_PATH:-}
     volumes:
       - ${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault
+      # Opt-in: create the folder as yourself first (`mkdir -p data`), or
+      # Docker creates it as root and the backend can't write to it.
+      # - ${CEREBRUM_DATA_HOST_PATH:-./data}:/data/cerebrum
     healthcheck:
       test:
         [

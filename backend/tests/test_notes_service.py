@@ -693,6 +693,22 @@ def test_move_into_a_hidden_folder_leaves_wikilinks_as_written(vault: Path) -> N
     assert "See [[Note]]." in read_note(vault, "Other.md").content
 
 
+def test_move_into_a_hidden_folder_leaves_markdown_links_as_written(
+    vault: Path,
+) -> None:
+    # Same as wikilinks: a hidden note isn't indexed, so pointing links at
+    # `.trash/` would only make them dead. Left alone, they work again as
+    # soon as the note is restored.
+    write_note(vault, "Other.md", "See [the note](Note.md).")
+    write_note(vault, "Note.md", "root")
+
+    move_note(vault, "Note.md", ".trash/Note.md")
+    assert "See [the note](Note.md)." in read_note(vault, "Other.md").content
+
+    move_note(vault, ".trash/Note.md", "Note.md")
+    assert "See [the note](Note.md)." in read_note(vault, "Other.md").content
+
+
 def test_rewrite_never_writes_a_target_a_wikilink_cannot_hold(vault: Path) -> None:
     write_note(vault, "Index.md", "See [[A/Spec]].")
     write_note(vault, "A/Spec.md", "moving")

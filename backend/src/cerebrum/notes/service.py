@@ -22,7 +22,7 @@ from cerebrum.notes.parser import (
     retarget_links,
     retarget_wikilinks,
 )
-from cerebrum.notes.wikilinks import NoteMove
+from cerebrum.notes.wikilinks import NoteMove, is_hidden_path
 from cerebrum.read_only import ensure_vault_writable
 
 logger = logging.getLogger(__name__)
@@ -224,8 +224,16 @@ def _retarget_other_notes(
                 other_raw = other_file.read_text(encoding="utf-8")
                 other_parsed = parse_note(other_path, other_raw)
 
-                new_body = retarget_links(
-                    other_parsed.body, other_path, old_target, new_target
+                # A note moved into a hidden folder (`.trash/`) is no longer
+                # indexed, so markdown links pointing there would only be
+                # dead. Leave them on the old path, as `retarget_wikilinks`
+                # does, so they work again once the note is restored.
+                new_body = (
+                    other_parsed.body
+                    if is_hidden_path(new_target)
+                    else retarget_links(
+                        other_parsed.body, other_path, old_target, new_target
+                    )
                 )
                 source = move.logical_path(other_path)
                 new_body = retarget_wikilinks(new_body, source, source, move)

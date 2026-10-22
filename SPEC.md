@@ -224,7 +224,7 @@ All endpoints under `/api`.
 | GET | `/api/notes/{path:path}` | Fetch one note: raw markdown + parsed metadata |
 | PUT | `/api/notes/{path:path}` | Create or update a note (body = raw markdown) |
 | DELETE | `/api/notes/{path:path}` | Delete a note file + its index rows |
-| POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's links that pointed at it (markdown links always, wikilinks only where they would stop resolving to it -- see [Wikilinks](#wikilinks)); `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
+| POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's links that pointed at it (markdown links always, wikilinks only where they would stop resolving to it -- see [Wikilinks](#wikilinks); a move into a hidden folder such as `.trash/` leaves both kinds as written, so they work again once the note is restored); `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 | GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |

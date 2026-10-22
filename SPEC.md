@@ -53,6 +53,13 @@ deliberate simplification; see [Known Gaps](#10-known-gaps--future-work).
   provider (`oidc_identities`: issuer plus subject). An account created
   through the provider has no password; its `password_hash` holds a fixed
   marker that no password matches.
+- **Read-only mode** (`CEREBRUM_VAULT_READ_ONLY=true`) serves a vault some
+  other tool owns -- a git checkout a cron keeps pulled, a synced folder, an
+  Obsidian vault edited elsewhere -- without ever writing to it. Startup
+  refuses an index or accounts database inside the vault (SQLite's side
+  files would still be writes), and does not create a missing vault folder.
+  Every write path is closed twice: the REST and MCP layers refuse it, and
+  the note and attachment write functions themselves raise as a backstop.
 
 ## 3. Note format
 
@@ -213,7 +220,7 @@ All endpoints under `/api`.
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 | GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |
 | GET | `/api/tasks` | Every open (unchecked) markdown checkbox across the vault, joined with its note's title, ordered by note path then line; read-only |
-| GET | `/api/vault-settings` | `{ daily_note_folder, templates_folder, link_format }` -- the server's vault conventions (see `CEREBRUM_DAILY_NOTE_FOLDER` / `CEREBRUM_TEMPLATES_FOLDER` / `CEREBRUM_LINK_FORMAT` below); the web app loads it on start and on login and keeps the last copy for offline use |
+| GET | `/api/vault-settings` | `{ daily_note_folder, templates_folder, link_format, read_only }` -- the server's vault conventions (see `CEREBRUM_DAILY_NOTE_FOLDER` / `CEREBRUM_TEMPLATES_FOLDER` / `CEREBRUM_LINK_FORMAT` below); the web app loads it on start and on login and keeps the last copy for offline use |
 | POST | `/api/attachments?note_path=...` | Upload a pasted image (raw bytes) into the note's `<stem>.attachments/` folder |
 | GET | `/api/attachments/{path:path}` | Serve a file inside a `*.attachments/` folder, or an image (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) anywhere in the vault outside hidden folders. Checked after symlinks are resolved, so nothing under `.cerebrum/` (the accounts database, the index) or any other hidden folder, and no non-image file outside `*.attachments/`, is ever served |
 | GET | `/api/attachments/find?name=...&from=...` | Where the image an embed like `![[cat.png]]` in note `from` refers to is: `{ path }`, chosen like a wikilink among same-named images; 404 if none |
@@ -227,6 +234,8 @@ Sign-in routes live outside the authenticated API (no bearer token needed unless
 | GET | `/api/auth/oidc/callback` | Where the provider sends the browser back. Success redirects to `/?oidc=1` (sign-in and invite sign-up, with the refresh cookie set) or `/settings` (link); a failure redirects to `/login`, `/register` or `/settings` with `?oidc_error=<code>` |
 | GET | `/api/account/identity` | `{ linked, provider_name, display_name, has_password, password_usable }` for the caller (authenticated) |
 | DELETE | `/api/account/identity` | Unlink the caller's provider identity; 409 when their password can't sign them in, since unlinking would lock them out |
+
+In read-only mode (`CEREBRUM_VAULT_READ_ONLY`) the four vault-writing routes -- `PUT` and `DELETE /api/notes/{path}`, `POST /api/notes/{path}/move` and `POST /api/attachments` -- answer 403 "This vault is read-only" (the upload before its body is read). Account, token and admin routes keep working: they write the accounts database, not the vault.
 
 The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated with a personal API token:
 
@@ -242,6 +251,8 @@ The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated wit
 | `append-to-note` | Add markdown at the end of an existing note, keeping the rest |
 | `edit-note` | Replace one passage (`old_text` must match exactly once, frontmatter included) |
 | `delete-note` | Delete a note and its attachments folder; links to it stay, as unresolved links |
+
+In read-only mode only the read tools (`list-notes`, `get-note`, `search-notes`, `get-graph`, `get-backlinks`) are registered, so `tools/list` shows exactly those. A client holding a tool list from before the switch gets "Unknown tool" for the others.
 
 `append-to-note` and `edit-note` read and write under the same per-file lock (`modify_note` in `notes/service.py`), so a concurrent write to the same note can't be lost between the read and the write; a client calling `get-note` and then `update-note` has no such guarantee.
 
@@ -401,6 +412,7 @@ API calls.
 | `LOG_LEVEL` | backend | `INFO` | logging level |
 | `CEREBRUM_VAULT_PATH` | backend | `./vault` | root dir of `.md` notes |
 | `CEREBRUM_INDEX_PATH` | backend | `<vault>/.cerebrum/index.sqlite3` | SQLite index location. A blank value means the default |
+| `CEREBRUM_VAULT_READ_ONLY` | backend | `false` | `true` serves the vault without writing to it: note and attachment writes get 403, MCP lists only its read tools, external renames are indexed without rewriting links, and the web app hides its write controls. Requires `CEREBRUM_INDEX_PATH` and `CEREBRUM_AUTH_DB_PATH` outside the vault, or startup fails |
 | `CEREBRUM_AUTH_DB_PATH` | backend | `<vault>/.cerebrum/auth.sqlite3` | accounts database location (accounts, sessions, API tokens). A blank value means the default. Move an existing file (with its `-wal`/`-shm` siblings) before setting it, or startup creates an empty accounts database and the setup token works again |
 | `CEREBRUM_DATA_HOST_PATH` | compose | `./data` | host folder for the opt-in `/data/cerebrum` mount that holds the two files above when they live outside the vault |
 | `CORS_ORIGINS` | backend | `["http://localhost:5173"]` | allowed frontend origins |
@@ -716,7 +728,9 @@ how consistently each was cited as high-value across that research.
       link-preserving the same way an in-app rename is, including
       relocating its attachment folder; see
       [Known gaps](#10-known-gaps--future-work) for the narrower
-      constraints that remain.
+      constraints that remain. In read-only mode a rename is indexed as a
+      delete plus a create instead: links in other notes stay exactly as
+      the owning tool wrote them, and no attachment folder is moved.
 - [x] see notes created or changed while the window was in the
       background (another device, an MCP client, a file edited on disk)
       in the sidebar when the window comes back to the foreground -- the
@@ -754,6 +768,10 @@ how consistently each was cited as high-value across that research.
   several providers at once, creating accounts on first provider sign-in
   without an invite, single logout at the provider, and an admin view of
   which accounts are linked.
+- **Read-only is per instance, not per account or token.** There is no
+  read-only account or API token on a writable vault yet. The workaround
+  is a second instance with `CEREBRUM_VAULT_READ_ONLY=true` over the same
+  vault folder, with its own index and accounts database.
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
 - **Frontend request/parameter types stay hand-kept for non-JSON

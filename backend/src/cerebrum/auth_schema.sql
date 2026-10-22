@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS invites (
     consumed_by  INTEGER REFERENCES users(id)
 );
 -- Same rationale as the two token_hash indexes above -- invite redemption
--- (accounts/service.py's _find_valid_invite_token_hash()) looks this up by
+-- (accounts/service.py's find_valid_invite_token_hash()) looks this up by
 -- exact hash too; cheap to add alongside the other two while touching this
 -- file, even though invite volume is low at this app's household scale.
 CREATE INDEX IF NOT EXISTS idx_invites_token_hash ON invites(token_hash);

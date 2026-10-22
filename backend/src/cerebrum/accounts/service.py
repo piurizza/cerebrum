@@ -115,9 +115,11 @@ def _is_first_account(auth_db: sqlite3.Connection) -> bool:
         return auth_db.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None
 
 
-def _find_valid_invite_token_hash(
-    auth_db: sqlite3.Connection, token: str
-) -> str | None:
+def find_valid_invite_token_hash(auth_db: sqlite3.Connection, token: str) -> str | None:
+    """The hash of `token` when it names an invite that is unexpired and
+    not yet consumed, else None. Also used by the OpenID Connect sign-up
+    (`api/oidc.py`), which checks the invite before sending the browser to
+    the provider and consumes it, by hash, in the callback."""
     token_hash = hash_token(token)
     now = datetime.now(UTC).isoformat()
     # Locked for the same reason as `_is_first_account` above.
@@ -216,7 +218,7 @@ async def register_account(
         ):
             raise InvalidTokenError("invalid setup token")
     else:
-        invite_token_hash = _find_valid_invite_token_hash(auth_db, token)
+        invite_token_hash = find_valid_invite_token_hash(auth_db, token)
         if invite_token_hash is None:
             raise InvalidTokenError(
                 "invalid, expired, or already-consumed invite token"
@@ -336,7 +338,7 @@ async def authenticate(
     differently (see `InvalidCredentialError`'s own docstring).
     """
     # Locked for the same reason as `_is_first_account`/
-    # `_find_valid_invite_token_hash` above -- a read against the shared
+    # `find_valid_invite_token_hash` above -- a read against the shared
     # `auth_db` connection is not safe to run unlocked while another thread
     # may be mid-write against it.
     with auth_write_lock:

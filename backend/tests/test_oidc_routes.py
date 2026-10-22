@@ -1,0 +1,544 @@
+"""The OpenID Connect start and callback routes (`api/oidc.py`), end to end
+through `TestClient` against the fake provider in `tests/oidc_fake.py`:
+signing in with a linked identity and signing up with an invite.
+
+Each flow runs the way a browser would: `POST /api/auth/oidc/start` sets the
+`oidc_flow` cookie in the client's jar, `FakeProvider.authorize()` stands in
+for the trip to the provider's login page, and the callback request carries
+the cookie back."""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import parse_qs, urlsplit
+
+import httpx
+import jwt
+import pytest
+from fastapi.testclient import TestClient
+
+from cerebrum.accounts.service import NO_PASSWORD_HASH
+from cerebrum.auth_db import hash_token
+from tests.mcp_test_support import issue_test_access_token
+from tests.oidc_fake import ISSUER, FakeProvider
+
+_START = "/api/auth/oidc/start"
+_CALLBACK = "/api/auth/oidc/callback"
+_SETUP_TOKEN = "y" * 32
+_PASSWORD = "correct horse battery staple"
+_JWT_SECRET = "x" * 32
+
+
+# -- helpers -------------------------------------------------------------------
+
+
+def _auth_db(client: TestClient) -> sqlite3.Connection:
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    return auth_db
+
+
+def _bootstrap_admin(client: TestClient) -> str:
+    """The first (admin) account, through the setup token; returns its
+    access token."""
+    return issue_test_access_token(client, "admin", _PASSWORD)
+
+
+def _create_invite(client: TestClient, admin_token: str) -> str:
+    response = client.post(
+        "/api/invites", headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert response.status_code == 201, response.text
+    return str(response.json()["token"])
+
+
+def _user_id(client: TestClient, username: str) -> int:
+    row = (
+        _auth_db(client)
+        .execute("SELECT id FROM users WHERE username = ?", (username,))
+        .fetchone()
+    )
+    assert row is not None, f"no user {username!r}"
+    return int(row["id"])
+
+
+def _count(client: TestClient, table: str) -> int:
+    row = _auth_db(client).execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()
+    return int(row["n"])
+
+
+def _link(client: TestClient, user_id: int, subject: str, issuer: str = ISSUER) -> None:
+    with _auth_db(client) as auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO oidc_identities (issuer, subject, user_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (issuer, subject, user_id, datetime.now(UTC).isoformat()),
+        )
+
+
+def _invite_consumed_by(client: TestClient, invite_token: str) -> Any:
+    row = (
+        _auth_db(client)
+        .execute(
+            "SELECT consumed_by FROM invites WHERE token_hash = ?",
+            (hash_token(invite_token),),
+        )
+        .fetchone()
+    )
+    assert row is not None
+    return row["consumed_by"]
+
+
+def _start(
+    client: TestClient,
+    intent: str = "login",
+    headers: dict[str, str] | None = None,
+    **fields: str,
+) -> httpx.Response:
+    return client.post(_START, json={"intent": intent, **fields}, headers=headers)
+
+
+def _callback(client: TestClient, **params: str) -> httpx.Response:
+    return client.get(_CALLBACK, params=params, follow_redirects=False)
+
+
+def _run_flow(
+    client: TestClient, provider: FakeProvider, intent: str = "login", **fields: str
+) -> httpx.Response:
+    """Start a flow, sign in at the fake provider, and return the callback's
+    response (not followed)."""
+    started = _start(client, intent, **fields)
+    assert started.status_code == 200, started.text
+    code, state = provider.authorize(started.json()["authorization_url"])
+    return _callback(client, code=code, state=state)
+
+
+def _set_cookies(response: httpx.Response) -> dict[str, str]:
+    """Every `Set-Cookie` header on `response`, by cookie name, lowercased
+    (`response.cookies` doesn't expose the flags)."""
+    cookies = {}
+    for header in response.headers.get_list("set-cookie"):
+        name = header.split("=", 1)[0]
+        cookies[name] = header.lower()
+    return cookies
+
+
+def _assert_flow_cookie_cleared(response: httpx.Response) -> None:
+    flow_cookie = _set_cookies(response).get("oidc_flow")
+    assert flow_cookie is not None, "the callback did not clear oidc_flow"
+    assert "max-age=0" in flow_cookie
+    assert "path=/api/auth/oidc/callback" in flow_cookie
+
+
+def _assert_failure(response: httpx.Response, location: str) -> None:
+    assert response.status_code == 303, response.text
+    assert response.headers["location"] == location
+    assert "refresh_token" not in _set_cookies(response)
+    _assert_flow_cookie_cleared(response)
+
+
+# -- signing in ----------------------------------------------------------------
+
+
+def test_login_with_a_linked_active_account_signs_in(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    _bootstrap_admin(client)
+    admin_id = _user_id(client, "admin")
+    _link(client, admin_id, fake_provider.subject)
+
+    response = _run_flow(client, fake_provider)
+
+    assert response.status_code == 303, response.text
+    assert response.headers["location"] == "/?oidc=1"
+    cookies = _set_cookies(response)
+    refresh_cookie = cookies["refresh_token"]
+    assert "httponly" in refresh_cookie
+    assert "samesite=strict" in refresh_cookie
+    assert "path=/api/auth/refresh" in refresh_cookie
+    _assert_flow_cookie_cleared(response)
+
+    refreshed = client.post("/api/auth/refresh")
+    assert refreshed.status_code == 200, refreshed.text
+    claims = jwt.decode(
+        refreshed.json()["access_token"], _JWT_SECRET, algorithms=["HS256"]
+    )
+    assert claims["sub"] == str(admin_id)
+
+
+def test_login_ignores_the_password_lockout(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    _bootstrap_admin(client)
+    admin_id = _user_id(client, "admin")
+    _link(client, admin_id, fake_provider.subject)
+    for _ in range(5):
+        client.post("/api/auth/login", json={"username": "admin", "password": "no"})
+    locked = client.post(
+        "/api/auth/login", json={"username": "admin", "password": _PASSWORD}
+    )
+    assert locked.status_code == 401
+
+    response = _run_flow(client, fake_provider)
+
+    assert response.headers["location"] == "/?oidc=1"
+    assert client.post("/api/auth/refresh").status_code == 200
+
+
+def test_login_with_an_unlinked_identity_is_refused_and_creates_nothing(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    _bootstrap_admin(client)
+
+    response = _run_flow(client, fake_provider)
+
+    _assert_failure(response, "/login?oidc_error=not_linked")
+    assert _count(client, "users") == 1
+    assert _count(client, "oidc_identities") == 0
+
+
+def test_login_ignores_a_link_from_another_issuer(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    _bootstrap_admin(client)
+    _link(
+        client,
+        _user_id(client, "admin"),
+        fake_provider.subject,
+        issuer="https://old-idp.test",
+    )
+
+    response = _run_flow(client, fake_provider)
+
+    _assert_failure(response, "/login?oidc_error=not_linked")
+
+
+def test_login_with_a_deactivated_account_is_refused(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    invite = _create_invite(client, admin_token)
+    registered = client.post(
+        "/api/auth/register",
+        json={"username": "bob", "password": _PASSWORD, "token": invite},
+    )
+    assert registered.status_code == 201, registered.text
+    bob_id = _user_id(client, "bob")
+    _link(client, bob_id, fake_provider.subject)
+    deactivated = client.post(
+        f"/api/accounts/{bob_id}/deactivate",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert deactivated.status_code == 204, deactivated.text
+
+    response = _run_flow(client, fake_provider)
+
+    _assert_failure(response, "/login?oidc_error=inactive")
+    sessions = (
+        _auth_db(client)
+        .execute(
+            "SELECT COUNT(*) AS n FROM refresh_tokens WHERE user_id = ?", (bob_id,)
+        )
+        .fetchone()
+    )
+    assert sessions["n"] == 0
+
+
+# -- signing up with an invite -------------------------------------------------
+
+
+def test_invite_sign_up_creates_a_linked_passwordless_account(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    invite = _create_invite(client, admin_token)
+
+    response = _run_flow(
+        client, fake_provider, "register", username="carol", invite_token=invite
+    )
+
+    assert response.status_code == 303, response.text
+    assert response.headers["location"] == "/?oidc=1"
+    _assert_flow_cookie_cleared(response)
+
+    row = (
+        _auth_db(client)
+        .execute(
+            "SELECT id, password_hash, is_admin, is_active FROM users "
+            "WHERE username = 'carol'"
+        )
+        .fetchone()
+    )
+    assert row["password_hash"] == NO_PASSWORD_HASH
+    assert row["is_admin"] == 0
+    assert row["is_active"] == 1
+    identity = (
+        _auth_db(client)
+        .execute("SELECT issuer, subject, user_id, display_name FROM oidc_identities")
+        .fetchone()
+    )
+    assert tuple(identity) == (ISSUER, fake_provider.subject, row["id"], "alice")
+    assert _invite_consumed_by(client, invite) == row["id"]
+
+    refreshed = client.post("/api/auth/refresh")
+    assert refreshed.status_code == 200, refreshed.text
+    claims = jwt.decode(
+        refreshed.json()["access_token"], _JWT_SECRET, algorithms=["HS256"]
+    )
+    assert claims["sub"] == str(row["id"])
+
+    # No password exists to sign in with.
+    password_login = client.post(
+        "/api/auth/login", json={"username": "carol", "password": NO_PASSWORD_HASH}
+    )
+    assert password_login.status_code == 401
+
+
+def test_invite_consumed_before_the_callback_is_refused(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    invite = _create_invite(client, admin_token)
+    started = _start(client, "register", username="carol", invite_token=invite)
+    assert started.status_code == 200, started.text
+    code, state = fake_provider.authorize(started.json()["authorization_url"])
+    # Someone else redeems the invite with a password in the meantime.
+    used = client.post(
+        "/api/auth/register",
+        json={"username": "dave", "password": _PASSWORD, "token": invite},
+    )
+    assert used.status_code == 201, used.text
+
+    response = _callback(client, code=code, state=state)
+
+    _assert_failure(response, "/register?oidc_error=invite_invalid&username=carol")
+    users = _auth_db(client).execute("SELECT username FROM users").fetchall()
+    assert sorted(row["username"] for row in users) == ["admin", "dave"]
+    assert _count(client, "oidc_identities") == 0
+
+
+def test_username_taken_before_the_callback_rolls_everything_back(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    invite = _create_invite(client, admin_token)
+    other_invite = _create_invite(client, admin_token)
+    started = _start(client, "register", username="carol", invite_token=invite)
+    assert started.status_code == 200, started.text
+    code, state = fake_provider.authorize(started.json()["authorization_url"])
+    taken = client.post(
+        "/api/auth/register",
+        json={"username": "carol", "password": _PASSWORD, "token": other_invite},
+    )
+    assert taken.status_code == 201, taken.text
+
+    response = _callback(client, code=code, state=state)
+
+    _assert_failure(response, "/register?oidc_error=username_taken&username=carol")
+    assert invite not in response.headers["location"]
+    assert _invite_consumed_by(client, invite) is None
+    assert _count(client, "users") == 2
+    assert _count(client, "oidc_identities") == 0
+
+
+def test_invite_sign_up_with_an_identity_linked_elsewhere_is_refused(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    _link(client, _user_id(client, "admin"), fake_provider.subject)
+    invite = _create_invite(client, admin_token)
+
+    response = _run_flow(
+        client, fake_provider, "register", username="carol", invite_token=invite
+    )
+
+    _assert_failure(response, "/register?oidc_error=already_linked&username=carol")
+    assert _invite_consumed_by(client, invite) is None
+    assert _count(client, "users") == 1
+
+
+def test_register_start_with_an_invalid_invite_is_refused_without_a_cookie(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    _bootstrap_admin(client)
+
+    response = _start(client, "register", username="carol", invite_token="nope")
+
+    assert response.status_code == 400, response.text
+    assert "set-cookie" not in response.headers
+    assert not fake_provider.requests
+
+
+def test_register_start_with_a_taken_username_is_refused_without_a_cookie(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    invite = _create_invite(client, admin_token)
+
+    response = _start(client, "register", username="admin", invite_token=invite)
+
+    assert response.status_code == 409, response.text
+    assert "set-cookie" not in response.headers
+    assert not fake_provider.requests
+
+
+@pytest.mark.usefixtures("fake_provider")
+def test_register_start_needs_a_username_and_an_invite(client: TestClient) -> None:
+    _bootstrap_admin(client)
+
+    response = _start(client, "register", username="carol")
+
+    assert response.status_code == 400, response.text
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.usefixtures("fake_provider")
+def test_start_refuses_an_unknown_intent(client: TestClient) -> None:
+    response = _start(client, "link")
+
+    assert response.status_code == 422, response.text
+    assert "set-cookie" not in response.headers
+
+
+def test_setup_token_bootstrap_still_works_and_is_not_offered_through_the_provider(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    refused = _start(client, "register", username="root", invite_token=_SETUP_TOKEN)
+    assert refused.status_code == 400, refused.text
+    assert "set-cookie" not in refused.headers
+    assert not fake_provider.requests
+
+    registered = client.post(
+        "/api/auth/register",
+        json={"username": "root", "password": _PASSWORD, "token": _SETUP_TOKEN},
+    )
+    assert registered.status_code == 201, registered.text
+    assert registered.json()["is_admin"] is True
+
+
+# -- failures and the flow cookie ----------------------------------------------
+
+
+@pytest.mark.usefixtures("fake_provider")
+def test_callback_without_a_flow_cookie_is_expired(client: TestClient) -> None:
+    response = _callback(client, code="some-code", state="some-state")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?oidc_error=expired"
+
+
+def test_provider_error_is_reported_without_echoing_the_provider(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    started = _start(client)
+    assert started.status_code == 200, started.text
+    _, state = fake_provider.authorize(started.json()["authorization_url"])
+
+    response = _callback(
+        client,
+        error="access_denied",
+        error_description="The user said <b>no</b>",
+        state=state,
+    )
+
+    _assert_failure(response, "/login?oidc_error=provider_error")
+    assert not fake_provider.token_requests
+
+
+@pytest.mark.usefixtures("fake_provider")
+def test_provider_error_on_sign_up_returns_to_the_register_page(
+    client: TestClient,
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    invite = _create_invite(client, admin_token)
+    started = _start(client, "register", username="carol", invite_token=invite)
+    assert started.status_code == 200, started.text
+
+    response = _callback(client, error="access_denied")
+
+    _assert_failure(response, "/register?oidc_error=provider_error&username=carol")
+
+
+def test_callback_without_a_code_is_a_provider_error(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    started = _start(client)
+    assert started.status_code == 200, started.text
+    _, state = fake_provider.authorize(started.json()["authorization_url"])
+
+    response = _callback(client, state=state)
+
+    _assert_failure(response, "/login?oidc_error=provider_error")
+
+
+def test_replayed_callback_fails_because_the_cookie_was_cleared(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    _bootstrap_admin(client)
+    _link(client, _user_id(client, "admin"), fake_provider.subject)
+    started = _start(client)
+    code, state = fake_provider.authorize(started.json()["authorization_url"])
+    first = _callback(client, code=code, state=state)
+    assert first.headers["location"] == "/?oidc=1"
+
+    replayed = _callback(client, code=code, state=state)
+
+    assert replayed.status_code == 303
+    assert replayed.headers["location"] == "/login?oidc_error=expired"
+    assert len(fake_provider.token_requests) == 1
+
+
+def test_start_reports_an_unreachable_provider(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    fake_provider.unreachable = True
+
+    response = _start(client)
+
+    assert response.status_code == 502, response.text
+    assert "set-cookie" not in response.headers
+
+
+# -- origin, cookie flags and configuration ------------------------------------
+
+
+@pytest.mark.usefixtures("fake_provider")
+def test_redirect_uri_and_cookie_follow_the_forwarded_origin(
+    client: TestClient,
+) -> None:
+    response = _start(
+        client,
+        headers={"Host": "fedora.example:8443", "X-Forwarded-Proto": "https"},
+    )
+
+    assert response.status_code == 200, response.text
+    query = parse_qs(urlsplit(response.json()["authorization_url"]).query)
+    assert query["redirect_uri"] == [
+        "https://fedora.example:8443/api/auth/oidc/callback"
+    ]
+    flow_cookie = _set_cookies(response)["oidc_flow"]
+    assert "secure" in flow_cookie
+    assert "httponly" in flow_cookie
+    assert "samesite=lax" in flow_cookie
+    assert "path=/api/auth/oidc/callback" in flow_cookie
+    assert "max-age=600" in flow_cookie
+
+
+@pytest.mark.usefixtures("fake_provider")
+def test_flow_cookie_is_not_secure_over_plain_http(client: TestClient) -> None:
+    response = _start(client)
+
+    assert response.status_code == 200, response.text
+    query = parse_qs(urlsplit(response.json()["authorization_url"]).query)
+    assert query["redirect_uri"] == ["http://testserver/api/auth/oidc/callback"]
+    flow_cookie = _set_cookies(response)["oidc_flow"]
+    assert "secure" not in flow_cookie
+    assert "samesite=lax" in flow_cookie
+
+
+def test_routes_are_not_found_without_a_provider(client: TestClient) -> None:
+    assert _start(client).status_code == 404
+    assert _callback(client, code="c", state="s").status_code == 404

@@ -47,52 +47,47 @@ def issue_session(user: User, auth_db: sqlite3.Connection) -> tuple[str, str]:
     value, so slow/memory-hard hashing would add latency with no security
     benefit.
     """
-    settings = get_settings()
-    now = datetime.now(UTC)
-
-    access_token = _mint_access_token(user.id, now)
-
-    refresh_token = secrets.token_urlsafe(32)
-    token_hash = hash_token(refresh_token)
-    family_id = secrets.token_hex(16)
-    expires_at = now + timedelta(days=settings.auth_refresh_token_ttl_days)
-
     # Single-row insert, but still taken under `auth_write_lock` per this
     # codebase's established idiom for any write against `auth_db` (see
     # `index/indexer.py`), not just multi-statement ones.
     with auth_write_lock, auth_db:
-        auth_db.execute(
-            """
-            INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (user.id, token_hash, family_id, expires_at.isoformat()),
-        )
-
-    return access_token, refresh_token
+        return insert_session(auth_db, user.id)
 
 
-def _insert_rotated_refresh_token(
+def insert_session(auth_db: sqlite3.Connection, user_id: int) -> tuple[str, str]:
+    """`issue_session()`'s work without its lock: the caller must already
+    hold `auth_write_lock` inside a `with auth_write_lock, auth_db:` block.
+    For a session that has to land in the same transaction as other writes
+    -- the OpenID Connect callback creates an account, links it and signs
+    it in as one unit (`accounts/oidc_accounts.py`). `auth_write_lock` is a
+    plain, non-reentrant `threading.Lock`, so calling `issue_session()`
+    from inside such a block would deadlock.
+
+    Returns `(access_token, refresh_token)`, like `issue_session()`."""
+    now = datetime.now(UTC)
+    refresh_token = _insert_refresh_token(auth_db, user_id, secrets.token_hex(16), now)
+    return _mint_access_token(user_id, now), refresh_token
+
+
+def _insert_refresh_token(
     auth_db: sqlite3.Connection, user_id: int, family_id: str, now: datetime
 ) -> str:
-    """Insert a rotation's replacement row -- same shape as the persisted
-    half of `issue_session()`, except `family_id` is carried over from the
-    token being rotated rather than freshly minted, which is what makes
-    it a rotation instead of a brand-new login. Returns the new refresh
-    token's plaintext (only its hash is persisted, same as
-    `issue_session()`)."""
+    """Insert one refresh-token row and return the token's plaintext (only
+    its hash is persisted). A new session passes a fresh `family_id`; a
+    rotation carries over the `family_id` of the token being rotated,
+    which is what makes it a rotation instead of a brand-new login. The
+    caller holds `auth_write_lock` and the transaction."""
     settings = get_settings()
-    new_refresh_token = secrets.token_urlsafe(32)
-    new_token_hash = hash_token(new_refresh_token)
+    refresh_token = secrets.token_urlsafe(32)
     expires_at = now + timedelta(days=settings.auth_refresh_token_ttl_days)
     auth_db.execute(
         """
         INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
         VALUES (?, ?, ?, ?)
         """,
-        (user_id, new_token_hash, family_id, expires_at.isoformat()),
+        (user_id, hash_token(refresh_token), family_id, expires_at.isoformat()),
     )
-    return new_refresh_token
+    return refresh_token
 
 
 def refresh_session(refresh_token: str, auth_db: sqlite3.Connection) -> tuple[str, str]:
@@ -149,7 +144,7 @@ def refresh_session(refresh_token: str, auth_db: sqlite3.Connection) -> tuple[st
         owner_row = rotate_cursor.fetchone()
 
         if owner_row is not None:
-            new_refresh_token = _insert_rotated_refresh_token(
+            new_refresh_token = _insert_refresh_token(
                 auth_db, owner_row["user_id"], owner_row["family_id"], now
             )
             return _mint_access_token(owner_row["user_id"], now), new_refresh_token

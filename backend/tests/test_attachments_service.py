@@ -330,3 +330,19 @@ def test_move_attachment_dir_merges_into_pre_existing_destination(vault: Path) -
     assert (new_dir / "orphan.png").is_file()
     # Not nested one level too deep under new_dir.
     assert not (new_dir / "idea.attachments").exists()
+
+
+def test_resolve_attachment_path_refuses_accounts_db_in_a_regular_folder(
+    vault: Path,
+) -> None:
+    # CEREBRUM_AUTH_DB_PATH can point anywhere, including a non-hidden
+    # folder inside the vault. It must stay unreachable directly and
+    # through an image-named symlink, because it isn't an image.
+    (vault / "data").mkdir()
+    (vault / "data" / "auth.sqlite3").write_bytes(b"secret")
+    (vault / "photos").mkdir()
+    (vault / "photos" / "cat.png").symlink_to(vault / "data" / "auth.sqlite3")
+
+    for path in ("data/auth.sqlite3", "photos/cat.png"):
+        with pytest.raises(InvalidAttachmentPathError):
+            resolve_attachment_path(vault, path)

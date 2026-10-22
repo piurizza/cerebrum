@@ -44,10 +44,13 @@ deliberate simplification; see [Known Gaps](#10-known-gaps--future-work).
   (configurable via `CEREBRUM_INDEX_PATH`). It exists purely for fast
   queries (listing, backlinks, graph, search) and can be deleted and
   rebuilt from the vault at any time with no data loss.
-- The **accounts database** (`<vault>/.cerebrum/auth.sqlite3`) holds
-  accounts, sessions, API tokens, invites, and the links between accounts
-  and identities at an OpenID Connect provider (`oidc_identities`: issuer
-  plus subject). Unlike the index it cannot be rebuilt. An account created
+- **Accounts, sessions and API tokens** live in a separate SQLite database,
+  by default `<vault>/.cerebrum/auth.sqlite3` (configurable via
+  `CEREBRUM_AUTH_DB_PATH`). Unlike the index it is not derived: back it up.
+  Setting both paths outside the vault keeps all of Cerebrum's own state out
+  of the notes folder, for a vault another tool owns. It also holds invites
+  and the links between accounts and identities at an OpenID Connect
+  provider (`oidc_identities`: issuer plus subject). An account created
   through the provider has no password; its `password_hash` holds a fixed
   marker that no password matches.
 
@@ -397,7 +400,9 @@ API calls.
 | `APP_NAME` | backend | `Cerebrum` | display name |
 | `LOG_LEVEL` | backend | `INFO` | logging level |
 | `CEREBRUM_VAULT_PATH` | backend | `./vault` | root dir of `.md` notes |
-| `CEREBRUM_INDEX_PATH` | backend | `<vault>/.cerebrum/index.sqlite3` | SQLite index location |
+| `CEREBRUM_INDEX_PATH` | backend | `<vault>/.cerebrum/index.sqlite3` | SQLite index location. A blank value means the default |
+| `CEREBRUM_AUTH_DB_PATH` | backend | `<vault>/.cerebrum/auth.sqlite3` | accounts database location (accounts, sessions, API tokens). A blank value means the default. Move an existing file (with its `-wal`/`-shm` siblings) before setting it, or startup creates an empty accounts database and the setup token works again |
+| `CEREBRUM_DATA_HOST_PATH` | compose | `./data` | host folder for the opt-in `/data/cerebrum` mount that holds the two files above when they live outside the vault |
 | `CORS_ORIGINS` | backend | `["http://localhost:5173"]` | allowed frontend origins |
 | `AUTH_JWT_SECRET` | backend | *(required)* | signing secret for access-token JWTs |
 | `AUTH_SETUP_TOKEN` | backend | *(required)* | one-time invite token for the first (bootstrap admin) account |

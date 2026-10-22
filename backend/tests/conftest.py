@@ -33,6 +33,16 @@ from tests.oidc_fake import FakeProvider, configure_oidc_env  # noqa: E402
 # pylint: enable=wrong-import-position
 
 
+@pytest.fixture(autouse=True)
+def _state_paths_inside_test_vault(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the index and accounts database to their in-vault defaults for
+    every test. A blank variable outranks backend/.env, so a developer's
+    CEREBRUM_AUTH_DB_PATH (or one in the shell) can never point the suite at
+    a real accounts database. Tests that need other paths set them again."""
+    monkeypatch.setenv("CEREBRUM_INDEX_PATH", "")
+    monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", "")
+
+
 @pytest.fixture
 def vault(tmp_path: Path) -> Path:
     vault_dir = tmp_path / "vault"

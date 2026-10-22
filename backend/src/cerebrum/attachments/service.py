@@ -22,8 +22,9 @@ _EXTENSION_BY_CONTENT_TYPE = {
 
 # Images served from anywhere in the vault, not just `*.attachments/`
 # folders, so notes imported from Obsidian (which keeps pasted images in
-# any folder) can show them. An allowlist on purpose: the vault also holds
-# the accounts database (`.cerebrum/auth.sqlite3`). SVG is left out
+# any folder) can show them. An allowlist on purpose: the vault may also
+# hold the accounts database (`.cerebrum/auth.sqlite3` unless
+# CEREBRUM_AUTH_DB_PATH moves it) and the index. SVG is left out
 # because it can carry scripts.
 _VAULT_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
 

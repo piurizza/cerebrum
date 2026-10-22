@@ -42,6 +42,11 @@ desktop/.env
 /vault/*
 !/vault/.gitkeep
 
+# State moved out of the vault (CEREBRUM_AUTH_DB_PATH / CEREBRUM_INDEX_PATH,
+# see docker-compose.yml) — holds the accounts database: password and token
+# hashes. Never commit it.
+/data/*
+
 # Agent planning artifacts (brainstorm/plan docs) — local working notes, not committed
 /docs/plans/
 

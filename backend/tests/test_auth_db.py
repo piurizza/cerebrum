@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from cerebrum.auth_db import connect
+from tests.mcp_test_support import issue_test_access_token, mcp_test_client
 
 
 def _auth_db_path(vault: Path) -> Path:
@@ -173,3 +174,55 @@ def test_one_account_links_at_most_one_identity_per_issuer(vault: Path) -> None:
         _insert_identity(conn, "https://other-idp.example", "sub-1", user_id)
     finally:
         conn.close()
+
+
+def test_app_keeps_accounts_where_cerebrum_auth_db_path_points(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    accounts_db = tmp_path / "state" / "auth.sqlite3"
+    monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", str(accounts_db))
+
+    with mcp_test_client(vault, monkeypatch) as client:
+        token = issue_test_access_token(client)
+        authed = client.get(
+            "/api/vault-settings", headers={"Authorization": f"Bearer {token}"}
+        )
+
+    assert authed.status_code == 200
+    assert accounts_db.is_file()
+    assert not _auth_db_path(vault).exists()
+
+
+def test_app_refuses_to_start_when_accounts_db_was_not_moved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The variable was set before the file was moved: starting would create
+    # an empty accounts database and re-arm the setup token.
+    vault = tmp_path / "vault"
+    connect(_auth_db_path(vault)).close()
+    monkeypatch.setenv(
+        "CEREBRUM_AUTH_DB_PATH", str(tmp_path / "state" / "auth.sqlite3")
+    )
+
+    with (
+        pytest.raises(RuntimeError, match="still at"),
+        mcp_test_client(vault, monkeypatch),
+    ):
+        pass
+
+    assert not (tmp_path / "state" / "auth.sqlite3").exists()
+
+
+def test_app_starts_once_the_accounts_db_was_moved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vault = tmp_path / "vault"
+    moved = tmp_path / "state" / "auth.sqlite3"
+    connect(moved).close()
+    connect(_auth_db_path(vault)).close()  # a leftover copy is fine
+    monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", str(moved))
+
+    with mcp_test_client(vault, monkeypatch) as client:
+        assert client.get("/api/health").status_code == 200

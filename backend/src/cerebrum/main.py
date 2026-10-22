@@ -89,7 +89,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     _refuse_unmoved_accounts_db(settings)
     async with AsyncExitStack() as stack:
-        settings.cerebrum_vault_path.mkdir(parents=True, exist_ok=True)
+        if not settings.cerebrum_vault_read_only:
+            settings.cerebrum_vault_path.mkdir(parents=True, exist_ok=True)
+        elif not settings.cerebrum_vault_path.is_dir():
+            # Never created here: a read-only vault is someone else's
+            # folder. The app still starts, with nothing to show, and the
+            # health check reports it degraded.
+            logger.warning(
+                "read-only vault %s does not exist", settings.cerebrum_vault_path
+            )
         app.state.db = connect(settings.index_path)
         stack.callback(app.state.db.close)
 
@@ -137,8 +145,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # new path first and permanently defeat pairing for that
             # rename, since an already-indexed path is never a rename
             # target.
+            # `retarget=False` keeps a read-only vault's renames from
+            # rewriting the notes that link to them (see PendingRenameCache).
             pending_renames = PendingRenameCache(
-                settings.watcher_rename_pairing_window_seconds
+                settings.watcher_rename_pairing_window_seconds,
+                retarget=not settings.cerebrum_vault_read_only,
             )
             try:
                 watcher_task = asyncio.create_task(
@@ -166,6 +177,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 # its own task, which watch_vault already catches
                 # internally (see watcher.py).
                 logger.warning("failed to start watcher/backstop tasks: %s", exc)
+            # Exposed so tests can check both tasks are still alive.
+            app.state.watcher_task = watcher_task
+            app.state.backstop_task = backstop_task
 
             async def _stop_background_tasks() -> None:
                 stop_event.set()

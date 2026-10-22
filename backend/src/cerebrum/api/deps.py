@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, Request
 
 from cerebrum.auth import AuthenticationError, verify_credential
 from cerebrum.auth_db import auth_write_lock
+from cerebrum.settings import get_settings
 
 
 def get_db(request: Request) -> sqlite3.Connection:
@@ -79,3 +80,14 @@ def require_admin(
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     return identity
+
+
+def require_writable_vault() -> None:
+    """Refuse a vault write when CEREBRUM_VAULT_READ_ONLY is on. Attached as
+    a route-level dependency, which runs before the handler reads the
+    request body -- so an upload is refused without being received.
+
+    403, like `require_admin`: a policy refusal the frontend shows
+    verbatim, not a missing route (405) or a session problem (401)."""
+    if get_settings().cerebrum_vault_read_only:
+        raise HTTPException(status_code=403, detail="This vault is read-only")

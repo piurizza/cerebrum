@@ -81,10 +81,18 @@ def _invalid_path_error(path: str) -> ToolError:
 def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
     """Register the note tools against `mcp`, closing over `app` (KTD8) to
     reach the shared index connection and vault path the same way REST
-    routes do."""
-    # Read once at registration: changing the setting needs a restart.
-    link_guidance = _LINK_GUIDANCE[get_settings().cerebrum_link_format]
+    routes do. A read-only vault gets only the read tools, so `tools/list`
+    never offers an agent a write it would be refused."""
+    # Read once at registration: changing either setting needs a restart.
+    settings = get_settings()
+    _register_notes_read_tools(mcp, app)
+    if not settings.cerebrum_vault_read_only:
+        _register_notes_write_tools(
+            mcp, app, _LINK_GUIDANCE[settings.cerebrum_link_format]
+        )
 
+
+def _register_notes_read_tools(mcp: FastMCP, app: FastAPI) -> None:
     @mcp.tool(
         name="list-notes",
         description=(
@@ -131,6 +139,8 @@ def register_notes_tools(mcp: FastMCP, app: FastAPI) -> None:
     def search_notes(query: str = "") -> list[NoteMeta]:
         return search_notes_in_index(get_db(app), query)
 
+
+def _register_notes_write_tools(mcp: FastMCP, app: FastAPI, link_guidance: str) -> None:
     @mcp.tool(
         name="create-note",
         description=(

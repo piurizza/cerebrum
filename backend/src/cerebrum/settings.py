@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # e.g. when the vault is a checkout some other tool owns.
     cerebrum_index_path: Path | None = None
     cerebrum_auth_db_path: Path | None = None
+    # Serve the vault without ever writing to it: note and attachment
+    # writes are refused, MCP write tools aren't offered, and an external
+    # rename is indexed without relinking. Requires both paths above to be
+    # outside the vault.
+    cerebrum_vault_read_only: bool = False
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
@@ -120,6 +125,25 @@ class Settings(BaseSettings):
                 "CEREBRUM_INDEX_PATH and CEREBRUM_AUTH_DB_PATH must be different "
                 f"files, both are {self.index_path}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _keep_state_out_of_a_read_only_vault(self) -> Settings:
+        """A read-only vault must not hold the index or the accounts
+        database: SQLite writes to them (and their -wal/-shm files) on
+        every request, which would still be Cerebrum writing into it."""
+        if not self.cerebrum_vault_read_only:
+            return self
+        vault = self.cerebrum_vault_path.resolve()
+        for env_name, path in (
+            ("CEREBRUM_INDEX_PATH", self.index_path),
+            ("CEREBRUM_AUTH_DB_PATH", self.auth_db_path),
+        ):
+            if path.resolve().is_relative_to(vault):
+                raise ValueError(
+                    f"CEREBRUM_VAULT_READ_ONLY needs {env_name} outside the vault "
+                    f"({vault}), got {path}"
+                )
         return self
 
     @model_validator(mode="after")

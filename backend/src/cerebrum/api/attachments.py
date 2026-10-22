@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from cerebrum.api.deps import require_writable_vault
 from cerebrum.attachments.service import (
     AttachmentTooLargeError,
     InvalidAttachmentPathError,
@@ -29,7 +30,11 @@ class AttachmentUploadResponse(BaseModel):
     path: str
 
 
-@router.post("", response_model=AttachmentUploadResponse)
+@router.post(
+    "",
+    response_model=AttachmentUploadResponse,
+    dependencies=[Depends(require_writable_vault)],
+)
 async def upload_attachment(
     note_path: str, request: Request
 ) -> AttachmentUploadResponse:

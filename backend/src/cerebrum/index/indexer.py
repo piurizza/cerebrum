@@ -57,10 +57,18 @@ class PendingRenameCache:
     `self._lock` for their full body, since `prune`/`pop_unambiguous_match`
     each do a read-then-mutate sequence on `self._entries` that isn't
     safe to interleave with a concurrent mutation from the other thread.
+
+    `retarget=False` (a read-only vault) still pairs renames but never
+    relinks them: `_apply_pairs` and `_maybe_cross_window_pair` decline, so
+    each side is indexed as a plain delete and create and no note in the
+    vault is rewritten. Carried
+    here because this cache is the one object both the watcher and the
+    backstop rescan already share.
     """
 
-    def __init__(self, window_seconds: float) -> None:
+    def __init__(self, window_seconds: float, *, retarget: bool = True) -> None:
         self._window_seconds = window_seconds
+        self.retarget = retarget
         self._entries: list[_PendingDeletion] = []
         self._lock = threading.Lock()
 
@@ -429,8 +437,20 @@ def _apply_retarget(
     return True
 
 
+def _relinking_declined(pair: tuple[str, str]) -> bool:
+    """A read-only vault's rename (`PendingRenameCache(retarget=False)`):
+    log it and report it as not applied, so the caller indexes the pair as
+    a plain delete and create and no note is rewritten."""
+    logger.info("vault is read-only; indexing rename %s -> %s without relinking", *pair)
+    return False
+
+
 def _apply_pairs(
-    conn: sqlite3.Connection, vault_root: Path, pairs: list[tuple[str, str]]
+    conn: sqlite3.Connection,
+    vault_root: Path,
+    pairs: list[tuple[str, str]],
+    *,
+    retarget: bool,
 ) -> tuple[set[str], set[str]]:
     """Applies each confirmed same-batch rename pair via
     `_apply_retarget` (removing `old_path`'s row, since it hasn't been
@@ -447,6 +467,9 @@ def _apply_pairs(
     paired_old: set[str] = set()
     paired_new: set[str] = set()
     for index, (old_path, new_path) in enumerate(pairs):
+        if not retarget:
+            _relinking_declined((old_path, new_path))
+            continue
         pending = {later_new: later_old for later_old, later_new in pairs[index + 1 :]}
         if _apply_retarget(
             conn,
@@ -486,6 +509,8 @@ def _maybe_cross_window_pair(
     old_path = pending_renames.pop_unambiguous_match(content_hash)
     if old_path is None:
         return False
+    if not pending_renames.retarget:
+        return _relinking_declined((old_path, new_path))
     return _apply_retarget(conn, vault_root, (old_path, new_path), remove_old=False)
 
 
@@ -633,7 +658,9 @@ def apply_watch_batch(
     batch = _classify_batch(conn, vault_root, rel_paths, pending_renames, now)
 
     pairs = _match_unambiguous_pairs(batch.old_hashes, batch.new_hashes)
-    paired_old, paired_new = _apply_pairs(conn, vault_root, pairs)
+    paired_old, paired_new = _apply_pairs(
+        conn, vault_root, pairs, retarget=pending_renames.retarget
+    )
 
     # Cross-window matching runs against `pending_renames` as it stood
     # BEFORE this batch's own unpaired `gone` paths are added below --

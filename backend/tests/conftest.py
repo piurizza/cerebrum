@@ -88,6 +88,37 @@ def client(vault: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]
 
 
 @pytest.fixture
+def read_only_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Turn on read-only vault mode, with the index and accounts database
+    under `tmp_path/state/` -- read-only mode refuses to start with either
+    inside the vault. Yields that state folder."""
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("CEREBRUM_VAULT_READ_ONLY", "true")
+    monkeypatch.setenv("CEREBRUM_INDEX_PATH", str(state_dir / "index.sqlite3"))
+    monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", str(state_dir / "auth.sqlite3"))
+    get_settings.cache_clear()
+    yield state_dir
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def read_only_client(read_only_env: Path, client: TestClient) -> TestClient:
+    """`client` on a read-only vault. `read_only_env` is listed first so
+    its variables are set before `client` builds the app."""
+    del read_only_env
+    return client
+
+
+@pytest.fixture
+def authenticated_read_only_client(read_only_client: TestClient) -> TestClient:
+    """`authenticated_client` on a read-only vault: signing in writes only
+    the accounts database, which lives outside the vault."""
+    token = issue_test_access_token(read_only_client)
+    read_only_client.headers.update({"Authorization": f"Bearer {token}"})
+    return read_only_client
+
+
+@pytest.fixture
 def authenticated_client(client: TestClient) -> TestClient:
     """Same `client` fixture, but with a real, live access token attached
     as a default `Authorization: Bearer <token>` header -- for REST tests

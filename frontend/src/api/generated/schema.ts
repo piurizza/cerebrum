@@ -320,7 +320,8 @@ export interface paths {
          * Get Vault Settings
          * @description Server-side vault conventions the web app needs, already normalized
          *     by `Settings` (no leading/trailing slashes, never empty), and the link
-         *     form the editor's `[[` picker inserts.
+         *     form the editor's `[[` picker inserts, and whether the vault is
+         *     read-only.
          */
         get: operations["get_vault_settings_api_vault_settings_get"];
         put?: never;
@@ -630,6 +631,8 @@ export interface components {
              * @enum {string}
              */
             link_format: "markdown" | "wikilink";
+            /** Read Only */
+            read_only: boolean;
         };
     };
     responses: never;

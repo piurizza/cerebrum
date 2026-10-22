@@ -379,3 +379,38 @@ def test_password_switch_off_linked_non_admin_cannot_unlink(
     assert refused.status_code == 409, refused.text
     assert allowed.status_code == 204, allowed.text
     assert _links(client) == [("bob", ISSUER)]
+
+
+@pytest.mark.usefixtures("fake_provider")
+def test_password_switch_off_only_usable_passwords_can_be_changed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    admin_token = _register_and_login(client)
+    bob_token = _invited_user(client, admin_token)
+    _link(client, "bob")
+    _link(client, "mira", subject="admin-subject")
+    _switch_password_login_off(monkeypatch)
+
+    refused = _change_password(client, bob_token, _OLD_PASSWORD, _NEW_PASSWORD)
+    # The admin's password still signs in (break-glass), so it can change.
+    allowed = _change_password(client, admin_token, _OLD_PASSWORD, _NEW_PASSWORD)
+
+    assert refused.status_code == 403, refused.text
+    assert refused.json() == {
+        "detail": "Your password does not sign you in, so it cannot be changed"
+    }
+    assert allowed.status_code == 200, allowed.text
+    assert _login_status(client, _NEW_PASSWORD) == 200
+
+
+@pytest.mark.usefixtures("fake_provider")
+def test_passwordless_account_cannot_change_password(client: TestClient) -> None:
+    admin_token = _register_and_login(client)
+    carol_token = _passwordless_user(client, admin_token)
+
+    response = _change_password(client, carol_token, "anything at all", _NEW_PASSWORD)
+
+    assert response.status_code == 403, response.text
+    assert response.json() == {
+        "detail": "Your password does not sign you in, so it cannot be changed"
+    }

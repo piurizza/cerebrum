@@ -5,9 +5,11 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from cerebrum.accounts.oidc_accounts import password_login_open
 from cerebrum.accounts.service import (
     InvalidCredentialError,
     InvalidTokenError,
+    PasswordRegistrationClosedError,
     TokenReuseDetectedError,
     User,
     UsernameTakenError,
@@ -68,6 +70,12 @@ async def register(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UsernameTakenError as exc:
         raise HTTPException(status_code=409, detail="Username already taken") from exc
+    except PasswordRegistrationClosedError as exc:
+        provider_name = get_settings().oidc_provider_name
+        raise HTTPException(
+            status_code=403,
+            detail=f"Password registration is turned off; sign up with {provider_name}",
+        ) from exc
 
 
 class LoginRequest(BaseModel):
@@ -86,7 +94,14 @@ async def login(
     auth_db: sqlite3.Connection = Depends(get_auth_db),
 ) -> LoginResponse:
     try:
-        user = await authenticate(body.username, body.password, auth_db)
+        # With `AUTH_PASSWORD_LOGIN` off, a linked non-admin's right
+        # password is refused exactly like a wrong one (KTD11).
+        user = await authenticate(
+            body.username,
+            body.password,
+            auth_db,
+            password_login_open=lambda account: password_login_open(auth_db, account),
+        )
     except InvalidCredentialError as exc:
         raise HTTPException(
             status_code=401, detail="Invalid username or password"

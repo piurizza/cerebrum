@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import secrets
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -73,6 +74,12 @@ class InvalidTokenError(Exception):
 
 class UsernameTakenError(Exception):
     """Registration with an existing username."""
+
+
+class PasswordRegistrationClosedError(Exception):
+    """Registration with an invite while `AUTH_PASSWORD_LOGIN` is off: new
+    people sign up through the provider instead (KTD11). The setup-token
+    bootstrap of the first account is never refused."""
 
 
 class TokenReuseDetectedError(Exception):
@@ -206,6 +213,10 @@ async def register_account(
     unauthenticated caller must not be able to learn whether a username is
     taken by presenting no token, or a bad one, and comparing error
     messages (see `InvalidTokenError` vs `UsernameTakenError` below).
+
+    With `AUTH_PASSWORD_LOGIN` off, every registration but the bootstrap
+    raises `PasswordRegistrationClosedError`, before the invite is even
+    looked at.
     """
     settings = get_settings()
     is_first_account = _is_first_account(auth_db)
@@ -217,6 +228,8 @@ async def register_account(
             settings.auth_setup_token.get_secret_value().encode("utf-8"),
         ):
             raise InvalidTokenError("invalid setup token")
+    elif not settings.auth_password_login:
+        raise PasswordRegistrationClosedError("password registration is turned off")
     else:
         invite_token_hash = find_valid_invite_token_hash(auth_db, token)
         if invite_token_hash is None:
@@ -327,7 +340,11 @@ def _record_successful_login(auth_db: sqlite3.Connection, user_id: int) -> None:
 
 
 async def authenticate(
-    username: str, password: str, auth_db: sqlite3.Connection
+    username: str,
+    password: str,
+    auth_db: sqlite3.Connection,
+    *,
+    password_login_open: Callable[[User], bool] | None = None,
 ) -> User:
     """Verify a username/password login, returning the `User` on success.
 
@@ -336,6 +353,14 @@ async def authenticate(
     locked-out account -- deliberately one exception type for all four, so
     the API layer has no distinguishable cause to leak by mapping them
     differently (see `InvalidCredentialError`'s own docstring).
+
+    `password_login_open`, when given, is asked whether password login is
+    open to the account (KTD11). A refusal is the same
+    `InvalidCredentialError`, and is decided only once the password has
+    been verified, so it reveals nothing about the account to someone who
+    doesn't know the password. It is not a successful login, so it leaves
+    the lockout count alone; nor a failed one, since the password was
+    right.
     """
     # Locked for the same reason as `_is_first_account`/
     # `find_valid_invite_token_hash` above -- a read against the shared
@@ -382,15 +407,18 @@ async def authenticate(
         _record_failed_login(auth_db, row["id"])
         raise InvalidCredentialError("invalid username or password")
 
-    _record_successful_login(auth_db, row["id"])
-
-    return User(
+    user = User(
         id=row["id"],
         username=row["username"],
         is_admin=bool(row["is_admin"]),
         is_active=bool(row["is_active"]),
         created_at=row["created_at"],
     )
+    if password_login_open is not None and not password_login_open(user):
+        raise InvalidCredentialError("password login is closed to this account")
+
+    _record_successful_login(auth_db, row["id"])
+    return user
 
 
 async def change_password(

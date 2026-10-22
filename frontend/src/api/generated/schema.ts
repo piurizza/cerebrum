@@ -301,6 +301,11 @@ export interface paths {
          *     authenticated, and a 401 here would send the frontend's
          *     refresh-and-retry path (`fetchWithRetry()` in `client.ts`) through a
          *     pointless token refresh before surfacing the error.
+         *
+         *     So is an account whose password doesn't sign it in (KTD8): one with no
+         *     password, or a linked non-admin's while password login is switched off
+         *     (KTD11). Checked first, so such an account's guesses at its own
+         *     password never reach the lockout count.
          */
         post: operations["change_own_password_api_account_password_post"];
         delete?: never;

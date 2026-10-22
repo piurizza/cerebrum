@@ -10,6 +10,7 @@ the cookie back."""
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import UTC, datetime
 from typing import Any
@@ -23,7 +24,7 @@ from fastapi.testclient import TestClient
 from cerebrum.accounts.service import NO_PASSWORD_HASH
 from cerebrum.auth_db import hash_token
 from tests.mcp_test_support import issue_test_access_token
-from tests.oidc_fake import ISSUER, FakeProvider
+from tests.oidc_fake import ISSUER, FakeProvider, configure_oidc_env
 
 _START = "/api/auth/oidc/start"
 _CALLBACK = "/api/auth/oidc/callback"
@@ -692,6 +693,185 @@ def test_unlinking_a_password_account_stops_provider_sign_in(
     assert unlinked.status_code == 204, unlinked.text
     assert _count(client, "oidc_identities") == 0
     _assert_failure(_run_flow(client, fake_provider), "/login?oidc_error=not_linked")
+
+
+# -- admin group sync ----------------------------------------------------------
+
+# `configure_oidc_env()` turns admin sync on for a `client` that already
+# exists: the routes read `get_settings()` per request.
+_ADMIN_GROUP = "cerebrum-admins"
+
+
+def _is_admin(client: TestClient, username: str) -> bool:
+    row = (
+        _auth_db(client)
+        .execute("SELECT is_admin FROM users WHERE username = ?", (username,))
+        .fetchone()
+    )
+    assert row is not None, f"no user {username!r}"
+    return bool(row["is_admin"])
+
+
+def _set_admin(client: TestClient, username: str, is_admin: bool = True) -> None:
+    with _auth_db(client) as auth_db:
+        auth_db.execute(
+            "UPDATE users SET is_admin = ? WHERE username = ?",
+            (int(is_admin), username),
+        )
+
+
+def _provider_sign_in(
+    client: TestClient, provider: FakeProvider, subject: str, groups: list[str]
+) -> None:
+    """Sign in through the provider as `subject`, a member of `groups`."""
+    provider.subject = subject
+    provider.extra_claims["groups"] = groups
+    response = _run_flow(client, provider)
+    assert response.headers["location"] == "/?oidc=1", response.text
+
+
+def _provider_only_user(
+    client: TestClient, provider: FakeProvider, admin_token: str, username: str
+) -> None:
+    """A passwordless account signed up through the provider, linked to the
+    subject `username`."""
+    invite = _create_invite(client, admin_token)
+    provider.subject = username
+    signed_up = _run_flow(
+        client, provider, "register", username=username, invite_token=invite
+    )
+    assert signed_up.headers["location"] == "/?oidc=1", signed_up.text
+
+
+def _skipped_demotions(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "cerebrum.accounts.oidc_accounts"
+        and record.levelno == logging.WARNING
+    ]
+
+
+def test_admin_group_membership_promotes_and_its_loss_demotes(
+    fake_provider: FakeProvider, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    _invited_password_user(client, admin_token)
+    _link(client, _user_id(client, "bob"), "bob-subject")
+    configure_oidc_env(monkeypatch, OIDC_ADMIN_GROUP=_ADMIN_GROUP)
+
+    _provider_sign_in(client, fake_provider, "bob-subject", ["staff", _ADMIN_GROUP])
+    assert _is_admin(client, "bob") is True
+
+    _provider_sign_in(client, fake_provider, "bob-subject", ["staff"])
+    assert _is_admin(client, "bob") is False
+
+
+def test_admin_removed_from_the_group_is_demoted_when_another_admin_has_a_password(
+    fake_provider: FakeProvider, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    _invited_password_user(client, admin_token)
+    _set_admin(client, "bob")
+    _link(client, _user_id(client, "bob"), "bob-subject")
+    configure_oidc_env(monkeypatch, OIDC_ADMIN_GROUP=_ADMIN_GROUP)
+
+    _provider_sign_in(client, fake_provider, "bob-subject", [])
+
+    assert _is_admin(client, "bob") is False
+    assert _is_admin(client, "admin") is True
+
+
+def test_demoting_the_only_active_admin_is_skipped_and_logged(
+    fake_provider: FakeProvider,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    _provider_only_user(client, fake_provider, admin_token, "carol")
+    _set_admin(client, "carol")
+    # The bootstrap admin's password no longer counts: the account is
+    # deactivated.
+    with _auth_db(client) as auth_db:
+        auth_db.execute("UPDATE users SET is_active = 0 WHERE username = 'admin'")
+    configure_oidc_env(monkeypatch, OIDC_ADMIN_GROUP=_ADMIN_GROUP)
+
+    with caplog.at_level(logging.WARNING, logger="cerebrum.accounts.oidc_accounts"):
+        _provider_sign_in(client, fake_provider, "carol", ["staff"])
+
+    assert _is_admin(client, "carol") is True
+    assert len(_skipped_demotions(caplog)) == 1
+
+
+def test_demotion_is_skipped_when_no_other_admin_has_a_password(
+    fake_provider: FakeProvider,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    _link(client, _user_id(client, "admin"), "admin-subject")
+    # Another admin, but one with no password to fall back on.
+    _provider_only_user(client, fake_provider, admin_token, "carol")
+    _set_admin(client, "carol")
+    configure_oidc_env(monkeypatch, OIDC_ADMIN_GROUP=_ADMIN_GROUP)
+
+    with caplog.at_level(logging.WARNING, logger="cerebrum.accounts.oidc_accounts"):
+        _provider_sign_in(client, fake_provider, "admin-subject", ["staff"])
+
+    assert _is_admin(client, "admin") is True
+    assert len(_skipped_demotions(caplog)) == 1
+
+
+def test_invited_member_of_the_admin_group_starts_as_a_non_admin(
+    fake_provider: FakeProvider, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    configure_oidc_env(monkeypatch, OIDC_ADMIN_GROUP=_ADMIN_GROUP)
+    fake_provider.extra_claims["groups"] = [_ADMIN_GROUP]
+
+    _provider_only_user(client, fake_provider, admin_token, "carol")
+    assert _is_admin(client, "carol") is False
+
+    _provider_sign_in(client, fake_provider, "carol", [_ADMIN_GROUP])
+    assert _is_admin(client, "carol") is True
+
+
+def test_without_an_admin_group_provider_sign_in_never_changes_admin(
+    fake_provider: FakeProvider, client: TestClient
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    _invited_password_user(client, admin_token)
+    _link(client, _user_id(client, "admin"), "admin-subject")
+    _link(client, _user_id(client, "bob"), "bob-subject")
+
+    _provider_sign_in(client, fake_provider, "admin-subject", [])
+    _provider_sign_in(client, fake_provider, "bob-subject", [_ADMIN_GROUP])
+
+    assert _is_admin(client, "admin") is True
+    assert _is_admin(client, "bob") is False
+
+
+def test_password_sign_in_never_changes_admin(
+    fake_provider: FakeProvider, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    admin_token = _bootstrap_admin(client)
+    _invited_password_user(client, admin_token)
+    _link(client, _user_id(client, "admin"), "admin-subject")
+    _link(client, _user_id(client, "bob"), fake_provider.subject)
+    configure_oidc_env(monkeypatch, OIDC_ADMIN_GROUP=_ADMIN_GROUP)
+
+    for username in ("admin", "bob"):
+        login = client.post(
+            "/api/auth/login", json={"username": username, "password": _PASSWORD}
+        )
+        assert login.status_code == 200, login.text
+
+    # The admin is in no group and bob is in the admin group (the fake
+    # provider's default), yet only a provider sign-in would act on that.
+    assert _is_admin(client, "admin") is True
+    assert _is_admin(client, "bob") is False
 
 
 # -- failures and the flow cookie ----------------------------------------------

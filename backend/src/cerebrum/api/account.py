@@ -46,7 +46,17 @@ async def change_own_password(
     authenticated, and a 401 here would send the frontend's
     refresh-and-retry path (`fetchWithRetry()` in `client.ts`) through a
     pointless token refresh before surfacing the error.
+
+    So is an account whose password doesn't sign it in (KTD8): one with no
+    password, or a linked non-admin's while password login is switched off
+    (KTD11). Checked first, so such an account's guesses at its own
+    password never reach the lockout count.
     """
+    if not identity_status(auth_db, int(identity)).password_usable:
+        raise HTTPException(
+            status_code=403,
+            detail="Your password does not sign you in, so it cannot be changed",
+        )
     try:
         user = await change_password(
             int(identity), body.current_password, body.new_password, auth_db

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from cerebrum.accounts.service import NO_PASSWORD_HASH
 from cerebrum.settings import get_settings
+from tests.mcp_test_support import issue_test_access_token
 
 # Matches conftest.py's `client` fixture, which sets AUTH_SETUP_TOKEN to
 # this exact value before constructing the app.
@@ -500,3 +501,139 @@ def test_auth_methods_reports_password_login_off(
         "password_login": False,
         "oidc": {"provider_name": "SSO"},
     }
+
+
+# --- AUTH_PASSWORD_LOGIN=false ------------------------------------------------
+
+
+def _switch_password_login_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_oidc(monkeypatch, AUTH_PASSWORD_LOGIN="false")
+
+
+def _link(client: TestClient, username: str, subject: str) -> None:
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    with auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO oidc_identities (issuer, subject, user_id, created_at)
+            SELECT ?, ?, id, ? FROM users WHERE username = ?
+            """,
+            (_OIDC_ISSUER, subject, datetime.now(UTC).isoformat(), username),
+        )
+
+
+def _login(client: TestClient, username: str, password: str = _PASSWORD) -> int:
+    return client.post(
+        "/api/auth/login", json={"username": username, "password": password}
+    ).status_code
+
+
+def test_password_switch_off_admin_still_signs_in_with_a_password(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    issue_test_access_token(client, "root", _PASSWORD)
+    _link(client, "root", "root-subject")
+    _switch_password_login_off(monkeypatch)
+
+    assert _login(client, "root") == 200
+
+
+def test_password_switch_off_linked_non_admin_is_refused_like_a_wrong_password(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _insert_user(client, "lena", _PASSWORD)
+    _link(client, "lena", "lena-subject")
+    _switch_password_login_off(monkeypatch)
+    assert _login(client, "lena", "wrong password") == 401
+
+    refused = client.post(
+        "/api/auth/login", json={"username": "lena", "password": _PASSWORD}
+    )
+    wrong = client.post(
+        "/api/auth/login", json={"username": "lena", "password": "wrong password"}
+    )
+
+    assert refused.status_code == 401
+    assert refused.json() == wrong.json() == {"detail": "Invalid username or password"}
+    assert "refresh_token" not in refused.cookies
+    # The refusal is not a successful login: it does not reset the lockout
+    # count the two wrong passwords built up.
+    assert _failed_login_attempts(client, "lena") == 2
+
+
+def test_password_switch_off_unlinked_non_admin_signs_in_until_linked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _insert_user(client, "milo", _PASSWORD)
+    _switch_password_login_off(monkeypatch)
+
+    assert _login(client, "milo") == 200
+
+    _link(client, "milo", "milo-subject")
+    assert _login(client, "milo") == 401
+
+
+def test_password_switch_off_ignores_a_link_from_another_issuer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _insert_user(client, "nico", _PASSWORD)
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    with auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO oidc_identities (issuer, subject, user_id, created_at)
+            SELECT 'https://old-idp.test', 'nico-subject', id, ? FROM users
+            WHERE username = 'nico'
+            """,
+            (datetime.now(UTC).isoformat(),),
+        )
+    _switch_password_login_off(monkeypatch)
+
+    assert _login(client, "nico") == 200
+
+
+def test_password_switch_off_refuses_invite_registration(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    admin_token = issue_test_access_token(client, "root", _PASSWORD)
+    invite = client.post(
+        "/api/invites", headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert invite.status_code == 201, invite.text
+    _configure_oidc(
+        monkeypatch, AUTH_PASSWORD_LOGIN="false", OIDC_PROVIDER_NAME="Authentik"
+    )
+
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "username": "omar",
+            "password": _PASSWORD,
+            "token": invite.json()["token"],
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Password registration is turned off; sign up with Authentik"
+    }
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    assert (
+        auth_db.execute("SELECT 1 FROM users WHERE username = 'omar'").fetchone()
+        is None
+    )
+
+
+def test_password_switch_off_still_bootstraps_the_first_admin(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _switch_password_login_off(monkeypatch)
+
+    response = client.post(
+        "/api/auth/register",
+        json={"username": "root", "password": _PASSWORD, "token": _SETUP_TOKEN},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["is_admin"] is True
+    assert _login(client, "root") == 200

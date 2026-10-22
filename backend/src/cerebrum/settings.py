@@ -26,7 +26,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     cerebrum_vault_path: Path = Path("./vault")
+    # Where the derived index and the accounts database live. Unset means
+    # `<vault>/.cerebrum/`. Setting them puts that state outside the vault,
+    # e.g. when the vault is a checkout some other tool owns.
     cerebrum_index_path: Path | None = None
+    cerebrum_auth_db_path: Path | None = None
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
@@ -87,6 +91,16 @@ class Settings(BaseSettings):
             )
         return folder
 
+    @field_validator("cerebrum_index_path", "cerebrum_auth_db_path", mode="before")
+    @classmethod
+    def _blank_path_means_default(cls, value: object) -> object:
+        """A blank value means the default location. Compose passes an unset
+        variable through as an empty string, which would otherwise become
+        `Path(".")` and fail startup."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("cerebrum_link_format", mode="before")
     @classmethod
     def _normalize_link_format(cls, value: object) -> object:
@@ -95,6 +109,18 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.strip().lower() or "markdown"
         return value
+
+    @model_validator(mode="after")
+    def _keep_index_and_accounts_apart(self) -> Settings:
+        """The index is a disposable cache (deleting it is always safe);
+        the accounts database is not. Sharing one file would make that
+        advice delete every account."""
+        if self.index_path.resolve() == self.auth_db_path.resolve():
+            raise ValueError(
+                "CEREBRUM_INDEX_PATH and CEREBRUM_AUTH_DB_PATH must be different "
+                f"files, both are {self.index_path}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _require_strong_auth_secrets(self) -> Settings:
@@ -115,6 +141,8 @@ class Settings(BaseSettings):
 
     @property
     def auth_db_path(self) -> Path:
+        if self.cerebrum_auth_db_path is not None:
+            return self.cerebrum_auth_db_path
         return self.cerebrum_vault_path / ".cerebrum" / "auth.sqlite3"
 
 

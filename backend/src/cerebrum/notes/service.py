@@ -60,8 +60,9 @@ def iter_note_paths(vault_root: Path) -> Iterator[str]:
 
     Hidden folders (`.git/`, `.obsidian/`, `.trash/`, `.cerebrum/`) are
     never entered and hidden files never listed, matching `is_hidden_path`.
-    A `.md` symlink resolving outside the vault is left out, since
-    `resolve_note_path` would refuse to read it.
+    A `.md` symlink resolving outside the vault, to a non-`.md` file, or
+    in a loop is left out, since `resolve_note_path` would refuse to read
+    it -- one bad link must never stop the whole scan, and with it startup.
     """
     vault_resolved = vault_root.resolve()
     paths: list[str] = []
@@ -72,7 +73,11 @@ def iter_note_paths(vault_root: Path) -> Iterator[str]:
             if file_name.startswith(".") or not file_name.endswith(".md"):
                 continue
             file_path = Path(directory) / file_name
-            if not file_path.resolve().is_relative_to(vault_resolved):
+            try:
+                resolved = file_path.resolve()
+            except (OSError, RuntimeError):  # RuntimeError: a symlink loop
+                continue
+            if not resolved.is_relative_to(vault_resolved) or resolved.suffix != ".md":
                 continue
             paths.append(file_path.relative_to(vault_resolved).as_posix())
     yield from sorted(paths)

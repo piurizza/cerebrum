@@ -115,6 +115,19 @@ def test_iter_note_paths_skips_symlinks_resolving_outside_the_vault(
     assert list(iter_note_paths(vault)) == ["alias.md", "real.md"]
 
 
+def test_iter_note_paths_skips_symlink_loops_and_non_markdown_targets(
+    vault: Path,
+) -> None:
+    # A self-referencing link makes `Path.resolve()` raise; one bad link in
+    # the vault must not stop the whole scan (and with it, startup).
+    write_note(vault, "real.md", "content")
+    (vault / "loop.md").symlink_to(vault / "loop.md")
+    (vault / "settings.txt").write_text("not a note", encoding="utf-8")
+    (vault / "text.md").symlink_to(vault / "settings.txt")
+
+    assert list(iter_note_paths(vault)) == ["real.md"]
+
+
 def test_move_note_relocates_file_and_preserves_content(vault: Path) -> None:
     written = write_note(vault, "a.md", "---\ntitle: A\n---\nBody.\n")
 

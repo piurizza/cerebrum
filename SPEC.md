@@ -35,6 +35,13 @@ deliberate simplification; see [Known Gaps](#10-known-gaps--future-work).
   `CEREBRUM_VAULT_PATH` (default `./vault` in dev, `/data/vault` in Docker).
 - The vault is a plain directory tree of `.md` files and their attachments.
   Nothing about its structure is proprietary.
+- **Hidden files and folders are not notes.** Anything whose path has a
+  dot-prefixed segment (`.git/`, `.obsidian/`, `.trash/`, `.hidden.md`) is
+  never indexed, listed, searched, graphed or offered over MCP, the same
+  rule wikilinks already follow. A note can still be read by its explicit
+  path, and moving a note into `.trash/` takes it out of every list at
+  once. A `.md` symlink that resolves outside the vault is ignored; one
+  that resolves inside it works like the file it points at.
 - A note's pasted images live in a sibling folder named
   `<note-stem>.attachments/` (dot-suffixed to avoid colliding with a
   same-named content folder some vaults use). It travels with the note:
@@ -116,7 +123,8 @@ a note by **file name** (never by title), ignoring case and a trailing
 - A target with folders (`[[folder/Note]]`) must match the whole
   vault-relative path, or its end. A leading `/` (`[[/Note]]`) means the
   exact path from the vault root.
-- Notes in hidden folders (`.trash/`, `.obsidian/`) are never matched.
+- Notes in hidden folders (`.trash/`, `.obsidian/`) are never matched (and
+  are not indexed at all, see [Storage model](#2-storage-model)).
   Relative targets (`[[../Note]]`) are unsupported and stay unresolved.
 - `[[#Heading]]` links within the same note; a heading opens the note at
   its top.
@@ -195,8 +203,9 @@ CREATE INDEX idx_tasks_source ON tasks(source_path);
   validated in application code, not the schema.
 - `notes_fts` is scaffolded now; the search endpoint itself is future work.
 
-**Rebuild strategy:** full vault rescan (walk, hash, upsert changed rows,
-delete rows for removed files) on backend startup via a FastAPI lifespan
+**Rebuild strategy:** full vault rescan (walk, skipping hidden folders and
+out-of-vault symlinks, hash, upsert changed rows, delete rows for removed
+files, including any note indexed before hidden folders were skipped) on backend startup via a FastAPI lifespan
 hook, plus a periodic backstop rescan on the same logic while the app is
 running. Incremental single-file upsert on every `PUT`/`DELETE` note
 request, and on every filesystem change a background watcher observes
@@ -215,7 +224,7 @@ All endpoints under `/api`.
 | GET | `/api/notes/{path:path}` | Fetch one note: raw markdown + parsed metadata |
 | PUT | `/api/notes/{path:path}` | Create or update a note (body = raw markdown) |
 | DELETE | `/api/notes/{path:path}` | Delete a note file + its index rows |
-| POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's links that pointed at it (markdown links always, wikilinks only where they would stop resolving to it -- see [Wikilinks](#wikilinks)); `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
+| POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's links that pointed at it (markdown links always, wikilinks only where they would stop resolving to it -- see [Wikilinks](#wikilinks); a move into a hidden folder such as `.trash/` leaves both kinds as written, so they work again once the note is restored); `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 | GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |
@@ -772,6 +781,12 @@ how consistently each was cited as high-value across that research.
   read-only account or API token on a writable vault yet. The workaround
   is a second instance with `CEREBRUM_VAULT_READ_ONLY=true` over the same
   vault folder, with its own index and accounts database.
+- **The watcher still watches hidden folders.** `watchfiles` filters events
+  in Python after its native watcher has seen them, so inotify watches
+  (or polling) still cover `.git/objects` in a git checkout; only the
+  resulting events are dropped. A very large `.git` may need a higher
+  `fs.inotify.max_user_watches`. Markdown links inside hidden notes are
+  also no longer rewritten when the note they point at moves.
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
 - **Frontend request/parameter types stay hand-kept for non-JSON

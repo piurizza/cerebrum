@@ -370,6 +370,9 @@ viewer understands. It also reads Obsidian-style `[[wikilinks]]` (including
 `![[photo.png]]`), so a vault imported from Obsidian shows up linked in the
 graph, backlinks and preview, and its links survive renames.
 
+Hidden folders are skipped: notes under `.obsidian/`, `.trash/`, `.git/` or
+any other dot-prefixed folder never show up in lists, search or the graph.
+
 To have the editor and MCP agents *write* wikilinks too, set
 `CEREBRUM_LINK_FORMAT=wikilink` in `.env` and restart. Existing links are
 never converted. See [SPEC.md](SPEC.md#wikilinks) for how a wikilink picks

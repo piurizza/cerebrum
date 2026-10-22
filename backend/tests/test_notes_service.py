@@ -81,6 +81,53 @@ def test_iter_note_paths_lists_only_markdown(vault: Path) -> None:
     assert set(iter_note_paths(vault)) == {"a.md", "sub/b.md"}
 
 
+def test_iter_note_paths_skips_hidden_folders_and_files(vault: Path) -> None:
+    write_note(vault, "a.md", "content")
+    for hidden in (
+        ".git/README.md",
+        ".obsidian/x.md",
+        ".trash/y.md",
+        ".hidden.md",
+        "a/.b/c.md",
+        ".cerebrum/decoy.md",
+    ):
+        write_note(vault, hidden, "content")
+
+    assert list(iter_note_paths(vault)) == ["a.md"]
+
+
+def test_iter_note_paths_skips_symlinks_resolving_outside_the_vault(
+    vault: Path, tmp_path: Path
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.env").write_text("AUTH_JWT_SECRET=x", encoding="utf-8")
+    # Shares the vault's name as a prefix, so a string prefix check would
+    # wrongly accept it.
+    sibling = tmp_path / "vault-sibling"
+    sibling.mkdir()
+    (sibling / "other.md").write_text("other vault", encoding="utf-8")
+    write_note(vault, "real.md", "content")
+    (vault / "escape.md").symlink_to(outside / "secret.env")
+    (vault / "sibling.md").symlink_to(sibling / "other.md")
+    (vault / "alias.md").symlink_to(vault / "real.md")
+
+    assert list(iter_note_paths(vault)) == ["alias.md", "real.md"]
+
+
+def test_iter_note_paths_skips_symlink_loops_and_non_markdown_targets(
+    vault: Path,
+) -> None:
+    # A self-referencing link makes `Path.resolve()` raise; one bad link in
+    # the vault must not stop the whole scan (and with it, startup).
+    write_note(vault, "real.md", "content")
+    (vault / "loop.md").symlink_to(vault / "loop.md")
+    (vault / "settings.txt").write_text("not a note", encoding="utf-8")
+    (vault / "text.md").symlink_to(vault / "settings.txt")
+
+    assert list(iter_note_paths(vault)) == ["real.md"]
+
+
 def test_move_note_relocates_file_and_preserves_content(vault: Path) -> None:
     written = write_note(vault, "a.md", "---\ntitle: A\n---\nBody.\n")
 
@@ -644,6 +691,22 @@ def test_move_into_a_hidden_folder_leaves_wikilinks_as_written(vault: Path) -> N
     move_note(vault, ".trash/Note.md", "Note.md")
 
     assert "See [[Note]]." in read_note(vault, "Other.md").content
+
+
+def test_move_into_a_hidden_folder_leaves_markdown_links_as_written(
+    vault: Path,
+) -> None:
+    # Same as wikilinks: a hidden note isn't indexed, so pointing links at
+    # `.trash/` would only make them dead. Left alone, they work again as
+    # soon as the note is restored.
+    write_note(vault, "Other.md", "See [the note](Note.md).")
+    write_note(vault, "Note.md", "root")
+
+    move_note(vault, "Note.md", ".trash/Note.md")
+    assert "See [the note](Note.md)." in read_note(vault, "Other.md").content
+
+    move_note(vault, ".trash/Note.md", "Note.md")
+    assert "See [the note](Note.md)." in read_note(vault, "Other.md").content
 
 
 def test_rewrite_never_writes_a_target_a_wikilink_cannot_hold(vault: Path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
@@ -21,7 +22,7 @@ from cerebrum.notes.parser import (
     retarget_links,
     retarget_wikilinks,
 )
-from cerebrum.notes.wikilinks import NoteMove
+from cerebrum.notes.wikilinks import NoteMove, is_hidden_path
 from cerebrum.read_only import ensure_vault_writable
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,31 @@ def resolve_note_path(vault_root: Path, path: str) -> Path:
 
 
 def iter_note_paths(vault_root: Path) -> Iterator[str]:
-    if not vault_root.exists():
-        return
-    for file_path in sorted(vault_root.rglob("*.md")):
-        if ".cerebrum" in file_path.relative_to(vault_root).parts:
-            continue
-        yield file_path.relative_to(vault_root).as_posix()
+    """Every note in the vault, as sorted vault-relative posix paths.
+
+    Hidden folders (`.git/`, `.obsidian/`, `.trash/`, `.cerebrum/`) are
+    never entered and hidden files never listed, matching `is_hidden_path`.
+    A `.md` symlink resolving outside the vault, to a non-`.md` file, or
+    in a loop is left out, since `resolve_note_path` would refuse to read
+    it -- one bad link must never stop the whole scan, and with it startup.
+    """
+    vault_resolved = vault_root.resolve()
+    paths: list[str] = []
+    for directory, folders, files in os.walk(vault_resolved):
+        # os.walk doesn't descend into symlinked folders by default.
+        folders[:] = [folder for folder in folders if not folder.startswith(".")]
+        for file_name in files:
+            if file_name.startswith(".") or not file_name.endswith(".md"):
+                continue
+            file_path = Path(directory) / file_name
+            try:
+                resolved = file_path.resolve()
+            except (OSError, RuntimeError):  # RuntimeError: a symlink loop
+                continue
+            if not resolved.is_relative_to(vault_resolved) or resolved.suffix != ".md":
+                continue
+            paths.append(file_path.relative_to(vault_resolved).as_posix())
+    yield from sorted(paths)
 
 
 def read_note(vault_root: Path, path: str) -> Note:
@@ -204,8 +224,16 @@ def _retarget_other_notes(
                 other_raw = other_file.read_text(encoding="utf-8")
                 other_parsed = parse_note(other_path, other_raw)
 
-                new_body = retarget_links(
-                    other_parsed.body, other_path, old_target, new_target
+                # A note moved into a hidden folder (`.trash/`) is no longer
+                # indexed, so markdown links pointing there would only be
+                # dead. Leave them on the old path, as `retarget_wikilinks`
+                # does, so they work again once the note is restored.
+                new_body = (
+                    other_parsed.body
+                    if is_hidden_path(new_target)
+                    else retarget_links(
+                        other_parsed.body, other_path, old_target, new_target
+                    )
                 )
                 source = move.logical_path(other_path)
                 new_body = retarget_wikilinks(new_body, source, source, move)

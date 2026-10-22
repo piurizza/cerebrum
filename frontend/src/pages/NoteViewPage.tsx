@@ -290,7 +290,11 @@ export function NoteViewPage() {
         )}
 
         <div className="note-editor-actions">
-          <span className="save-status">{isDirty ? "Unsaved changes" : "Saved"}</span>
+          {/* "Saved" means nothing on a vault that can't be written; an
+              edit already in flight when read-only arrives still says so. */}
+          {(isDirty || !vaultReadOnly) && (
+            <span className="save-status">{isDirty ? "Unsaved changes" : "Saved"}</span>
+          )}
           {!vaultReadOnly && (
             <span className="shortcut-hint">
               <kbd>{isMac ? "⌘" : "Ctrl"}</kbd>+<kbd>S</kbd> to save

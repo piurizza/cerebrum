@@ -250,7 +250,7 @@ describe("NoteViewPage offline gating", () => {
 });
 
 describe("NoteViewPage read-only vault", () => {
-  it("hides Edit and the save shortcut hint, and tells the header", async () => {
+  it("hides Edit, the save status and the save shortcut hint, and tells the header", async () => {
     mockGetNote.mockResolvedValue(makeNote());
     setCachedVaultReadOnly(true);
 
@@ -260,6 +260,7 @@ describe("NoteViewPage read-only vault", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByText(/to save/)).toBeNull();
+    expect(screen.queryByText("Saved")).toBeNull();
     expect(capturedHeaderProps.readOnly).toBe(true);
   });
 

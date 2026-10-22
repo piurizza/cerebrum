@@ -95,9 +95,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         elif not settings.cerebrum_vault_path.is_dir():
             # Never created here: a read-only vault is someone else's
             # folder. The app still starts, with nothing to show, and the
-            # health check reports it degraded.
+            # health check reports it degraded. The live watcher can't
+            # watch a missing folder, so only the backstop rescan picks
+            # the vault up once it appears.
             logger.warning(
-                "read-only vault %s does not exist", settings.cerebrum_vault_path
+                "read-only vault %s does not exist; once it appears, notes "
+                "show up at the next backstop rescan, and live updates "
+                "start after a restart",
+                settings.cerebrum_vault_path,
             )
         app.state.db = connect(settings.index_path)
         stack.callback(app.state.db.close)

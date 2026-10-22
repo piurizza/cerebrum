@@ -300,6 +300,36 @@ def test_read_only_mode_starts_on_a_vault_it_cannot_write(
         vault.chmod(0o755)
 
 
+@pytest.mark.parametrize("read_only", [True, False])
+def test_lifespan_shares_one_rename_cache_that_relinks_only_when_writable(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    read_only: bool,
+) -> None:
+    """The watcher and the backstop share the cache the lifespan builds, so
+    its `retarget` flag is what keeps a read-only vault from being
+    rewritten when an external rename arrives."""
+    built: list[bool] = []
+
+    class RecordingCache(main_module.PendingRenameCache):
+        def __init__(self, window_seconds: float, *, retarget: bool = True) -> None:
+            super().__init__(window_seconds, retarget=retarget)
+            built.append(retarget)
+
+    monkeypatch.setattr(main_module, "PendingRenameCache", RecordingCache)
+    if read_only:
+        state = tmp_path / "state"
+        monkeypatch.setenv("CEREBRUM_VAULT_READ_ONLY", "true")
+        monkeypatch.setenv("CEREBRUM_INDEX_PATH", str(state / "index.sqlite3"))
+        monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", str(state / "auth.sqlite3"))
+
+    with mcp_test_client(vault, monkeypatch) as client:
+        assert client.get("/api/health").status_code == 200
+
+    assert built == [not read_only]
+
+
 def test_read_only_mode_does_not_create_a_missing_vault(
     tmp_path: Path, read_only_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

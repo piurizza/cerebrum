@@ -38,9 +38,12 @@ def _state_paths_inside_test_vault(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the index and accounts database to their in-vault defaults for
     every test. A blank variable outranks backend/.env, so a developer's
     CEREBRUM_AUTH_DB_PATH (or one in the shell) can never point the suite at
-    a real accounts database. Tests that need other paths set them again."""
+    a real accounts database. Tests that need other paths set them again.
+    Read-only mode is pinned off for the same reason; `read_only_env` turns
+    it back on."""
     monkeypatch.setenv("CEREBRUM_INDEX_PATH", "")
     monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", "")
+    monkeypatch.setenv("CEREBRUM_VAULT_READ_ONLY", "false")
 
 
 @pytest.fixture

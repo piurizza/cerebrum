@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -12,11 +13,14 @@ from cerebrum.index import indexer
 from cerebrum.index.db import list_notes, search_notes
 from cerebrum.index.indexer import (
     _SCHEMA_BACKFILL_VERSION,
+    PendingRenameCache,
+    apply_watch_batch,
     rebuild_index,
     remove_note,
     upsert_note,
 )
-from cerebrum.notes.service import write_note
+from cerebrum.notes.service import InvalidNotePathError, write_note
+from cerebrum.tasks.service import list_open_tasks
 
 
 def test_rebuild_index_populates_notes_and_links(
@@ -637,3 +641,117 @@ def test_rebuild_index_backfills_wikilinks_from_an_older_index(
 
     assert _edges(db) == {("a.md", "B.md")}
     assert db.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_BACKFILL_VERSION
+
+
+def _index_row_from_before_hidden_folders_were_skipped(
+    db: sqlite3.Connection, path: str
+) -> None:
+    with db:
+        db.execute(
+            "INSERT INTO notes (path, title, content_hash, mtime) "
+            "VALUES (?, 'Old', '', 0)",
+            (path,),
+        )
+        db.execute(
+            "INSERT INTO notes_fts (path, title, body) VALUES (?, 'Old', 'stale')",
+            (path,),
+        )
+
+
+def test_rebuild_index_drops_a_previously_indexed_hidden_note(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    write_note(vault, "a.md", "content")
+    write_note(vault, ".trash/x.md", "stale")
+    _index_row_from_before_hidden_folders_were_skipped(db, ".trash/x.md")
+
+    rebuild_index(db, vault)
+
+    assert [note.path for note in list_notes(db)] == ["a.md"]
+    assert search_notes(db, "stale") == []
+
+
+def test_upsert_note_on_a_hidden_path_removes_it_from_the_index(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    # The write paths (save, move, MCP) upsert directly, never through a
+    # vault scan, so a note saved or moved into .obsidian/ or .trash/ must
+    # be dropped here.
+    write_note(vault, ".obsidian/x.md", "- [ ] hidden task")
+    _index_row_from_before_hidden_folders_were_skipped(db, ".obsidian/x.md")
+
+    upsert_note(db, vault, ".obsidian/x.md")
+
+    assert list_notes(db) == []
+    assert search_notes(db, "stale") == []
+    assert list_open_tasks(db) == []
+
+
+def _symlinks_out_of_the_vault(vault: Path, tmp_path: Path) -> list[str]:
+    """`escape.md` points at a non-note secret outside the vault (think
+    /proc/self/environ), `sibling.md` at a note in a folder whose name
+    starts with the vault's. Returns their vault-relative paths."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.env").write_text(
+        "SECRETTOKEN\n- [ ] leaked task\n", encoding="utf-8"
+    )
+    sibling = tmp_path / "vault-sibling"
+    sibling.mkdir()
+    (sibling / "other.md").write_text(
+        "SIBLINGTOKEN\n- [ ] sibling task\n", encoding="utf-8"
+    )
+    (vault / "escape.md").symlink_to(outside / "secret.env")
+    (vault / "sibling.md").symlink_to(sibling / "other.md")
+    return ["escape.md", "sibling.md"]
+
+
+def _assert_nothing_from_outside_is_indexed(db: sqlite3.Connection) -> None:
+    assert search_notes(db, "SECRETTOKEN") == []
+    assert search_notes(db, "SIBLINGTOKEN") == []
+    assert {task.text for task in list_open_tasks(db)} <= {"real task"}
+
+
+def test_rebuild_index_skips_symlinks_out_of_the_vault(
+    vault: Path, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    _symlinks_out_of_the_vault(vault, tmp_path)
+    write_note(vault, "real.md", "- [ ] real task")
+    (vault / "alias.md").symlink_to(vault / "real.md")
+
+    rebuild_index(db, vault)
+
+    assert [note.path for note in list_notes(db)] == ["alias.md", "real.md"]
+    _assert_nothing_from_outside_is_indexed(db)
+    assert {task.path for task in list_open_tasks(db)} == {"alias.md", "real.md"}
+
+
+def test_upsert_note_refuses_symlinks_out_of_the_vault(
+    vault: Path, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    for path in _symlinks_out_of_the_vault(vault, tmp_path):
+        with pytest.raises(InvalidNotePathError):
+            upsert_note(db, vault, path)
+
+    assert list_notes(db) == []
+    _assert_nothing_from_outside_is_indexed(db)
+
+
+def test_watch_batch_never_reads_symlinks_out_of_the_vault(
+    vault: Path, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    paths = _symlinks_out_of_the_vault(vault, tmp_path)
+    write_note(vault, "real.md", "- [ ] real task")
+    # A pending deletion makes the batch hash every new arrival for
+    # rename pairing -- that read must not follow the links either.
+    pending_renames = PendingRenameCache(window_seconds=30)
+    pending_renames.add("gone.md", "0" * 64, time.monotonic())
+
+    apply_watch_batch(db, vault, {*paths, "real.md"}, pending_renames)
+
+    assert [note.path for note in list_notes(db)] == ["real.md"]
+    _assert_nothing_from_outside_is_indexed(db)
+    hashes = indexer._hash_new_arrivals(  # pylint: disable=protected-access
+        vault, {*paths, "real.md"}
+    )
+    assert set(hashes) == {"real.md"}

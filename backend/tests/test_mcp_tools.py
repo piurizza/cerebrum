@@ -555,6 +555,17 @@ def _call(
     return asyncio.run(run())
 
 
+def test_list_notes_leaves_out_a_note_created_in_a_hidden_folder(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    _call(mcp_with_vault, "create-note", {"path": "a.md", "content": "a"})
+    _call(mcp_with_vault, "create-note", {"path": ".obsidian/x.md", "content": "x"})
+
+    assert (vault / ".obsidian" / "x.md").exists()
+    listed = _call(mcp_with_vault, "list-notes", {})
+    assert [item.path for item in listed.data] == ["a.md"]
+
+
 def test_append_to_note_adds_text_at_the_end_and_keeps_frontmatter(
     vault: Path, mcp_with_vault: FastMCP
 ) -> None:

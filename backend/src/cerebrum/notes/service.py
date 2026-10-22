@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
@@ -55,12 +56,26 @@ def resolve_note_path(vault_root: Path, path: str) -> Path:
 
 
 def iter_note_paths(vault_root: Path) -> Iterator[str]:
-    if not vault_root.exists():
-        return
-    for file_path in sorted(vault_root.rglob("*.md")):
-        if ".cerebrum" in file_path.relative_to(vault_root).parts:
-            continue
-        yield file_path.relative_to(vault_root).as_posix()
+    """Every note in the vault, as sorted vault-relative posix paths.
+
+    Hidden folders (`.git/`, `.obsidian/`, `.trash/`, `.cerebrum/`) are
+    never entered and hidden files never listed, matching `is_hidden_path`.
+    A `.md` symlink resolving outside the vault is left out, since
+    `resolve_note_path` would refuse to read it.
+    """
+    vault_resolved = vault_root.resolve()
+    paths: list[str] = []
+    for directory, folders, files in os.walk(vault_resolved):
+        # os.walk doesn't descend into symlinked folders by default.
+        folders[:] = [folder for folder in folders if not folder.startswith(".")]
+        for file_name in files:
+            if file_name.startswith(".") or not file_name.endswith(".md"):
+                continue
+            file_path = Path(directory) / file_name
+            if not file_path.resolve().is_relative_to(vault_resolved):
+                continue
+            paths.append(file_path.relative_to(vault_resolved).as_posix())
+    yield from sorted(paths)
 
 
 def read_note(vault_root: Path, path: str) -> Note:

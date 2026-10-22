@@ -124,3 +124,32 @@ def test_move_note_retargets_other_notes_incoming_links(
     nodes_by_path = {node["path"]: node for node in graph["nodes"]}
     assert "b.md" not in nodes_by_path  # no longer a ghost node either
     assert nodes_by_path["folder/b.md"]["exists"] is True
+
+
+def test_move_note_into_trash_drops_it_from_the_list_immediately(
+    authenticated_client: TestClient,
+) -> None:
+    authenticated_client.put("/api/notes/a.md", content="content")
+    authenticated_client.put("/api/notes/x.md", content="content")
+
+    move_response = authenticated_client.post(
+        "/api/notes/x.md/move", json={"new_path": ".trash/x.md"}
+    )
+    assert move_response.status_code == 200
+
+    list_response = authenticated_client.get("/api/notes")
+    assert [note["path"] for note in list_response.json()] == ["a.md"]
+    # Still readable by its explicit path, so it can be restored.
+    assert authenticated_client.get("/api/notes/.trash/x.md").status_code == 200
+
+
+def test_put_note_in_a_hidden_folder_is_not_listed(
+    authenticated_client: TestClient,
+) -> None:
+    put_response = authenticated_client.put(
+        "/api/notes/.obsidian/x.md", content="content"
+    )
+    assert put_response.status_code == 200
+
+    list_response = authenticated_client.get("/api/notes")
+    assert list_response.json() == []

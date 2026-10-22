@@ -81,6 +81,40 @@ def test_iter_note_paths_lists_only_markdown(vault: Path) -> None:
     assert set(iter_note_paths(vault)) == {"a.md", "sub/b.md"}
 
 
+def test_iter_note_paths_skips_hidden_folders_and_files(vault: Path) -> None:
+    write_note(vault, "a.md", "content")
+    for hidden in (
+        ".git/README.md",
+        ".obsidian/x.md",
+        ".trash/y.md",
+        ".hidden.md",
+        "a/.b/c.md",
+        ".cerebrum/decoy.md",
+    ):
+        write_note(vault, hidden, "content")
+
+    assert list(iter_note_paths(vault)) == ["a.md"]
+
+
+def test_iter_note_paths_skips_symlinks_resolving_outside_the_vault(
+    vault: Path, tmp_path: Path
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.env").write_text("AUTH_JWT_SECRET=x", encoding="utf-8")
+    # Shares the vault's name as a prefix, so a string prefix check would
+    # wrongly accept it.
+    sibling = tmp_path / "vault-sibling"
+    sibling.mkdir()
+    (sibling / "other.md").write_text("other vault", encoding="utf-8")
+    write_note(vault, "real.md", "content")
+    (vault / "escape.md").symlink_to(outside / "secret.env")
+    (vault / "sibling.md").symlink_to(sibling / "other.md")
+    (vault / "alias.md").symlink_to(vault / "real.md")
+
+    assert list(iter_note_paths(vault)) == ["alias.md", "real.md"]
+
+
 def test_move_note_relocates_file_and_preserves_content(vault: Path) -> None:
     written = write_note(vault, "a.md", "---\ntitle: A\n---\nBody.\n")
 

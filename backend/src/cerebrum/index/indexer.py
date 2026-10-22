@@ -13,8 +13,12 @@ from pathlib import Path
 from cerebrum.index.db import write_lock
 from cerebrum.notes.models import ParsedLink, ParsedWikilink
 from cerebrum.notes.parser import parse_note
-from cerebrum.notes.service import iter_note_paths, retarget_note_links
-from cerebrum.notes.wikilinks import target_name_key
+from cerebrum.notes.service import (
+    iter_note_paths,
+    resolve_note_path,
+    retarget_note_links,
+)
+from cerebrum.notes.wikilinks import is_hidden_path, target_name_key
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +155,18 @@ def upsert_note(
     that already read the file to compute its content hash for rename
     matching (`rebuild_index`'s cache-aware branch), re-reading here
     would cost a second file read and SHA-256 hash for no reason.
+
+    A hidden note (`.trash/`, `.obsidian/`) is never indexed: its row, if
+    any, is removed instead. The write paths (save, move, MCP) call this
+    directly rather than through `iter_note_paths`, so this is where a note
+    moved into `.trash/` leaves the index. The file is opened through
+    `resolve_note_path`, so a symlink resolving outside the vault raises
+    `InvalidNotePathError` instead of being read.
     """
-    file_path = vault_root / path
+    if is_hidden_path(path):
+        remove_note(conn, path)
+        return
+    file_path = resolve_note_path(vault_root, path)
     if raw_content is None:
         raw_content = file_path.read_text(encoding="utf-8")
     parsed = parse_note(path, raw_content)
@@ -296,7 +310,9 @@ def rebuild_index(
                 # Read once, reuse for both the match attempt and the
                 # eventual upsert on a miss -- avoids reading and
                 # SHA-256-hashing the same file twice.
-                raw_content = (vault_root / path).read_text(encoding="utf-8")
+                raw_content = resolve_note_path(vault_root, path).read_text(
+                    encoding="utf-8"
+                )
                 content_hash = _hash_content(raw_content)
                 if _maybe_cross_window_pair(
                     conn, vault_root, path, content_hash, pending_renames
@@ -385,7 +401,7 @@ def _hash_new_arrivals(vault_root: Path, new_arrivals: set[str]) -> dict[str, st
     for path in new_arrivals:
         try:
             new_hashes[path] = _hash_content(
-                (vault_root / path).read_text(encoding="utf-8")
+                resolve_note_path(vault_root, path).read_text(encoding="utf-8")
             )
         except Exception:  # noqa: BLE001 -- one bad file must not abort the batch
             logger.exception("skipping rename-hash read for %s", path)

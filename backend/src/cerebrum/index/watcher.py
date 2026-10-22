@@ -16,25 +16,33 @@ from watchfiles._rust_notify import (  # noqa: PLC2701  # pylint: disable=no-nam
 )
 
 from cerebrum.index.indexer import PendingRenameCache, apply_watch_batch
+from cerebrum.notes.wikilinks import is_hidden_path
 from cerebrum.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 
 class VaultFilter(BaseFilter):
-    """Restricts watched changes to vault markdown content.
+    """Restricts watched changes to vault notes.
 
-    Mirrors `notes/service.py`'s `iter_note_paths` exclusion rule
-    (skip `.cerebrum/`, only `.md` files) but applied at the
-    `watch_filter` level instead of a glob -- `.cerebrum/` subdirectories
-    are still watched at the OS level (see KTD8), just filtered out of
-    the events `awatch` yields.
+    Mirrors `notes/service.py`'s `iter_note_paths` rule (only `.md` files,
+    nothing hidden) but applied at the `watch_filter` level -- hidden
+    folders like `.cerebrum/` and `.git/` are still watched at the OS level
+    (see KTD8), just filtered out of the events `awatch` yields. Only the
+    part of the path inside `vault_root` is checked, so a vault that itself
+    lives under a hidden folder (`~/.local/share/...`) still works.
     """
 
-    ignore_dirs = (*BaseFilter.ignore_dirs, ".cerebrum")
+    def __init__(self, vault_root: Path) -> None:
+        super().__init__()
+        self._vault_root = vault_root.resolve()
 
     def __call__(self, change: Change, path: str) -> bool:
-        return path.endswith(".md") and super().__call__(change, path)
+        try:
+            relative = Path(path).relative_to(self._vault_root).as_posix()
+        except ValueError:
+            return False
+        return path.endswith(".md") and not is_hidden_path(relative)
 
 
 async def watch_vault(
@@ -75,7 +83,7 @@ async def watch_vault(
     try:
         async for changes in awatch(
             vault_root,
-            watch_filter=VaultFilter(),
+            watch_filter=VaultFilter(vault_root),
             debounce=settings.watcher_debounce_ms,
             stop_event=stop_event,
         ):

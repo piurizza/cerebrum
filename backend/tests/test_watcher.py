@@ -59,12 +59,29 @@ async def _run_and_wait(
         await task
 
 
-def test_vault_filter_allows_only_markdown_outside_cerebrum() -> None:
-    vault_filter = VaultFilter()
+def test_vault_filter_allows_only_markdown_outside_hidden_folders() -> None:
+    vault_filter = VaultFilter(Path("/vault"))
     assert vault_filter(Change.added, "/vault/notes/a.md") is True
     assert vault_filter(Change.added, "/vault/notes/a.txt") is False
     assert vault_filter(Change.added, "/vault/.cerebrum/index.sqlite3") is False
     assert vault_filter(Change.added, "/vault/.cerebrum/decoy.md") is False
+    assert vault_filter(Change.added, "/vault/.trash/y.md") is False
+    assert vault_filter(Change.added, "/vault/.hidden.md") is False
+    assert vault_filter(Change.added, "/elsewhere/a.md") is False
+
+
+def test_vault_filter_rejects_notes_under_nested_hidden_folders() -> None:
+    vault_filter = VaultFilter(Path("/vault"))
+    assert vault_filter(Change.added, "/vault/a/.b/c.md") is False
+    assert vault_filter(Change.added, "/vault/a/b/.c.md") is False
+    assert vault_filter(Change.added, "/vault/a/b/c.md") is True
+
+
+def test_vault_filter_accepts_a_vault_inside_a_hidden_folder() -> None:
+    # Only the part of the path inside the vault counts.
+    vault_filter = VaultFilter(Path("/home/me/.local/share/vault"))
+    assert vault_filter(Change.added, "/home/me/.local/share/vault/a.md") is True
+    assert vault_filter(Change.added, "/home/me/.local/share/vault/.git/a.md") is False
 
 
 def test_creating_md_file_indexes_it(vault: Path, db: sqlite3.Connection) -> None:
@@ -95,7 +112,7 @@ def test_deleting_md_file_removes_index_row(
     asyncio.run(_run_and_wait(db, vault, settings, mutate, check))
 
 
-def test_non_md_and_dotcerebrum_changes_are_ignored(
+def test_non_md_and_hidden_folder_changes_are_ignored(
     vault: Path, db: sqlite3.Connection
 ) -> None:
     settings = _settings()
@@ -108,8 +125,12 @@ def test_non_md_and_dotcerebrum_changes_are_ignored(
             (vault / "notes.txt").write_text("not markdown", encoding="utf-8")
             (vault / ".cerebrum").mkdir(exist_ok=True)
             (vault / ".cerebrum" / "decoy.md").write_text("decoy", encoding="utf-8")
+            (vault / ".git").mkdir()
+            (vault / ".git" / "README.md").write_text("git", encoding="utf-8")
+            (vault / ".trash").mkdir()
+            (vault / ".trash" / "y.md").write_text("trashed", encoding="utf-8")
             # Give the watcher ample time (well past debounce+step) to have
-            # processed -- and correctly ignored -- both changes before we
+            # processed -- and correctly ignored -- every change before we
             # assert nothing landed in the index.
             await asyncio.sleep(settings.watcher_debounce_ms / 1000 + 1.0)
             assert list_notes(db) == []

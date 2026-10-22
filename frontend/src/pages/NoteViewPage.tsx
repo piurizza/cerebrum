@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useBlocker, useNavigate, useParams } from "react-router-dom";
 import { encodeNotePath, errorMessage, getNote, putNote } from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
@@ -183,7 +183,12 @@ export function NoteViewPage() {
     if (blocker.state === "blocked") blocker.reset();
   }
 
-  useEffect(() => {
+  // A layout effect, not a plain one: React runs plain effects a moment
+  // after the page renders, so a Cmd+S pressed right after a note loads
+  // could reach the previous listener, which still holds the content from
+  // before the load. A layout effect swaps the listener in during the
+  // same commit that shows the new content.
+  useLayoutEffect(() => {
     if (!path) return;
     function handleKeyDown(event: KeyboardEvent) {
       const isSaveShortcut =

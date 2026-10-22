@@ -5,9 +5,11 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import jwt
+import pytest
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 
+from cerebrum.accounts.service import NO_PASSWORD_HASH
 from cerebrum.settings import get_settings
 
 # Matches conftest.py's `client` fixture, which sets AUTH_SETUP_TOKEN to
@@ -40,6 +42,30 @@ def _insert_user(
                 datetime.now(UTC).isoformat(),
             ),
         )
+
+
+def _insert_user_with_hash(
+    client: TestClient, username: str, password_hash: str
+) -> None:
+    """Insert an account whose `password_hash` is stored verbatim -- for the
+    password-less sentinel and for a corrupt value no hasher would produce."""
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    with auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO users (username, password_hash, is_admin, is_active, created_at)
+            VALUES (?, ?, 0, 1, ?)
+            """,
+            (username, password_hash, datetime.now(UTC).isoformat()),
+        )
+
+
+def _failed_login_attempts(client: TestClient, username: str) -> int:
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    row = auth_db.execute(
+        "SELECT failed_login_attempts FROM users WHERE username = ?", (username,)
+    ).fetchone()
+    return int(row["failed_login_attempts"])
 
 
 def test_register_first_account_with_valid_setup_token_succeeds(
@@ -377,3 +403,100 @@ def test_refresh_route_reachable_without_authorization_header(
     response = client.post("/api/auth/refresh")
 
     assert response.status_code not in (401, 403)
+
+
+def test_login_for_password_less_account_returns_generic_401_and_counts_failure(
+    client: TestClient,
+) -> None:
+    _insert_user_with_hash(client, "jules", NO_PASSWORD_HASH)
+
+    response = client.post(
+        "/api/auth/login", json={"username": "jules", "password": _PASSWORD}
+    )
+    baseline = client.post(
+        "/api/auth/login", json={"username": "no-such-user", "password": _PASSWORD}
+    )
+
+    assert response.status_code == 401
+    assert response.json() == baseline.json()
+    assert _failed_login_attempts(client, "jules") == 1
+
+
+@pytest.mark.parametrize(
+    "corrupt_hash",
+    [
+        "not-a-hash",
+        "",
+        "$argon2id$v=19$m=65536,t=3,p=4$truncated",
+    ],
+)
+def test_login_for_account_with_corrupt_hash_returns_401_not_500(
+    client: TestClient, corrupt_hash: str
+) -> None:
+    _insert_user_with_hash(client, "kim", corrupt_hash)
+
+    response = client.post(
+        "/api/auth/login", json={"username": "kim", "password": _PASSWORD}
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid username or password"}
+    assert _failed_login_attempts(client, "kim") == 1
+
+
+# --- GET /api/auth/methods ---------------------------------------------------
+
+_OIDC_ISSUER = "https://idp.example/realms/home"
+_OIDC_CLIENT_ID = "cerebrum-client-id"
+
+
+def _configure_oidc(monkeypatch: pytest.MonkeyPatch, **extra: str) -> None:
+    """Turn the provider on for a `client` that already exists. The routes
+    read `get_settings()` per request, so clearing its cache is enough; the
+    `client` fixture clears it again on teardown."""
+    monkeypatch.setenv("OIDC_ISSUER", _OIDC_ISSUER)
+    monkeypatch.setenv("OIDC_CLIENT_ID", _OIDC_CLIENT_ID)
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "client-secret-value")
+    for key, value in extra.items():
+        monkeypatch.setenv(key, value)
+    get_settings.cache_clear()
+
+
+def test_auth_methods_without_a_provider_offers_password_only(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/auth/methods")
+
+    assert response.status_code == 200
+    assert response.json() == {"password_login": True, "oidc": None}
+
+
+def test_auth_methods_with_a_provider_names_it_without_leaking_its_config(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_oidc(monkeypatch, OIDC_PROVIDER_NAME="Authentik")
+
+    response = client.get("/api/auth/methods")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "password_login": True,
+        "oidc": {"provider_name": "Authentik"},
+    }
+    assert _OIDC_ISSUER not in response.text
+    assert "idp.example" not in response.text
+    assert _OIDC_CLIENT_ID not in response.text
+    assert "client-secret-value" not in response.text
+
+
+def test_auth_methods_reports_password_login_off(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_oidc(monkeypatch, AUTH_PASSWORD_LOGIN="false")
+
+    response = client.get("/api/auth/methods")
+
+    assert response.json() == {
+        "password_login": False,
+        "oidc": {"provider_name": "SSO"},
+    }

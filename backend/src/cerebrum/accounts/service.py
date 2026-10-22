@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -7,7 +8,11 @@ from typing import cast
 
 import anyio
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import (
+    InvalidHashError,
+    VerificationError,
+    VerifyMismatchError,
+)
 from pydantic import BaseModel
 
 from cerebrum.auth_db import auth_write_lock, hash_token
@@ -36,6 +41,20 @@ _LOCKOUT_DURATION = timedelta(minutes=15)
 # enumerate valid usernames against `/api/auth/login` despite the
 # identical error message and status code.
 _DUMMY_PASSWORD_HASH = _password_hasher.hash("dummy-password-for-timing-parity")
+
+# Stored in `users.password_hash` (which stays NOT NULL) for an account
+# created through the OpenID Connect provider, which has no password. Not
+# an Argon2 hash, and no `PasswordHasher.hash()` output can ever equal it,
+# so no typed password matches it -- `_verify_password_or_dummy` refuses
+# it outright rather than relying on Argon2 to reject it.
+NO_PASSWORD_HASH = "!no-password"
+
+
+def has_password(password_hash: str) -> bool:
+    """Whether an account has a password at all, i.e. isn't one created
+    through the provider. Not whether password login is open to it -- that
+    also depends on `auth_password_login` and the account's links."""
+    return password_hash != NO_PASSWORD_HASH
 
 
 class InvalidCredentialError(Exception):
@@ -241,12 +260,25 @@ def _verify_password_or_dummy(password_hash: str, password: str) -> bool:
     """Run one Argon2 verify, off the event loop via the caller's
     `anyio.to_thread.run_sync`. Used for both the real hash (an existing
     user) and `_DUMMY_PASSWORD_HASH` (no such user) so both paths pay the
-    identical CPU cost -- see `_DUMMY_PASSWORD_HASH`'s docstring."""
-    try:
-        _password_hasher.verify(password_hash, password)
-        return True
-    except VerifyMismatchError:
-        return False
+    identical CPU cost -- see `_DUMMY_PASSWORD_HASH`'s docstring.
+
+    A password-less account (`NO_PASSWORD_HASH`) and a stored value Argon2
+    can't even parse are both a mismatch, after verifying against the dummy
+    hash instead: neither may answer faster than a wrong password does, and
+    a corrupt row must fail login like one rather than surface as a 500."""
+    if has_password(password_hash):
+        try:
+            _password_hasher.verify(password_hash, password)
+            return True
+        except VerifyMismatchError:
+            return False
+        except (InvalidHashError, VerificationError, UnicodeEncodeError):
+            # Corrupt or truncated hash; `VerificationError` is argon2's
+            # "Decoding failed" for a hash that looks Argon2 but isn't.
+            pass
+    with contextlib.suppress(VerifyMismatchError):
+        _password_hasher.verify(_DUMMY_PASSWORD_HASH, password)
+    return False
 
 
 def _record_failed_login(auth_db: sqlite3.Connection, user_id: int) -> None:

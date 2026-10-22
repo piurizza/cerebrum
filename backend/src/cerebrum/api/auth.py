@@ -19,12 +19,13 @@ from cerebrum.accounts.sessions import issue_session, refresh_session
 from cerebrum.api.deps import get_auth_db
 from cerebrum.settings import get_settings
 
-# No auth dependency on this router by design -- registration, login, and
-# refresh must be reachable by a caller who does not yet hold any valid
-# access token (refresh authenticates via its own cookie, not a bearer
-# credential). Mounted directly on `app` in main.py, not through
-# `api_router`, so it can never accidentally pick up an auth-requiring
-# dependency added to `api_router` later.
+# No auth dependency on this router by design -- registration, login,
+# refresh, and the login-methods lookup the login page makes first must be
+# reachable by a caller who does not yet hold any valid access token
+# (refresh authenticates via its own cookie, not a bearer credential).
+# Mounted directly on `app` in main.py, not through `api_router`, so it can
+# never accidentally pick up an auth-requiring dependency added to
+# `api_router` later.
 unauthenticated_router = APIRouter()
 
 
@@ -117,3 +118,28 @@ async def refresh(
 
     set_refresh_cookie(response, new_refresh_token)
     return LoginResponse(access_token=access_token)
+
+
+class OidcMethod(BaseModel):
+    provider_name: str
+
+
+class AuthMethodsResponse(BaseModel):
+    password_login: bool
+    oidc: OidcMethod | None
+
+
+@unauthenticated_router.get("/methods", response_model=AuthMethodsResponse)
+async def auth_methods() -> AuthMethodsResponse:
+    """Which ways to sign in the login and register pages should offer.
+    Unauthenticated, so it carries only what those pages show -- the
+    provider's display name, never its issuer URL or client id."""
+    settings = get_settings()
+    return AuthMethodsResponse(
+        password_login=settings.auth_password_login,
+        oidc=(
+            OidcMethod(provider_name=settings.oidc_provider_name)
+            if settings.oidc_enabled
+            else None
+        ),
+    )

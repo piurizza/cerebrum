@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from tests.mcp_test_support import issue_test_access_token
 from tests.route_test_support import iter_routes
 
-# The 4 REST routes that must stay reachable with no `Authorization`
+# The 5 REST routes that must stay reachable with no `Authorization`
 # header at all -- every other route included into `api_router` picks up
 # `get_current_identity` as a default dependency (see router.py) and must
 # reject both a missing and a wrong bearer credential.
@@ -17,6 +17,7 @@ _EXEMPT_ROUTES = {
     ("POST", "/api/auth/register"),
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/refresh"),
+    ("GET", "/api/auth/methods"),
 }
 
 _PATH_PARAM = re.compile(r"\{[^/}]+\}")

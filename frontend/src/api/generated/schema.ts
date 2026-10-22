@@ -382,6 +382,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Auth Methods
+         * @description Which ways to sign in the login and register pages should offer.
+         *     Unauthenticated, so it carries only what those pages show -- the
+         *     provider's display name, never its issuer URL or client id.
+         */
+        get: operations["auth_methods_api_auth_methods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -455,6 +477,12 @@ export interface components {
         AttachmentUploadResponse: {
             /** Path */
             path: string;
+        };
+        /** AuthMethodsResponse */
+        AuthMethodsResponse: {
+            /** Password Login */
+            password_login: boolean;
+            oidc: components["schemas"]["OidcMethod"] | null;
         };
         /** ChangePasswordRequest */
         ChangePasswordRequest: {
@@ -572,6 +600,11 @@ export interface components {
             created: string | null;
             /** Updated */
             updated: string | null;
+        };
+        /** OidcMethod */
+        OidcMethod: {
+            /** Provider Name */
+            provider_name: string;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -1268,6 +1301,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+        };
+    };
+    auth_methods_api_auth_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthMethodsResponse"];
                 };
             };
         };

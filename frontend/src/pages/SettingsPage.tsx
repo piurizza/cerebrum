@@ -13,7 +13,6 @@ import {
   createInvite,
   deactivateAccount,
   errorMessage,
-  getAuthMethods,
   getLinkedIdentity,
   listAccounts,
   listApiTokens,
@@ -24,7 +23,7 @@ import {
 import { ConfirmDialog } from "../components/ConfirmDialog/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { useOffline } from "../context/OfflineContext";
-import { useOneShotSearchParams } from "../hooks/useAuthMethods";
+import { useAuthMethods, useOneShotSearchParams } from "../hooks/useAuthMethods";
 import { formatTimestamp } from "../lib/formatDate";
 import { oidcErrorMessage } from "../lib/oidcErrors";
 import {
@@ -622,8 +621,10 @@ const SETTINGS_QUERY_PARAMS = ["oidc_error"] as const;
 
 export function SettingsPage() {
   const { oidc_error: oidcError } = useOneShotSearchParams(SETTINGS_QUERY_PARAMS);
-  const [providerFromMethods, setProviderFromMethods] = useState<string | null>(null);
-  const [methodsSettled, setMethodsSettled] = useState(false);
+  // Says whether a provider is configured before the identity call
+  // settles, so the section can show its loading state; the identity's own
+  // `provider_name` covers a failed methods call.
+  const methodsState = useAuthMethods();
   const [identity, setIdentity] = useState<IdentityState>("loading");
 
   const loadIdentity = useCallback(() => {
@@ -633,19 +634,13 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    // The methods call says whether a provider is configured before the
-    // identity call settles, so the section can show its loading state;
-    // the identity's own `provider_name` covers a failed methods call.
-    getAuthMethods()
-      .then((methods) => setProviderFromMethods(methods.oidc?.provider_name ?? null))
-      .catch(() => setProviderFromMethods(null))
-      .finally(() => setMethodsSettled(true));
     loadIdentity();
   }, [loadIdentity]);
 
   const providerName =
-    providerFromMethods ??
-    (typeof identity === "object" ? identity.provider_name : null);
+    (methodsState.status === "ready"
+      ? methodsState.methods.oidc?.provider_name
+      : null) ?? (typeof identity === "object" ? identity.provider_name : null);
   // Hidden only once the identity has loaded and says the password does
   // not sign this account in (KTD8); on a failed call, keep the section.
   const passwordUsable = typeof identity !== "object" || identity.password_usable;
@@ -654,11 +649,14 @@ export function SettingsPage() {
   return (
     <div className="settings-page">
       <h1>Settings</h1>
-      {linkError && !providerName && methodsSettled && identity !== "loading" && (
-        <p className="error-text" role="alert">
-          {linkError}
-        </p>
-      )}
+      {linkError &&
+        !providerName &&
+        methodsState.status !== "loading" &&
+        identity !== "loading" && (
+          <p className="error-text" role="alert">
+            {linkError}
+          </p>
+        )}
       {passwordUsable && <ChangePasswordSection />}
       {providerName && (
         <SignInProviderSection

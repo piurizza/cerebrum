@@ -1,6 +1,7 @@
 import { type FormEvent, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { errorMessage, register, startOidc } from "../api/client";
+import { AuthMethodsFailedNotice } from "../components/AuthMethodsFailedNotice";
 import { useAuthMethods, useOneShotSearchParams } from "../hooks/useAuthMethods";
 import { oidcErrorMessage } from "../lib/oidcErrors";
 import { redirectTo } from "../lib/redirect";
@@ -150,12 +151,7 @@ export function RegisterPage() {
       <form className="auth-form" onSubmit={handleSubmit}>
         <h1>Register</h1>
         {methodsState.status === "failed" && (
-          <p className="auth-notice auth-notice-action">
-            Could not load sign-in options
-            <button type="button" className="btn btn-sm" onClick={methodsState.retry}>
-              Retry
-            </button>
-          </p>
+          <AuthMethodsFailedNotice onRetry={methodsState.retry} />
         )}
         {provider ? (
           <>

@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-from typing import Literal
+from typing import Literal, TypedDict
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -42,6 +42,7 @@ from cerebrum.accounts.oidc import (
 )
 from cerebrum.accounts.oidc_accounts import (
     create_invited_account,
+    identity_status,
     is_username_taken,
     link_identity,
     sign_in,
@@ -50,7 +51,6 @@ from cerebrum.accounts.service import (
     InvalidCredentialError,
     confirm_current_password,
     find_valid_invite_token_hash,
-    has_password,
 )
 from cerebrum.api.auth import set_refresh_cookie
 from cerebrum.api.deps import bearer_credential, get_auth_db
@@ -59,12 +59,20 @@ from cerebrum.auth import (
     NotASessionError,
     verify_session_credential,
 )
-from cerebrum.auth_db import auth_write_lock
 from cerebrum.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 CALLBACK_PATH = "/api/auth/oidc/callback"
+
+
+class _FlowCookieAttributes(TypedDict):
+    key: str
+    path: str
+    httponly: bool
+    samesite: Literal["lax"]
+    secure: bool
+
 
 # A bare host name or IPv4 address, or a bracketed IPv6 address, with an
 # optional port. Anything else in `Host` (a path, `@`, whitespace) would
@@ -148,6 +156,21 @@ def _register_intent(
     return RegisterIntent(username=body.username, invite_hash=invite_hash)
 
 
+def _flow_cookie_attributes(request: Request) -> _FlowCookieAttributes:
+    """The flow cookie's attributes, shared by setting it and clearing it
+    so the two can't drift apart (a delete only matches a cookie with the
+    same path and flags). Sent back only to the callback. `Lax`, not the
+    refresh cookie's `Strict`: the provider returns the browser with a
+    top-level cross-site GET, which a `Strict` cookie would miss (KTD4)."""
+    return {
+        "key": FLOW_COOKIE_NAME,
+        "path": CALLBACK_PATH,
+        "httponly": True,
+        "samesite": "lax",
+        "secure": request_scheme(request) == "https",
+    }
+
+
 async def _link_intent(
     body: OidcStartRequest, request: Request, auth_db: sqlite3.Connection
 ) -> LinkIntent:
@@ -173,13 +196,7 @@ async def _link_intent(
         raise HTTPException(status_code=401, detail="Not authenticated") from exc
 
     user_id = int(identity)
-    # Locked even though it's a single read -- see `auth_db.py`'s
-    # `auth_write_lock` docstring.
-    with auth_write_lock:
-        row = auth_db.execute(
-            "SELECT password_hash FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
-    if has_password(row["password_hash"]):
+    if identity_status(auth_db, user_id).has_password:
         try:
             # A missing password is checked as an empty one, so it fails --
             # and counts -- like any wrong guess.
@@ -220,16 +237,9 @@ async def start(
         ) from exc
 
     response.set_cookie(
-        key=FLOW_COOKIE_NAME,
         value=started.flow_cookie,
         max_age=FLOW_COOKIE_MAX_AGE_SECONDS,
-        # Sent back only to the callback. `Lax`, not the refresh cookie's
-        # `Strict`: the provider returns the browser with a top-level
-        # cross-site GET, which a `Strict` cookie would miss (KTD4).
-        path=CALLBACK_PATH,
-        httponly=True,
-        samesite="lax",
-        secure=request_scheme(request) == "https",
+        **_flow_cookie_attributes(request),
     )
     return OidcStartResponse(authorization_url=started.authorization_url)
 
@@ -293,11 +303,5 @@ async def callback(
 
     # Cleared on every outcome, so a callback URL replayed from history (or
     # by anyone who saw it) finds no flow to finish.
-    response.delete_cookie(
-        key=FLOW_COOKIE_NAME,
-        path=CALLBACK_PATH,
-        httponly=True,
-        samesite="lax",
-        secure=request_scheme(request) == "https",
-    )
+    response.delete_cookie(**_flow_cookie_attributes(request))
     return response

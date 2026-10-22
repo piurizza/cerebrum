@@ -9,7 +9,7 @@ export type AuthMethodsState =
   | { status: "failed" };
 
 /** The server's sign-in methods (KTD12), fetched once on mount, for the
- * login and register pages. While pending the page keeps its controls
+ * login and register pages and Settings. While pending the page keeps its controls
  * disabled; on failure it falls back to the password form as it was before
  * providers existed, and offers `retry`. */
 export function useAuthMethods(): AuthMethodsState & { retry: () => void } {

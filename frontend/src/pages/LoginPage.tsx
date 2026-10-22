@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { errorMessage, startOidc } from "../api/client";
+import { AuthMethodsFailedNotice } from "../components/AuthMethodsFailedNotice";
 import { useAuth } from "../context/AuthContext";
 import { useAuthMethods, useOneShotSearchParams } from "../hooks/useAuthMethods";
 import { oidcErrorMessage } from "../lib/oidcErrors";
@@ -128,12 +129,7 @@ export function LoginPage() {
           <p className="auth-notice">Account created. Log in to continue.</p>
         )}
         {methodsState.status === "failed" && (
-          <p className="auth-notice auth-notice-action">
-            Could not load sign-in options
-            <button type="button" className="btn btn-sm" onClick={methodsState.retry}>
-              Retry
-            </button>
-          </p>
+          <AuthMethodsFailedNotice onRetry={methodsState.retry} />
         )}
         {provider && (
           <>

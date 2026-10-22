@@ -131,14 +131,25 @@ def find_valid_invite_token_hash(auth_db: sqlite3.Connection, token: str) -> str
     now = datetime.now(UTC).isoformat()
     # Locked for the same reason as `_is_first_account` above.
     with auth_write_lock:
-        row = auth_db.execute(
-            """
-            SELECT token_hash FROM invites
-            WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
-            """,
-            (token_hash, now),
-        ).fetchone()
-    return token_hash if row is not None else None
+        valid = invite_hash_is_valid(auth_db, token_hash, now)
+    return token_hash if valid else None
+
+
+def invite_hash_is_valid(
+    auth_db: sqlite3.Connection, token_hash: str, now: str
+) -> bool:
+    """Whether `token_hash` names an invite that is unexpired at `now` and
+    not yet consumed. Lock-free: the caller holds `auth_write_lock` -- the
+    OpenID Connect sign-up re-checks the invite inside the transaction that
+    consumes it (`accounts/oidc_accounts.py`)."""
+    row = auth_db.execute(
+        """
+        SELECT 1 FROM invites
+        WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
+        """,
+        (token_hash, now),
+    ).fetchone()
+    return row is not None
 
 
 def _bootstrap_first_admin(

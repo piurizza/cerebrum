@@ -22,7 +22,12 @@ from datetime import UTC, datetime
 from typing import cast
 
 from cerebrum.accounts.oidc import OidcError, VerifiedIdentity
-from cerebrum.accounts.service import NO_PASSWORD_HASH, User, has_password
+from cerebrum.accounts.service import (
+    NO_PASSWORD_HASH,
+    User,
+    has_password,
+    invite_hash_is_valid,
+)
 from cerebrum.accounts.sessions import insert_session
 from cerebrum.auth_db import auth_write_lock
 from cerebrum.settings import get_settings
@@ -215,7 +220,7 @@ def create_invited_account(
         # The invite before the username, as `register_account()` orders
         # them: whether a username is taken is only told to someone holding
         # a usable invite.
-        if not _invite_is_valid(auth_db, invite_hash, created_at):
+        if not invite_hash_is_valid(auth_db, invite_hash, created_at):
             logger.info("OIDC sign-up refused: the invite is no longer valid")
             raise OidcError("invite_invalid")
 
@@ -246,27 +251,13 @@ def create_invited_account(
         )
         if consume_cursor.rowcount != 1:
             # Unreachable while this block holds the lock after
-            # `_invite_is_valid()`, but the conditional UPDATE is what
+            # `invite_hash_is_valid()`, but the conditional UPDATE is what
             # actually guarantees one redemption per invite.
             logger.info("OIDC sign-up refused: the invite was consumed meanwhile")
             raise OidcError("invite_invalid")
 
         _, refresh_token = insert_session(auth_db, user_id)
     return refresh_token
-
-
-def _invite_is_valid(auth_db: sqlite3.Connection, invite_hash: str, now: str) -> bool:
-    """`service.py`'s `find_valid_invite_token_hash()` by hash rather than by
-    token -- the flow cookie carries only the hash. The caller holds
-    `auth_write_lock`."""
-    row = auth_db.execute(
-        """
-        SELECT 1 FROM invites
-        WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
-        """,
-        (invite_hash, now),
-    ).fetchone()
-    return row is not None
 
 
 # -- linking from Settings -----------------------------------------------------

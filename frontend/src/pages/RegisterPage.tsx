@@ -32,7 +32,12 @@ export function RegisterPage() {
   const methods = methodsState.status === "ready" ? methodsState.methods : null;
   const provider = methods?.oidc ?? null;
   // No provider, or the methods call failed: the password form as it was.
-  const showPassword = provider === null || methods?.password_login !== false;
+  // A fresh install keeps it too: the first admin registers with the setup
+  // token and a password, never through the provider.
+  const showPassword =
+    provider === null ||
+    methods?.password_login !== false ||
+    methods?.setup_required === true;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();

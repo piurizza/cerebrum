@@ -561,6 +561,8 @@ export interface components {
             /** Password Login */
             password_login: boolean;
             oidc: components["schemas"]["OidcMethod"] | null;
+            /** Setup Required */
+            setup_required: boolean;
         };
         /** ChangePasswordRequest */
         ChangePasswordRequest: {

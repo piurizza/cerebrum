@@ -28,14 +28,20 @@ import { ApiError } from "../api/client";
 import { oidcErrorMessage } from "../lib/oidcErrors";
 import { RegisterPage } from "./RegisterPage";
 
-const NO_PROVIDER: AuthMethods = { password_login: true, oidc: null };
+const NO_PROVIDER: AuthMethods = {
+  password_login: true,
+  oidc: null,
+  setup_required: false,
+};
 const KEYCLOAK: AuthMethods = {
   password_login: true,
   oidc: { provider_name: "Keycloak" },
+  setup_required: false,
 };
 const KEYCLOAK_ONLY: AuthMethods = {
   password_login: false,
   oidc: { provider_name: "Keycloak" },
+  setup_required: false,
 };
 
 function renderRegister(entry = "/register") {
@@ -168,6 +174,23 @@ describe("RegisterPage with a provider", () => {
     await screen.findByRole("button", { name: "Sign up with Keycloak" });
     expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Register" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the first-admin password form on a fresh install even with password login off", async () => {
+    mockGetAuthMethods.mockResolvedValue({ ...KEYCLOAK_ONLY, setup_required: true });
+    mockRegister.mockResolvedValue();
+    const user = userEvent.setup();
+    const router = renderRegister();
+
+    await screen.findByRole("button", { name: "Sign up with Keycloak" });
+    await user.type(screen.getByLabelText("Username"), "owner");
+    await user.type(screen.getByLabelText("Password"), "ownerpassword1");
+    await user.type(screen.getByLabelText("Invite token"), "setup-token");
+    await user.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(mockRegister).toHaveBeenCalledWith("owner", "ownerpassword1", "setup-token");
+    expect(mockStartOidc).not.toHaveBeenCalled();
   });
 
   it("validates an empty invite itself and makes no request", async () => {

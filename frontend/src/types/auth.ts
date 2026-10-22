@@ -40,7 +40,9 @@ export type LoginResponse = components["schemas"]["LoginResponse"];
 export type _PinLoginResponse = Expect<EqualKeys<LoginResponse, "access_token">>;
 
 export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
-export type _PinAuthMethods = Expect<EqualKeys<AuthMethods, "password_login" | "oidc">>;
+export type _PinAuthMethods = Expect<
+  EqualKeys<AuthMethods, "password_login" | "oidc" | "setup_required">
+>;
 
 export type OidcStartRequest = components["schemas"]["OidcStartRequest"];
 export type _PinOidcStartRequest = Expect<

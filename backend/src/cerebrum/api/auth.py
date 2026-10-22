@@ -15,6 +15,7 @@ from cerebrum.accounts.service import (
     UsernameTakenError,
     WeakPasswordError,
     authenticate,
+    is_first_account,
     register_account,
 )
 from cerebrum.accounts.sessions import issue_session, refresh_session
@@ -142,10 +143,16 @@ class OidcMethod(BaseModel):
 class AuthMethodsResponse(BaseModel):
     password_login: bool
     oidc: OidcMethod | None
+    # No account exists yet: the register page must offer the setup-token
+    # + password form for the first admin even when password login is off,
+    # since that bootstrap is never done through the provider.
+    setup_required: bool
 
 
 @unauthenticated_router.get("/methods", response_model=AuthMethodsResponse)
-async def auth_methods() -> AuthMethodsResponse:
+async def auth_methods(
+    auth_db: sqlite3.Connection = Depends(get_auth_db),
+) -> AuthMethodsResponse:
     """Which ways to sign in the login and register pages should offer.
     Unauthenticated, so it carries only what those pages show -- the
     provider's display name, never its issuer URL or client id."""
@@ -157,4 +164,5 @@ async def auth_methods() -> AuthMethodsResponse:
             if settings.oidc_enabled
             else None
         ),
+        setup_required=is_first_account(auth_db),
     )

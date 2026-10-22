@@ -43,14 +43,20 @@ vi.mock("../lib/sessionEstablished", async () => {
 import { GENERIC_OIDC_ERROR, oidcErrorMessage } from "../lib/oidcErrors";
 import { LoginPage } from "./LoginPage";
 
-const NO_PROVIDER: AuthMethods = { password_login: true, oidc: null };
+const NO_PROVIDER: AuthMethods = {
+  password_login: true,
+  oidc: null,
+  setup_required: false,
+};
 const KEYCLOAK: AuthMethods = {
   password_login: true,
   oidc: { provider_name: "Keycloak" },
+  setup_required: false,
 };
 const KEYCLOAK_ONLY: AuthMethods = {
   password_login: false,
   oidc: { provider_name: "Keycloak" },
+  setup_required: false,
 };
 
 function renderLogin(entry = "/login") {

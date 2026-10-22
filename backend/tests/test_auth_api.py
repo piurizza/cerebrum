@@ -469,7 +469,11 @@ def test_auth_methods_without_a_provider_offers_password_only(
     response = client.get("/api/auth/methods")
 
     assert response.status_code == 200
-    assert response.json() == {"password_login": True, "oidc": None}
+    assert response.json() == {
+        "password_login": True,
+        "oidc": None,
+        "setup_required": True,
+    }
 
 
 def test_auth_methods_with_a_provider_names_it_without_leaking_its_config(
@@ -483,6 +487,7 @@ def test_auth_methods_with_a_provider_names_it_without_leaking_its_config(
     assert response.json() == {
         "password_login": True,
         "oidc": {"provider_name": "Authentik"},
+        "setup_required": True,
     }
     assert _OIDC_ISSUER not in response.text
     assert "idp.example" not in response.text
@@ -500,7 +505,21 @@ def test_auth_methods_reports_password_login_off(
     assert response.json() == {
         "password_login": False,
         "oidc": {"provider_name": "SSO"},
+        "setup_required": True,
     }
+
+
+def test_auth_methods_stops_asking_for_setup_once_an_account_exists(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The register page keeps the first-admin password form only while no
+    account exists, even with password login off."""
+    _configure_oidc(monkeypatch, AUTH_PASSWORD_LOGIN="false")
+    issue_test_access_token(client, "root", _PASSWORD)
+
+    response = client.get("/api/auth/methods")
+
+    assert response.json()["setup_required"] is False
 
 
 # --- AUTH_PASSWORD_LOGIN=false ------------------------------------------------

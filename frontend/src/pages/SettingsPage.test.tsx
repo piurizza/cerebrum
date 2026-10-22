@@ -223,6 +223,7 @@ describe("ChangePasswordSection", () => {
 const KEYCLOAK: AuthMethods = {
   password_login: true,
   oidc: { provider_name: "Keycloak" },
+  setup_required: false,
 };
 
 function identity(overrides: Partial<LinkedIdentity> = {}): LinkedIdentity {
@@ -291,7 +292,11 @@ describe("SettingsPage sign-in provider section", () => {
   });
 
   it("is hidden when no provider is configured, and change-password stays", async () => {
-    mockGetAuthMethods.mockResolvedValue({ password_login: true, oidc: null });
+    mockGetAuthMethods.mockResolvedValue({
+      password_login: true,
+      oidc: null,
+      setup_required: false,
+    });
     mockGetLinkedIdentity.mockResolvedValue(identity({ provider_name: null }));
     renderSettings();
 

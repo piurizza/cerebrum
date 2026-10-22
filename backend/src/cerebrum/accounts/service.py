@@ -108,7 +108,7 @@ class User(BaseModel):
     created_at: str
 
 
-def _is_first_account(auth_db: sqlite3.Connection) -> bool:
+def is_first_account(auth_db: sqlite3.Connection) -> bool:
     # Locked even though it's a single read: sqlite3's Connection object is
     # not safe for concurrent statement execution from multiple threads --
     # an unlocked read here can race a concurrent thread's locked write
@@ -129,7 +129,7 @@ def find_valid_invite_token_hash(auth_db: sqlite3.Connection, token: str) -> str
     the provider and consumes it, by hash, in the callback."""
     token_hash = hash_token(token)
     now = datetime.now(UTC).isoformat()
-    # Locked for the same reason as `_is_first_account` above.
+    # Locked for the same reason as `is_first_account` above.
     with auth_write_lock:
         valid = invite_hash_is_valid(auth_db, token_hash, now)
     return token_hash if valid else None
@@ -230,10 +230,10 @@ async def register_account(
     looked at.
     """
     settings = get_settings()
-    is_first_account = _is_first_account(auth_db)
+    bootstrapping = is_first_account(auth_db)
 
     invite_token_hash: str | None = None
-    if is_first_account:
+    if bootstrapping:
         if not secrets.compare_digest(
             token.encode("utf-8"),
             settings.auth_setup_token.get_secret_value().encode("utf-8"),
@@ -276,7 +276,7 @@ async def register_account(
     return User(
         id=user_id,
         username=username,
-        is_admin=is_first_account,
+        is_admin=bootstrapping,
         is_active=True,
         created_at=created_at,
     )
@@ -373,7 +373,7 @@ async def authenticate(
     the lockout count alone; nor a failed one, since the password was
     right.
     """
-    # Locked for the same reason as `_is_first_account`/
+    # Locked for the same reason as `is_first_account`/
     # `find_valid_invite_token_hash` above -- a read against the shared
     # `auth_db` connection is not safe to run unlocked while another thread
     # may be mid-write against it.

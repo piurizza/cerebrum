@@ -46,6 +46,17 @@ services:
       # another tool owns, e.g. a git checkout). Needs both paths above set
       # outside the vault -- see "Serve a read-only vault" in the README.
       CEREBRUM_VAULT_READ_ONLY: ${CEREBRUM_VAULT_READ_ONLY:-false}
+      # Sign in with an OpenID Connect provider (see the README). Blank means
+      # off; the issuer, client id and secret go together.
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-}
+      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
+      OIDC_ALLOW_INSECURE_ISSUER: ${OIDC_ALLOW_INSECURE_ISSUER:-false}
+      AUTH_PASSWORD_LOGIN: ${AUTH_PASSWORD_LOGIN:-true}
     volumes:
       - ${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault
       # Opt-in: create the folder as yourself first (`mkdir -p data`), or

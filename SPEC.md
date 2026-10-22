@@ -48,7 +48,11 @@ deliberate simplification; see [Known Gaps](#10-known-gaps--future-work).
   by default `<vault>/.cerebrum/auth.sqlite3` (configurable via
   `CEREBRUM_AUTH_DB_PATH`). Unlike the index it is not derived: back it up.
   Setting both paths outside the vault keeps all of Cerebrum's own state out
-  of the notes folder, for a vault another tool owns.
+  of the notes folder, for a vault another tool owns. It also holds invites
+  and the links between accounts and identities at an OpenID Connect
+  provider (`oidc_identities`: issuer plus subject). An account created
+  through the provider has no password; its `password_hash` holds a fixed
+  marker that no password matches.
 
 ## 3. Note format
 
@@ -213,6 +217,16 @@ All endpoints under `/api`.
 | POST | `/api/attachments?note_path=...` | Upload a pasted image (raw bytes) into the note's `<stem>.attachments/` folder |
 | GET | `/api/attachments/{path:path}` | Serve a file inside a `*.attachments/` folder, or an image (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) anywhere in the vault outside hidden folders. Checked after symlinks are resolved, so nothing under `.cerebrum/` (the accounts database, the index) or any other hidden folder, and no non-image file outside `*.attachments/`, is ever served |
 | GET | `/api/attachments/find?name=...&from=...` | Where the image an embed like `![[cat.png]]` in note `from` refers to is: `{ path }`, chosen like a wikilink among same-named images; 404 if none |
+
+Sign-in routes live outside the authenticated API (no bearer token needed unless noted):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/auth/methods` | `{ password_login, oidc: { provider_name } \| null }` -- which sign-in options the login and register pages show; never the issuer or client id |
+| POST | `/api/auth/oidc/start` | `{ intent: "login" \| "register" \| "link", username?, invite_token?, current_password? }` → `{ authorization_url }`, and sets a ten-minute flow cookie. `register` checks the invite and the username first (400 / 409). `link` needs a browser-session access token (a personal API token gets 403) and, for an account with a password, the current password (403 if wrong, counted toward the lockout). 404 with no provider configured |
+| GET | `/api/auth/oidc/callback` | Where the provider sends the browser back. Success redirects to `/?oidc=1` (sign-in and invite sign-up, with the refresh cookie set) or `/settings` (link); a failure redirects to `/login`, `/register` or `/settings` with `?oidc_error=<code>` |
+| GET | `/api/account/identity` | `{ linked, provider_name, display_name, has_password, password_usable }` for the caller (authenticated) |
+| DELETE | `/api/account/identity` | Unlink the caller's provider identity; 409 when their password can't sign them in, since unlinking would lock them out |
 
 The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated with a personal API token:
 
@@ -395,6 +409,15 @@ API calls.
 | `AUTH_ACCESS_TOKEN_TTL_MINUTES` | backend | `10` | access-token lifetime |
 | `AUTH_REFRESH_TOKEN_TTL_DAYS` | backend | `30` | refresh-token (session) lifetime |
 | `AUTH_COOKIE_SECURE` | backend | `false` | mark the refresh-token cookie `Secure`; enable once served over TLS |
+| `AUTH_PASSWORD_LOGIN` | backend | `true` | `false` turns off invite registration with a password, and password login for non-admins who have linked a provider identity. Admins keep password login (break-glass). Needs a provider configured |
+| `OIDC_ISSUER` | backend | *(unset)* | OpenID Connect issuer URL, copied exactly (Authentik's ends in `/`). With `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` it turns on sign-in with the provider; set all three or none. Must be `https://` except on `localhost`/`127.0.0.1`. Keep it stable: changing or removing it locks out accounts that have no password |
+| `OIDC_CLIENT_ID` | backend | *(unset)* | client id registered at the provider |
+| `OIDC_CLIENT_SECRET` | backend | *(unset)* | client secret (confidential client) |
+| `OIDC_PROVIDER_NAME` | backend | `SSO` | shown as "Sign in with <name>" |
+| `OIDC_SCOPES` | backend | `openid profile email` | scopes requested; `openid` is always added |
+| `OIDC_ADMIN_GROUP` | backend | *(unset)* | provider group whose members are admins, synced in both directions at each provider sign-in |
+| `OIDC_GROUPS_CLAIM` | backend | `groups` | ID-token claim holding the user's groups (a list or a space-separated string) |
+| `OIDC_ALLOW_INSECURE_ISSUER` | backend | `false` | accept an `http://` issuer on any host. Test stacks only; logs a warning |
 | `WATCHER_ENABLED` | backend | `true` | watch the vault for out-of-band `.md` changes and keep the index in sync |
 | `WATCHER_DEBOUNCE_MS` | backend | `400` | debounce window for batching filesystem change events |
 | `WATCHER_BACKSTOP_INTERVAL_SECONDS` | backend | `300` | interval for the periodic backstop rescan alongside real-time watching |
@@ -540,6 +563,38 @@ history.
 - [x] (admin) generate invite tokens and deactivate other accounts from
       Settings; deactivating a user immediately revokes their sessions
       and API tokens. Self-deactivation is rejected.
+- [x] sign in with one OpenID Connect provider (Keycloak, Authentik, Pocket
+      ID, Google, ...) configured by `OIDC_*` variables. The provider only
+      proves identity: Cerebrum still issues its own sessions, and API
+      tokens and MCP are unchanged. Identities are never matched to
+      accounts by email or username -- an identity is linked only by
+      redeeming an invite through the provider (which creates an account
+      with no password) or by a signed-in user linking from Settings (which
+      asks for their current password). One provider at a time. The flow
+      is the authorization code flow with PKCE, `state` and `nonce`; the
+      ID token must be signed with an asymmetric algorithm the provider
+      advertises, and its issuer, audience and expiry are checked. The
+      redirect URI is built from the request's `Host` and
+      `X-Forwarded-Proto` (nginx sends both for `/api/auth/oidc/`), so
+      every origin people use must be registered at the provider as an
+      exact URI.
+- [x] (optional) `OIDC_ADMIN_GROUP` makes members of a provider group admins
+      and removes admin from non-members, at each provider sign-in. A
+      demotion that would leave no active admin with a password is skipped
+      and logged. A change at the provider takes effect only at that
+      person's next provider sign-in: sessions, password sign-in and API
+      tokens carry on, so deactivate the account to remove someone at once.
+- [x] (optional) `AUTH_PASSWORD_LOGIN=false` makes the provider the way in:
+      invites can only be redeemed through it, and a non-admin who has
+      linked an identity can no longer sign in with a password. Admins
+      keep their password as break-glass for a provider outage, and
+      accounts not yet linked can still sign in with theirs, so they can
+      link. Ask everyone to link before turning it off.
+- [ ] sign in with the provider from the installed iOS home-screen app:
+      the provider page opens in Safari, which keeps its own cookies, so
+      the sign-in lands in Safari instead of the app. Use the site in
+      Safari, or a password where password login is still open. (Android
+      and the desktop app: see the verification notes in the README.)
 - [x] lockout after repeated failed logins (atomic, race-safe counter),
       with timing-attack-resistant rejection (dummy Argon2 hash paid
       even on the locked-out/unknown-user paths).
@@ -692,6 +747,13 @@ how consistently each was cited as high-value across that research.
   matches are detected, not fuzzy/similarity matching. The pending-match
   state is in-memory only; a backend restart mid-window loses any
   in-flight pairing.
+- **Accounts created through the OpenID Connect provider have no password
+  and no way to get one.** If the operator changes `OIDC_ISSUER` or turns
+  the provider off, those accounts can't sign in until an admin-side
+  password reset or "set a password" flow exists. Also not built yet:
+  several providers at once, creating accounts on first provider sign-in
+  without an invite, single logout at the provider, and an admin view of
+  which accounts are linked.
 - **No CRDT / offline-first sync.** Intentional: cerebrum is
   server-centralized by design, not a distributed local-first system.
 - **Frontend request/parameter types stay hand-kept for non-JSON

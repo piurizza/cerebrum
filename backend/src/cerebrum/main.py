@@ -14,6 +14,7 @@ from fastmcp.server.http import StarletteWithLifespan
 
 from cerebrum.api import health
 from cerebrum.api.auth import unauthenticated_router
+from cerebrum.api.oidc import oidc_router
 from cerebrum.api.router import api_router
 from cerebrum.auth_db import connect as connect_auth_db
 from cerebrum.index.db import connect
@@ -221,6 +222,10 @@ def create_app() -> FastAPI:
     # work with no `Authorization` header, so it must never end up behind
     # `api_router`'s default auth dependency.
     app.include_router(unauthenticated_router, prefix="/api/auth")
+    # Same reasoning for the OpenID Connect start and callback routes (see
+    # api/oidc.py): whoever calls them is not signed in yet. Always
+    # mounted; they answer 404 when no provider is configured.
+    app.include_router(oidc_router, prefix="/api/auth/oidc")
     # Also mounted directly on `app`, not through `api_router` (see
     # router.py): the Docker healthcheck hits this with no `Authorization`
     # header, so it must never end up behind `api_router`'s default auth

@@ -1078,6 +1078,43 @@ a {
   color: var(--text-muted);
 }
 
+/* "Could not load sign-in options" + its Retry button on one row. */
+.auth-notice-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+/* The "or" between the provider button and the password fields. */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+
+/* Password fields collapsed behind "Sign in with a password" when password
+   login is switched off; same spacing as the form around them. */
+.auth-password-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.auth-password-fields[hidden] {
+  display: none;
+}
+
 /* Settings page */
 
 .settings-page {

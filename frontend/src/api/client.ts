@@ -1,9 +1,13 @@
 import type {
   AccountSummary,
   ApiTokenMeta,
+  AuthMethods,
   CreateApiTokenResult,
   CreateInviteResult,
+  LinkedIdentity,
   LoginResponse,
+  OidcStartRequest,
+  OidcStartResult,
 } from "../types/auth";
 import type {
   AttachmentLocation,
@@ -555,6 +559,42 @@ export function register(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password, token }),
   });
+}
+
+// --- Sign-in provider (OpenID Connect) ---
+
+// Which sign-in methods this server offers: whether password login is on,
+// and the configured provider's display name (null when there is none).
+// Unauthenticated, like login -- the login and register pages need it
+// before anyone is signed in.
+export function getAuthMethods(): Promise<AuthMethods> {
+  return request<AuthMethods>("/auth/methods");
+}
+
+// Starts a provider round trip. The server sets a short-lived HttpOnly
+// flow cookie and returns the provider's authorization URL; the caller then
+// navigates the whole page there (`window.location.assign`), and the
+// provider sends the browser back to the server's callback. `login` and
+// `register` need no session; `link` needs this tab's access token (sent by
+// `request()` like any authenticated call) and, for an account with a
+// password, `current_password` -- a wrong one is a 403, not a 401, so it
+// never triggers the refresh-and-retry path.
+export function startOidc(body: OidcStartRequest): Promise<OidcStartResult> {
+  return request<OidcStartResult>("/auth/oidc/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function getLinkedIdentity(): Promise<LinkedIdentity> {
+  return request<LinkedIdentity>("/account/identity");
+}
+
+// 409 when unlinking would leave the account with no password it can sign
+// in with -- surfaced through `ApiError` like every other refusal.
+export function unlinkIdentity(): Promise<void> {
+  return request<void>("/account/identity", { method: "DELETE" });
 }
 
 // --- Personal API tokens ---

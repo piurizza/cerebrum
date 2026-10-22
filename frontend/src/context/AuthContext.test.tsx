@@ -239,6 +239,81 @@ describe("AuthProvider mount restore", () => {
   });
 });
 
+// KTD13: only a successful provider sign-in may clear the logout tombstone.
+// The server's callback marks success with `?oidc=1` and every failure with
+// `?oidc_error=<code>`; the provider button itself never touches the
+// tombstone, so a failed or abandoned round trip after a logout in this tab
+// cannot silently restore the previous user's session from the old cookie.
+describe("AuthProvider after a provider sign-in (KTD13)", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("with ?oidc=1 clears a pending logout tombstone, runs the refresh, and strips the marker", async () => {
+    window.history.replaceState({ idx: 0 }, "", "/?oidc=1");
+    // A logout happened earlier in this tab: the tombstone is pending. Like
+    // the real one, it reads true once and is gone afterwards.
+    mockConsumeLoggedOut.mockReturnValueOnce(true).mockReturnValue(false);
+    mockRefreshAccessToken.mockResolvedValue("new-access-token");
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(mockConsumeLoggedOut).toHaveBeenCalled();
+    expect(mockRefreshAccessToken).toHaveBeenCalled();
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("true");
+    expect(mockMarkSessionEstablished).toHaveBeenCalled();
+    expect(window.location.pathname).toBe("/");
+    expect(window.location.search).toBe("");
+    // The router's own history entry state survives the strip.
+    expect(window.history.state).toEqual({ idx: 0 });
+  });
+
+  it("keeps other query parameters when stripping the marker", async () => {
+    window.history.replaceState(null, "", "/?oidc=1&keep=yes");
+    mockRefreshAccessToken.mockResolvedValue("new-access-token");
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(window.location.search).toBe("?keep=yes");
+  });
+
+  it("on /login?oidc_error=not_linked keeps the tombstone in charge and stays logged out, even with a still-valid old refresh cookie", async () => {
+    window.history.replaceState(null, "", "/login?oidc_error=not_linked");
+    mockConsumeLoggedOut.mockReturnValue(true);
+    // The old session's refresh cookie would still succeed if asked.
+    mockRefreshAccessToken.mockResolvedValue("previous-users-token");
+
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("false"),
+    );
+    expect(screen.getByTestId("isAuthenticated")).toHaveTextContent("false");
+    expect(mockRefreshAccessToken).not.toHaveBeenCalled();
+    expect(mockMarkSessionEstablished).not.toHaveBeenCalled();
+    // The error parameter is the login page's to read and remove.
+    expect(window.location.search).toBe("?oidc_error=not_linked");
+  });
+});
+
 describe("AuthProvider mid-session refresh failure", () => {
   it("keeps the shell mounted on a transient failure (no auth rejection) with a session on record", async () => {
     mockWasSessionEstablished.mockReturnValue(true);

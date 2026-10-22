@@ -18,6 +18,14 @@ def get_auth_db(request: Request) -> sqlite3.Connection:
     return cast(sqlite3.Connection, request.app.state.auth_db)
 
 
+def bearer_credential(request: Request) -> str | None:
+    """The token in an `Authorization: Bearer <token>` header, if any."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return auth_header.removeprefix("Bearer ")
+    return None
+
+
 async def get_current_identity(
     request: Request,
     auth_db: sqlite3.Connection = Depends(get_auth_db),
@@ -31,12 +39,8 @@ async def get_current_identity(
     which is mounted outside `api_router` precisely so it never picks up
     this dependency).
     """
-    auth_header = request.headers.get("Authorization")
-    credential = None
-    if auth_header and auth_header.startswith("Bearer "):
-        credential = auth_header.removeprefix("Bearer ")
     try:
-        return await verify_credential(credential, auth_db)
+        return await verify_credential(bearer_credential(request), auth_db)
     except AuthenticationError as exc:
         raise HTTPException(status_code=401, detail="Not authenticated") from exc
 

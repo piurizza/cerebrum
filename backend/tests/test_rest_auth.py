@@ -8,15 +8,20 @@ from fastapi.testclient import TestClient
 from tests.mcp_test_support import issue_test_access_token
 from tests.route_test_support import iter_routes
 
-# The 4 REST routes that must stay reachable with no `Authorization`
+# The 7 REST routes that must stay reachable with no `Authorization`
 # header at all -- every other route included into `api_router` picks up
 # `get_current_identity` as a default dependency (see router.py) and must
-# reject both a missing and a wrong bearer credential.
+# reject both a missing and a wrong bearer credential. The two OpenID
+# Connect routes answer 404 here, with no provider configured; they are
+# exercised against the fake provider in `test_oidc_routes.py`.
 _EXEMPT_ROUTES = {
     ("GET", "/api/health"),
     ("POST", "/api/auth/register"),
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/refresh"),
+    ("GET", "/api/auth/methods"),
+    ("POST", "/api/auth/oidc/start"),
+    ("GET", "/api/auth/oidc/callback"),
 }
 
 _PATH_PARAM = re.compile(r"\{[^/}]+\}")

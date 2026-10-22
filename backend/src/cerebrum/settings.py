@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +20,20 @@ _MIN_AUTH_SECRET_BYTES = 32
 # falls back to.
 _DEFAULT_DAILY_NOTE_FOLDER = "daily"
 _DEFAULT_TEMPLATES_FOLDER = "templates"
+
+# Defaults for the OpenID Connect settings below, also what a blank value
+# falls back to.
+_OIDC_DEFAULTS = {
+    "oidc_provider_name": "SSO",
+    "oidc_scopes": "openid profile email",
+    "oidc_groups_claim": "groups",
+}
+
+# Hosts an `http://` issuer may use without `oidc_allow_insecure_issuer`:
+# a provider on the same machine, where nothing crosses a network.
+_LOOPBACK_ISSUER_HOSTS = ("localhost", "127.0.0.1")
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -72,7 +88,35 @@ class Settings(BaseSettings):
     # always read; this only picks which one gets written.
     cerebrum_link_format: Literal["markdown", "wikilink"] = "markdown"
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # Sign-in through one OpenID Connect provider (Keycloak, Authentik,
+    # Pocket ID, Google, ...). On when the issuer, client id and client
+    # secret are all set, off when none are; anything in between fails
+    # startup. A blank value counts as unset, so a compose `${VAR:-}`
+    # passthrough can't half-enable it.
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: SecretStr | None = None
+    # The `<name>` in "Sign in with <name>".
+    oidc_provider_name: str = _OIDC_DEFAULTS["oidc_provider_name"]
+    oidc_scopes: str = _OIDC_DEFAULTS["oidc_scopes"]
+    # Members of this provider group are admins; empty means the provider
+    # never grants or removes admin.
+    oidc_admin_group: str = ""
+    oidc_groups_claim: str = _OIDC_DEFAULTS["oidc_groups_claim"]
+    # Accept an `http://` issuer on any host, not just loopback. For test
+    # stacks only: the ID token and client secret cross the network in the
+    # clear.
+    oidc_allow_insecure_issuer: bool = False
+    # Off: only admins, and accounts not yet linked to the provider, may
+    # sign in with a password, and invites are redeemed through the
+    # provider. Needs a provider configured.
+    auth_password_login: bool = True
+
+    # `hide_input_in_errors`: a startup validation error would otherwise
+    # print every raw input, secrets such as `oidc_client_secret` included.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", hide_input_in_errors=True
+    )
 
     @field_validator("cerebrum_daily_note_folder", "cerebrum_templates_folder")
     @classmethod
@@ -115,6 +159,25 @@ class Settings(BaseSettings):
             return value.strip().lower() or "markdown"
         return value
 
+    @field_validator(
+        "oidc_issuer", "oidc_client_id", "oidc_client_secret", mode="before"
+    )
+    @classmethod
+    def _blank_means_unset(cls, value: object) -> object:
+        """Trim surrounding spaces; nothing left means unset."""
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+    @field_validator(
+        "oidc_provider_name", "oidc_scopes", "oidc_groups_claim", "oidc_admin_group"
+    )
+    @classmethod
+    def _blank_oidc_text_means_default(cls, value: str, info: ValidationInfo) -> str:
+        """Trim surrounding spaces; nothing left means the default."""
+        assert info.field_name is not None
+        return value.strip() or _OIDC_DEFAULTS.get(info.field_name, "")
+
     @model_validator(mode="after")
     def _keep_index_and_accounts_apart(self) -> Settings:
         """The index is a disposable cache (deleting it is always safe);
@@ -156,6 +219,62 @@ class Settings(BaseSettings):
                     "-- generate one with `openssl rand -hex 32`"
                 )
         return self
+
+    @model_validator(mode="after")
+    def _require_complete_oidc_provider(self) -> Settings:
+        required = {
+            "OIDC_ISSUER": self.oidc_issuer,
+            "OIDC_CLIENT_ID": self.oidc_client_id,
+            "OIDC_CLIENT_SECRET": self.oidc_client_secret,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing and len(missing) < len(required):
+            raise ValueError(
+                "an OpenID Connect provider needs OIDC_ISSUER, OIDC_CLIENT_ID and "
+                f"OIDC_CLIENT_SECRET together -- missing: {', '.join(missing)}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_secure_oidc_issuer(self) -> Settings:
+        if self.oidc_allow_insecure_issuer:
+            logger.warning(
+                "OIDC_ALLOW_INSECURE_ISSUER is on: an http:// OpenID Connect "
+                "issuer is accepted on any host. Use it for test stacks only."
+            )
+        if self.oidc_issuer is None:
+            return self
+        issuer = urlsplit(self.oidc_issuer)
+        if issuer.scheme == "https" and issuer.hostname:
+            return self
+        if issuer.scheme == "http" and issuer.hostname:
+            if issuer.hostname in _LOOPBACK_ISSUER_HOSTS:
+                return self
+            if self.oidc_allow_insecure_issuer:
+                return self
+        raise ValueError(
+            f"OIDC_ISSUER must be an https:// URL, got {self.oidc_issuer!r} -- "
+            "http:// is accepted only for localhost and 127.0.0.1, or on any host "
+            "with OIDC_ALLOW_INSECURE_ISSUER=true (test stacks only)"
+        )
+
+    @model_validator(mode="after")
+    def _require_provider_when_password_login_off(self) -> Settings:
+        if not self.auth_password_login and not self.oidc_enabled:
+            raise ValueError(
+                "AUTH_PASSWORD_LOGIN=false needs an OpenID Connect provider "
+                "(OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET) -- "
+                "otherwise nobody but admins could sign in"
+            )
+        return self
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return (
+            self.oidc_issuer is not None
+            and self.oidc_client_id is not None
+            and self.oidc_client_secret is not None
+        )
 
     @property
     def index_path(self) -> Path:

@@ -1,7 +1,9 @@
 import {
   type FormEvent,
+  type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -11,21 +13,27 @@ import {
   createInvite,
   deactivateAccount,
   errorMessage,
+  getLinkedIdentity,
   listAccounts,
   listApiTokens,
   revokeApiToken,
+  startOidc,
+  unlinkIdentity,
 } from "../api/client";
 import { ConfirmDialog } from "../components/ConfirmDialog/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { useOffline } from "../context/OfflineContext";
+import { useAuthMethods, useOneShotSearchParams } from "../hooks/useAuthMethods";
 import { formatTimestamp } from "../lib/formatDate";
+import { oidcErrorMessage } from "../lib/oidcErrors";
 import {
   canInstall,
   isStandalone,
   promptInstall,
   subscribeInstall,
 } from "../lib/pwaInstall";
-import type { AccountSummary, ApiTokenMeta } from "../types/auth";
+import { redirectTo } from "../lib/redirect";
+import type { AccountSummary, ApiTokenMeta, LinkedIdentity } from "../types/auth";
 
 /** A plaintext secret (personal API token or invite token) shown exactly
  * once, right after it's minted -- the server never returns it again after
@@ -150,6 +158,166 @@ export function ChangePasswordSection() {
       )}
       {done && (
         <p role="status">Password changed. Every other device has been signed out.</p>
+      )}
+    </section>
+  );
+}
+
+type IdentityState = LinkedIdentity | "loading" | "error";
+
+/** Link this account to the configured sign-in provider, or unlink it
+ * (R8, R9). Linking is a round trip through the provider: `startOidc`
+ * returns the provider's URL and the callback brings the browser back to
+ * `/settings`, with `?oidc_error=<code>` when it failed. */
+function SignInProviderSection({
+  providerName,
+  identity,
+  initialError,
+  onChanged,
+}: {
+  providerName: string;
+  identity: IdentityState;
+  initialError: string | null;
+  onChanged: () => void;
+}) {
+  const { isOffline } = useOffline();
+  const headingId = useId();
+  const unlinkHintId = useId();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(initialError);
+  const [confirmingUnlink, setConfirmingUnlink] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+
+  async function handleLink(event: FormEvent) {
+    event.preventDefault();
+    if (typeof identity !== "object") return;
+    setError(null);
+    setStarting(true);
+    try {
+      // An account with a password must re-enter it (KTD5), so a stolen
+      // short-lived access token can't add a lasting way in.
+      const { authorization_url } = await startOidc(
+        identity.has_password
+          ? { intent: "link", current_password: currentPassword }
+          : { intent: "link" },
+      );
+      redirectTo(authorization_url);
+    } catch (err) {
+      setError(errorMessage(err));
+      setStarting(false);
+    }
+  }
+
+  async function handleUnlink() {
+    setUnlinking(true);
+    setUnlinkError(null);
+    try {
+      await unlinkIdentity();
+      setConfirmingUnlink(false);
+      onChanged();
+    } catch (err) {
+      setUnlinkError(errorMessage(err));
+    } finally {
+      setUnlinking(false);
+    }
+  }
+
+  let body: ReactNode;
+  if (identity === "loading") {
+    body = <p className="loading-indicator">Loading...</p>;
+  } else if (identity === "error") {
+    body = (
+      <p className="error-text" role="alert">
+        Could not load your sign-in provider link.
+      </p>
+    );
+  } else if (identity.linked) {
+    body = (
+      <>
+        <p>
+          Linked to {providerName} as{" "}
+          <strong>{identity.display_name ?? "an account with no name"}</strong>.
+        </p>
+        <div>
+          <button
+            type="button"
+            className="btn btn-danger-outline"
+            disabled={isOffline || !identity.password_usable}
+            aria-describedby={identity.password_usable ? undefined : unlinkHintId}
+            onClick={() => {
+              setUnlinkError(null);
+              setConfirmingUnlink(true);
+            }}
+          >
+            Unlink
+          </button>
+        </div>
+        {!identity.password_usable && (
+          <p id={unlinkHintId} className="empty-hint">
+            Your account has no password that signs you in, so unlinking {providerName}{" "}
+            would lock you out.
+          </p>
+        )}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <p className="empty-hint">
+          Link your {providerName} account to sign in to Cerebrum with it.
+        </p>
+        <form onSubmit={handleLink} className="settings-stacked-form">
+          {identity.has_password && (
+            <label className="rename-field">
+              Current password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+              />
+            </label>
+          )}
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={
+              starting || isOffline || (identity.has_password && !currentPassword)
+            }
+          >
+            Link {providerName} account
+          </button>
+        </form>
+      </>
+    );
+  }
+
+  return (
+    <section className="settings-section" aria-labelledby={headingId}>
+      <h2 id={headingId}>Sign-in provider</h2>
+      {body}
+      {isOffline && typeof identity === "object" && (
+        <p className="empty-hint">
+          Reconnect to the server to link or unlink {providerName}.
+        </p>
+      )}
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+      {confirmingUnlink && (
+        <ConfirmDialog
+          title="Unlink sign-in provider"
+          message={`Unlink ${providerName}? You won't be able to sign in with it until you link it again; your password still works.`}
+          confirmLabel="Unlink"
+          error={unlinkError}
+          busy={unlinking}
+          onConfirm={handleUnlink}
+          onCancel={() => setConfirmingUnlink(false)}
+        />
       )}
     </section>
   );
@@ -449,11 +617,55 @@ export function InstallSection() {
   );
 }
 
+const SETTINGS_QUERY_PARAMS = ["oidc_error"] as const;
+
 export function SettingsPage() {
+  const { oidc_error: oidcError } = useOneShotSearchParams(SETTINGS_QUERY_PARAMS);
+  // Says whether a provider is configured before the identity call
+  // settles, so the section can show its loading state; the identity's own
+  // `provider_name` covers a failed methods call.
+  const methodsState = useAuthMethods();
+  const [identity, setIdentity] = useState<IdentityState>("loading");
+
+  const loadIdentity = useCallback(() => {
+    getLinkedIdentity()
+      .then((result) => setIdentity(result))
+      .catch(() => setIdentity("error"));
+  }, []);
+
+  useEffect(() => {
+    loadIdentity();
+  }, [loadIdentity]);
+
+  const providerName =
+    (methodsState.status === "ready"
+      ? methodsState.methods.oidc?.provider_name
+      : null) ?? (typeof identity === "object" ? identity.provider_name : null);
+  // Hidden only once the identity has loaded and says the password does
+  // not sign this account in (KTD8); on a failed call, keep the section.
+  const passwordUsable = typeof identity !== "object" || identity.password_usable;
+  const linkError = oidcErrorMessage(oidcError);
+
   return (
     <div className="settings-page">
       <h1>Settings</h1>
-      <ChangePasswordSection />
+      {linkError &&
+        !providerName &&
+        methodsState.status !== "loading" &&
+        identity !== "loading" && (
+          <p className="error-text" role="alert">
+            {linkError}
+          </p>
+        )}
+      {passwordUsable && <ChangePasswordSection />}
+      {providerName && (
+        <SignInProviderSection
+          providerName={providerName}
+          identity={identity}
+          initialError={linkError}
+          onChanged={loadIdentity}
+        />
+      )}
       <ApiTokensSection />
       <AdminSection />
       <InstallSection />

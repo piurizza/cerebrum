@@ -301,9 +301,40 @@ export interface paths {
          *     authenticated, and a 401 here would send the frontend's
          *     refresh-and-retry path (`fetchWithRetry()` in `client.ts`) through a
          *     pointless token refresh before surfacing the error.
+         *
+         *     So is an account whose password doesn't sign it in (KTD8): one with no
+         *     password, or a linked non-admin's while password login is switched off
+         *     (KTD11). Checked first, so such an account's guesses at its own
+         *     password never reach the lockout count.
          */
         post: operations["change_own_password_api_account_password_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Identity
+         * @description The caller's link to the configured sign-in provider, for Settings.
+         */
+        get: operations["get_own_identity_api_account_identity_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Unlink Own Identity
+         * @description Unlink the caller's provider identity (R9). 204 when nothing is
+         *     linked. 409 when the account would be left with no password it can
+         *     sign in with.
+         */
+        delete: operations["unlink_own_identity_api_account_identity_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -383,6 +414,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Auth Methods
+         * @description Which ways to sign in the login and register pages should offer.
+         *     Unauthenticated, so it carries only what those pages show -- the
+         *     provider's display name, never its issuer URL or client id.
+         */
+        get: operations["auth_methods_api_auth_methods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/oidc/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start */
+        post: operations["start_api_auth_oidc_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/oidc/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Callback */
+        get: operations["callback_api_auth_oidc_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -404,6 +491,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountIdentityResponse */
+        AccountIdentityResponse: {
+            /** Linked */
+            linked: boolean;
+            /** Provider Name */
+            provider_name: string | null;
+            /** Display Name */
+            display_name: string | null;
+            /** Has Password */
+            has_password: boolean;
+            /** Password Usable */
+            password_usable: boolean;
+        };
         /**
          * AccountSummary
          * @description Account metadata safe to hand back to an admin caller -- mirrors
@@ -456,6 +556,14 @@ export interface components {
         AttachmentUploadResponse: {
             /** Path */
             path: string;
+        };
+        /** AuthMethodsResponse */
+        AuthMethodsResponse: {
+            /** Password Login */
+            password_login: boolean;
+            oidc: components["schemas"]["OidcMethod"] | null;
+            /** Setup Required */
+            setup_required: boolean;
         };
         /** ChangePasswordRequest */
         ChangePasswordRequest: {
@@ -573,6 +681,30 @@ export interface components {
             created: string | null;
             /** Updated */
             updated: string | null;
+        };
+        /** OidcMethod */
+        OidcMethod: {
+            /** Provider Name */
+            provider_name: string;
+        };
+        /** OidcStartRequest */
+        OidcStartRequest: {
+            /**
+             * Intent
+             * @enum {string}
+             */
+            intent: "login" | "register" | "link";
+            /** Username */
+            username?: string | null;
+            /** Invite Token */
+            invite_token?: string | null;
+            /** Current Password */
+            current_password?: string | null;
+        };
+        /** OidcStartResponse */
+        OidcStartResponse: {
+            /** Authorization Url */
+            authorization_url: string;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -1169,6 +1301,44 @@ export interface operations {
             };
         };
     };
+    get_own_identity_api_account_identity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountIdentityResponse"];
+                };
+            };
+        };
+    };
+    unlink_own_identity_api_account_identity_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_vault_settings_api_vault_settings_get: {
         parameters: {
             query?: never;
@@ -1271,6 +1441,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+        };
+    };
+    auth_methods_api_auth_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthMethodsResponse"];
+                };
+            };
+        };
+    };
+    start_api_auth_oidc_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OidcStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OidcStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    callback_api_auth_oidc_callback_get: {
+        parameters: {
+            query?: {
+                code?: string | null;
+                state?: string | null;
+                error?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

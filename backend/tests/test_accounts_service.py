@@ -5,16 +5,20 @@ import hashlib
 import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import pytest
 
+from cerebrum.accounts import service
 from cerebrum.accounts.service import (
+    NO_PASSWORD_HASH,
     InvalidCredentialError,
     InvalidTokenError,
     User,
     UsernameTakenError,
     WeakPasswordError,
     authenticate,
+    has_password,
     register_account,
 )
 from cerebrum.settings import get_settings
@@ -380,3 +384,70 @@ def test_authenticate_lockout_for_one_account_does_not_affect_another(
 
     user = asyncio.run(authenticate("bob", VALID_PASSWORD, auth_db))
     assert user.username == "bob"
+
+
+def _make_password_less(auth_db: sqlite3.Connection, username: str) -> None:
+    with auth_db:
+        auth_db.execute(
+            "UPDATE users SET password_hash = ? WHERE username = ?",
+            (NO_PASSWORD_HASH, username),
+        )
+
+
+def test_no_password_sentinel_is_not_an_argon2_hash() -> None:
+    assert not NO_PASSWORD_HASH.startswith("$argon2")
+    assert has_password(NO_PASSWORD_HASH) is False
+
+
+def test_has_password_is_true_for_a_real_hash(auth_db: sqlite3.Connection) -> None:
+    _bootstrap_admin(auth_db, "alice")
+    row = auth_db.execute(
+        "SELECT password_hash FROM users WHERE username = 'alice'"
+    ).fetchone()
+
+    assert has_password(row["password_hash"]) is True
+
+
+@pytest.mark.parametrize("password", [VALID_PASSWORD, NO_PASSWORD_HASH, ""])
+def test_authenticate_password_less_account_fails_and_counts_toward_lockout(
+    auth_db: sqlite3.Connection, password: str
+) -> None:
+    # Whatever is typed -- including the sentinel string itself -- a
+    # password-less account never authenticates by password.
+    _bootstrap_admin(auth_db, "alice")
+    _make_password_less(auth_db, "alice")
+
+    with pytest.raises(InvalidCredentialError):
+        asyncio.run(authenticate("alice", password, auth_db))
+
+    row = auth_db.execute(
+        "SELECT failed_login_attempts FROM users WHERE username = 'alice'"
+    ).fetchone()
+    assert row["failed_login_attempts"] == 1
+
+
+def test_authenticate_password_less_account_still_pays_the_argon2_cost(
+    auth_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Timing parity: the sentinel short-circuits nothing -- one dummy
+    Argon2 verify still runs, like a wrong password would."""
+    _bootstrap_admin(auth_db, "alice")
+    _make_password_less(auth_db, "alice")
+
+    verified_hashes: list[str] = []
+
+    real_hasher = service._password_hasher  # pylint: disable=protected-access
+
+    class RecordingHasher:  # pylint: disable=too-few-public-methods
+        def verify(self, hash_: str | bytes, password: str | bytes) -> Literal[True]:
+            verified_hashes.append(str(hash_))
+            return real_hasher.verify(hash_, password)
+
+    monkeypatch.setattr(service, "_password_hasher", RecordingHasher())
+
+    with pytest.raises(InvalidCredentialError):
+        asyncio.run(authenticate("alice", VALID_PASSWORD, auth_db))
+
+    assert verified_hashes == [
+        service._DUMMY_PASSWORD_HASH  # pylint: disable=protected-access
+    ]

@@ -5,26 +5,30 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from cerebrum.accounts.oidc_accounts import password_login_open
 from cerebrum.accounts.service import (
     InvalidCredentialError,
     InvalidTokenError,
+    PasswordRegistrationClosedError,
     TokenReuseDetectedError,
     User,
     UsernameTakenError,
     WeakPasswordError,
     authenticate,
+    is_first_account,
     register_account,
 )
 from cerebrum.accounts.sessions import issue_session, refresh_session
 from cerebrum.api.deps import get_auth_db
 from cerebrum.settings import get_settings
 
-# No auth dependency on this router by design -- registration, login, and
-# refresh must be reachable by a caller who does not yet hold any valid
-# access token (refresh authenticates via its own cookie, not a bearer
-# credential). Mounted directly on `app` in main.py, not through
-# `api_router`, so it can never accidentally pick up an auth-requiring
-# dependency added to `api_router` later.
+# No auth dependency on this router by design -- registration, login,
+# refresh, and the login-methods lookup the login page makes first must be
+# reachable by a caller who does not yet hold any valid access token
+# (refresh authenticates via its own cookie, not a bearer credential).
+# Mounted directly on `app` in main.py, not through `api_router`, so it can
+# never accidentally pick up an auth-requiring dependency added to
+# `api_router` later.
 unauthenticated_router = APIRouter()
 
 
@@ -67,6 +71,12 @@ async def register(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UsernameTakenError as exc:
         raise HTTPException(status_code=409, detail="Username already taken") from exc
+    except PasswordRegistrationClosedError as exc:
+        provider_name = get_settings().oidc_provider_name
+        raise HTTPException(
+            status_code=403,
+            detail=f"Password registration is turned off; sign up with {provider_name}",
+        ) from exc
 
 
 class LoginRequest(BaseModel):
@@ -85,7 +95,14 @@ async def login(
     auth_db: sqlite3.Connection = Depends(get_auth_db),
 ) -> LoginResponse:
     try:
-        user = await authenticate(body.username, body.password, auth_db)
+        # With `AUTH_PASSWORD_LOGIN` off, a linked non-admin's right
+        # password is refused exactly like a wrong one (KTD11).
+        user = await authenticate(
+            body.username,
+            body.password,
+            auth_db,
+            password_login_open=lambda account: password_login_open(auth_db, account),
+        )
     except InvalidCredentialError as exc:
         raise HTTPException(
             status_code=401, detail="Invalid username or password"
@@ -117,3 +134,35 @@ async def refresh(
 
     set_refresh_cookie(response, new_refresh_token)
     return LoginResponse(access_token=access_token)
+
+
+class OidcMethod(BaseModel):
+    provider_name: str
+
+
+class AuthMethodsResponse(BaseModel):
+    password_login: bool
+    oidc: OidcMethod | None
+    # No account exists yet: the register page must offer the setup-token
+    # + password form for the first admin even when password login is off,
+    # since that bootstrap is never done through the provider.
+    setup_required: bool
+
+
+@unauthenticated_router.get("/methods", response_model=AuthMethodsResponse)
+async def auth_methods(
+    auth_db: sqlite3.Connection = Depends(get_auth_db),
+) -> AuthMethodsResponse:
+    """Which ways to sign in the login and register pages should offer.
+    Unauthenticated, so it carries only what those pages show -- the
+    provider's display name, never its issuer URL or client id."""
+    settings = get_settings()
+    return AuthMethodsResponse(
+        password_login=settings.auth_password_login,
+        oidc=(
+            OidcMethod(provider_name=settings.oidc_provider_name)
+            if settings.oidc_enabled
+            else None
+        ),
+        setup_required=is_first_account(auth_db),
+    )

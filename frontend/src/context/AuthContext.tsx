@@ -107,6 +107,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // freshly-rotated token -- force-logging out every tab.
     let cancelled = false;
 
+    // KTD13 (OIDC plan): the server's provider callback lands a successful
+    // sign-in on `/?oidc=1`, having just set a fresh refresh cookie. That
+    // is the one case where a pending logout tombstone must NOT stop the
+    // refresh below -- it would strand the person who just signed in at
+    // /login. So clear the tombstone, drop the marker from the URL, and fall
+    // through to the normal refresh. Failure redirects (`?oidc_error=...`)
+    // carry no marker, so they leave the tombstone in charge, and the
+    // provider button never touches it: a failed or abandoned round trip
+    // cannot quietly restore the previous user's session from the old,
+    // still-valid cookie. `history.replaceState` (not the router, which
+    // this provider sits above) keeps the router's own entry state.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("oidc") === "1") {
+      consumeLoggedOut();
+      params.delete("oidc");
+      const query = params.toString();
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+      );
+    }
+
     // KTD-C: an explicit `logout()` wrote a one-shot tombstone. Consume it
     // BEFORE any refresh -- clearing the session-established marker alone
     // does not make logout stick, because a successful refresh against the

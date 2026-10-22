@@ -1,15 +1,36 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  AccountSummary,
+  ApiTokenMeta,
+  AuthMethods,
+  LinkedIdentity,
+  OidcStartRequest,
+  OidcStartResult,
+} from "../types/auth";
 
 const mockChangePassword =
   vi.fn<(currentPassword: string, newPassword: string) => Promise<void>>();
+const mockGetAuthMethods = vi.fn<() => Promise<AuthMethods>>();
+const mockGetLinkedIdentity = vi.fn<() => Promise<LinkedIdentity>>();
+const mockStartOidc = vi.fn<(body: OidcStartRequest) => Promise<OidcStartResult>>();
+const mockUnlinkIdentity = vi.fn<() => Promise<void>>();
+const mockListApiTokens = vi.fn<() => Promise<ApiTokenMeta[]>>();
+const mockListAccounts = vi.fn<() => Promise<AccountSummary[]>>();
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
   return {
     ...actual,
     changePassword: (currentPassword: string, newPassword: string) =>
       mockChangePassword(currentPassword, newPassword),
+    getAuthMethods: () => mockGetAuthMethods(),
+    getLinkedIdentity: () => mockGetLinkedIdentity(),
+    startOidc: (body: OidcStartRequest) => mockStartOidc(body),
+    unlinkIdentity: () => mockUnlinkIdentity(),
+    listApiTokens: () => mockListApiTokens(),
+    listAccounts: () => mockListAccounts(),
   };
 });
 
@@ -19,7 +40,18 @@ vi.mock("../context/OfflineContext", () => ({
   useOffline: () => mockUseOffline(),
 }));
 
-import { ChangePasswordSection, InstallSection } from "./SettingsPage";
+vi.mock("../context/AuthContext", () => ({
+  useAuth: () => ({ username: null }),
+}));
+
+const mockRedirectTo = vi.fn<(url: string) => void>();
+vi.mock("../lib/redirect", () => ({
+  redirectTo: (url: string) => mockRedirectTo(url),
+}));
+
+import { ApiError } from "../api/client";
+import { oidcErrorMessage } from "../lib/oidcErrors";
+import { ChangePasswordSection, InstallSection, SettingsPage } from "./SettingsPage";
 
 const realMatchMedia = window.matchMedia;
 
@@ -185,5 +217,303 @@ describe("ChangePasswordSection", () => {
 
     expect(screen.getByRole("button", { name: "Change password" })).toBeDisabled();
     expect(screen.getByText(/Reconnect to the server/)).toBeInTheDocument();
+  });
+});
+
+const KEYCLOAK: AuthMethods = {
+  password_login: true,
+  oidc: { provider_name: "Keycloak" },
+};
+
+function identity(overrides: Partial<LinkedIdentity> = {}): LinkedIdentity {
+  return {
+    linked: false,
+    provider_name: "Keycloak",
+    display_name: null,
+    has_password: true,
+    password_usable: true,
+    ...overrides,
+  };
+}
+
+const LINKED_WITH_PASSWORD = identity({
+  linked: true,
+  display_name: "ana@example.com",
+});
+// Created through the provider: no password at all.
+const PROVIDER_ONLY = identity({
+  linked: true,
+  display_name: "bea@example.com",
+  has_password: false,
+  password_usable: false,
+});
+// A linked non-admin while password login is switched off: the password
+// exists but no longer signs them in.
+const PASSWORD_SWITCHED_OFF = identity({
+  linked: true,
+  display_name: "cal@example.com",
+  has_password: true,
+  password_usable: false,
+});
+
+function renderSettings(entry = "/settings") {
+  const router = createMemoryRouter(
+    [{ path: "/settings", element: <SettingsPage /> }],
+    {
+      initialEntries: [entry],
+    },
+  );
+  render(<RouterProvider router={router} />);
+  return router;
+}
+
+function providerSection() {
+  return screen.getByRole("region", { name: "Sign-in provider" });
+}
+
+async function findProviderSection() {
+  return screen.findByRole("region", { name: "Sign-in provider" });
+}
+
+describe("SettingsPage sign-in provider section", () => {
+  beforeEach(() => {
+    mockUseOffline.mockReturnValue({ isOffline: false, lastSyncedAt: null });
+    mockGetAuthMethods.mockReset();
+    mockGetLinkedIdentity.mockReset();
+    mockStartOidc.mockReset();
+    mockUnlinkIdentity.mockReset();
+    mockRedirectTo.mockReset();
+    mockListApiTokens.mockReset();
+    mockListApiTokens.mockResolvedValue([]);
+    mockListAccounts.mockReset();
+    mockListAccounts.mockRejectedValue(new ApiError("Forbidden", 403));
+    mockGetAuthMethods.mockResolvedValue(KEYCLOAK);
+  });
+
+  it("is hidden when no provider is configured, and change-password stays", async () => {
+    mockGetAuthMethods.mockResolvedValue({ password_login: true, oidc: null });
+    mockGetLinkedIdentity.mockResolvedValue(identity({ provider_name: null }));
+    renderSettings();
+
+    await waitFor(() => expect(mockGetLinkedIdentity).toHaveBeenCalled());
+    await waitFor(() => expect(mockGetAuthMethods).toHaveBeenCalled());
+    expect(screen.queryByRole("region", { name: "Sign-in provider" })).toBeNull();
+    expect(screen.queryByText(/Keycloak/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Change password" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a loading placeholder until the identity call resolves", async () => {
+    let resolve!: (value: LinkedIdentity) => void;
+    mockGetLinkedIdentity.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    renderSettings();
+
+    const section = await findProviderSection();
+    expect(within(section).getByText("Loading...")).toBeInTheDocument();
+    expect(within(section).queryByRole("button")).toBeNull();
+
+    await act(async () => {
+      resolve(LINKED_WITH_PASSWORD);
+    });
+    expect(within(section).queryByText("Loading...")).toBeNull();
+    expect(within(section).getByText("ana@example.com")).toBeInTheDocument();
+  });
+
+  it("shows the linked display name and an enabled Unlink for a password account", async () => {
+    mockGetLinkedIdentity.mockResolvedValue(LINKED_WITH_PASSWORD);
+    renderSettings();
+
+    const section = await findProviderSection();
+    expect(await within(section).findByText("ana@example.com")).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Unlink" })).toBeEnabled();
+    expect(within(section).queryByRole("button", { name: /^Link/ })).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Change password" }),
+    ).toBeInTheDocument();
+  });
+
+  it("unlinks after confirmation and reloads the identity", async () => {
+    mockGetLinkedIdentity
+      .mockResolvedValueOnce(LINKED_WITH_PASSWORD)
+      .mockResolvedValue(identity());
+    mockUnlinkIdentity.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderSettings();
+
+    const section = await findProviderSection();
+    await user.click(await within(section).findByRole("button", { name: "Unlink" }));
+    expect(mockUnlinkIdentity).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Unlink" }));
+
+    expect(mockUnlinkIdentity).toHaveBeenCalledTimes(1);
+    expect(
+      await within(section).findByRole("button", { name: "Link Keycloak account" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows an unlink refusal inline in an alert", async () => {
+    mockGetLinkedIdentity.mockResolvedValue(LINKED_WITH_PASSWORD);
+    mockUnlinkIdentity.mockRejectedValue(
+      new ApiError("You need a password you can sign in with before unlinking", 409),
+    );
+    const user = userEvent.setup();
+    renderSettings();
+
+    const section = await findProviderSection();
+    await user.click(await within(section).findByRole("button", { name: "Unlink" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Unlink" }),
+    );
+
+    expect(
+      await within(screen.getByRole("dialog")).findByRole("alert"),
+    ).toHaveTextContent("You need a password you can sign in with before unlinking");
+  });
+
+  it("provider-only account: Unlink disabled with an explanation, and no change-password section", async () => {
+    mockGetLinkedIdentity.mockResolvedValue(PROVIDER_ONLY);
+    renderSettings();
+
+    const section = await findProviderSection();
+    expect(await within(section).findByText("bea@example.com")).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Unlink" })).toBeDisabled();
+    expect(within(section).getByText(/would lock you out/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Change password" })).toBeNull();
+  });
+
+  it("linked non-admin with password login off: no change-password, Unlink disabled with its explanation", async () => {
+    mockGetLinkedIdentity.mockResolvedValue(PASSWORD_SWITCHED_OFF);
+    renderSettings();
+
+    const section = await findProviderSection();
+    expect(await within(section).findByText("cal@example.com")).toBeInTheDocument();
+    const unlink = within(section).getByRole("button", { name: "Unlink" });
+    expect(unlink).toBeDisabled();
+    expect(unlink).toHaveAccessibleDescription(/would lock you out/);
+    expect(screen.queryByRole("heading", { name: "Change password" })).toBeNull();
+  });
+
+  it("keeps the change-password section when the identity call fails", async () => {
+    mockGetLinkedIdentity.mockRejectedValue(new Error("boom"));
+    renderSettings();
+
+    const section = await findProviderSection();
+    expect(await within(section).findByRole("alert")).toHaveTextContent(
+      "Could not load your sign-in provider link",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Change password" }),
+    ).toBeInTheDocument();
+  });
+
+  it("links after asking for the current password", async () => {
+    mockGetLinkedIdentity.mockResolvedValue(identity());
+    mockStartOidc.mockResolvedValue({ authorization_url: "https://idp.example/auth" });
+    const user = userEvent.setup();
+    renderSettings();
+
+    const section = await findProviderSection();
+    const link = await within(section).findByRole("button", {
+      name: "Link Keycloak account",
+    });
+    expect(link).toBeDisabled();
+
+    await user.type(within(section).getByLabelText("Current password"), "my password");
+    await user.click(link);
+
+    expect(mockStartOidc).toHaveBeenCalledWith({
+      intent: "link",
+      current_password: "my password",
+    });
+    await waitFor(() =>
+      expect(mockRedirectTo).toHaveBeenCalledWith("https://idp.example/auth"),
+    );
+  });
+
+  it("links without a password prompt when the account has none", async () => {
+    mockGetLinkedIdentity.mockResolvedValue(
+      identity({ has_password: false, password_usable: false }),
+    );
+    mockStartOidc.mockResolvedValue({ authorization_url: "https://idp.example/auth" });
+    const user = userEvent.setup();
+    renderSettings();
+
+    const section = await findProviderSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Link Keycloak account" }),
+    );
+
+    expect(within(section).queryByLabelText("Current password")).toBeNull();
+    expect(mockStartOidc).toHaveBeenCalledWith({ intent: "link" });
+  });
+
+  it("shows a wrong current password inline", async () => {
+    mockGetLinkedIdentity.mockResolvedValue(identity());
+    mockStartOidc.mockRejectedValue(new ApiError("Current password is incorrect", 403));
+    const user = userEvent.setup();
+    renderSettings();
+
+    const section = await findProviderSection();
+    await user.type(
+      await within(section).findByLabelText("Current password"),
+      "wrong password",
+    );
+    await user.click(
+      within(section).getByRole("button", { name: "Link Keycloak account" }),
+    );
+
+    expect(await within(section).findByRole("alert")).toHaveTextContent(
+      "Current password is incorrect",
+    );
+    expect(mockRedirectTo).not.toHaveBeenCalled();
+    expect(
+      within(section).getByRole("button", { name: "Link Keycloak account" }),
+    ).toBeEnabled();
+  });
+
+  it("shows ?oidc_error from a failed link and removes it from the URL", async () => {
+    mockGetLinkedIdentity.mockResolvedValue(identity());
+    const router = renderSettings("/settings?oidc_error=already_linked");
+
+    const section = await findProviderSection();
+    expect(await within(section).findByRole("alert")).toHaveTextContent(
+      oidcErrorMessage("already_linked") ?? "missing",
+    );
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+  });
+
+  it("disables Link while offline, with the reconnect hint", async () => {
+    mockUseOffline.mockReturnValue({ isOffline: true, lastSyncedAt: null });
+    mockGetLinkedIdentity.mockResolvedValue(identity());
+    const user = userEvent.setup();
+    renderSettings();
+
+    const section = await findProviderSection();
+    await user.type(await within(section).findByLabelText("Current password"), "pw");
+    expect(
+      within(section).getByRole("button", { name: "Link Keycloak account" }),
+    ).toBeDisabled();
+    expect(within(section).getByText(/Reconnect to the server/)).toBeInTheDocument();
+  });
+
+  it("disables Unlink while offline, with the reconnect hint", async () => {
+    mockUseOffline.mockReturnValue({ isOffline: true, lastSyncedAt: null });
+    mockGetLinkedIdentity.mockResolvedValue(LINKED_WITH_PASSWORD);
+    renderSettings();
+
+    const section = await findProviderSection();
+    expect(
+      await within(section).findByRole("button", { name: "Unlink" }),
+    ).toBeDisabled();
+    expect(within(section).getByText(/Reconnect to the server/)).toBeInTheDocument();
+    expect(providerSection()).toBe(section);
   });
 });

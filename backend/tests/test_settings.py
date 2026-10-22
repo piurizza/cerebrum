@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from cerebrum.settings import Settings, get_settings
+from tests.oidc_fake import OIDC_ENV_KEYS
 
 # auth_jwt_secret/auth_setup_token are required settings with no default
 # (see settings.py) -- every test below that constructs Settings() for an
@@ -131,18 +132,6 @@ def test_watcher_settings_read_from_environment(
 
 # --- OpenID Connect provider settings ---------------------------------------
 
-_OIDC_ENV_KEYS = (
-    "OIDC_ISSUER",
-    "OIDC_CLIENT_ID",
-    "OIDC_CLIENT_SECRET",
-    "OIDC_PROVIDER_NAME",
-    "OIDC_SCOPES",
-    "OIDC_ADMIN_GROUP",
-    "OIDC_GROUPS_CLAIM",
-    "OIDC_ALLOW_INSECURE_ISSUER",
-    "AUTH_PASSWORD_LOGIN",
-)
-
 _VALID_OIDC_ENV = {
     "OIDC_ISSUER": "https://idp.example/realms/home",
     "OIDC_CLIENT_ID": "cerebrum",
@@ -154,7 +143,7 @@ def _set_oidc_env(monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:
     """Start every OIDC test from a clean slate -- none of the OIDC
     variables set -- then apply `overrides` (keys as the env var names)."""
     _set_valid_auth_env(monkeypatch)
-    for key in _OIDC_ENV_KEYS:
+    for key in OIDC_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     for key, value in overrides.items():
         monkeypatch.setenv(key, value)

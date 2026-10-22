@@ -21,12 +21,14 @@ os.environ.setdefault("AUTH_JWT_SECRET", "x" * 32)
 os.environ.setdefault("AUTH_SETUP_TOKEN", "y" * 32)
 
 # pylint: disable=wrong-import-position
+from cerebrum.accounts.oidc import use_transport  # noqa: E402
 from cerebrum.auth_db import connect as connect_auth_db  # noqa: E402
 from cerebrum.index.db import connect  # noqa: E402
 from cerebrum.index.indexer import PendingRenameCache  # noqa: E402
 from cerebrum.main import create_app  # noqa: E402
 from cerebrum.settings import get_settings  # noqa: E402
 from tests.mcp_test_support import issue_test_access_token  # noqa: E402
+from tests.oidc_fake import FakeProvider, configure_oidc_env  # noqa: E402
 
 # pylint: enable=wrong-import-position
 
@@ -102,3 +104,17 @@ def authenticated_client(client: TestClient) -> TestClient:
     token = issue_test_access_token(client)
     client.headers.update({"Authorization": f"Bearer {token}"})
     return client
+
+
+@pytest.fixture
+def fake_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeProvider]:
+    """A fresh in-process OpenID Connect provider (`tests/oidc_fake.py`):
+    the OIDC settings point at it, and every request `accounts/oidc.py`
+    makes is routed to it instead of the network. Request it before
+    `client` so the app is built with the provider configured."""
+    configure_oidc_env(monkeypatch)
+    provider = FakeProvider()
+    use_transport(provider.transport)
+    yield provider
+    use_transport(None)
+    get_settings.cache_clear()

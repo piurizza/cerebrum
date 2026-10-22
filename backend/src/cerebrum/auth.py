@@ -22,6 +22,33 @@ class AuthenticationError(Exception):
     """Raised by `verify_credential()` when a credential fails verification."""
 
 
+class NotASessionError(Exception):
+    """Raised by `verify_session_credential()` for a credential that
+    verifies, but as a personal API token rather than a browser session's
+    access token."""
+
+
+async def verify_session_credential(
+    credential: str | None, auth_db: sqlite3.Connection
+) -> str:
+    """`verify_credential()`, accepting only a browser session's access
+    token, for the few actions a personal API token must never take --
+    linking a sign-in provider, which would turn a leaked API token into a
+    lasting login (KTD5).
+
+    Raises `AuthenticationError` for a credential that doesn't verify at
+    all, and `NotASessionError` for a valid personal API token, so the
+    caller can answer 401 and 403 respectively."""
+    if not credential:
+        raise AuthenticationError("no credential presented")
+    try:
+        return await _verify_access_token(credential, auth_db)
+    except jwt.PyJWTError:
+        pass
+    _verify_api_token(credential, auth_db)
+    raise NotASessionError("a personal API token, not a session")
+
+
 async def verify_credential(credential: str | None, auth_db: sqlite3.Connection) -> str:
     """Verify a bearer-token-style credential and return the identity
     (subject) it authenticates, or raise `AuthenticationError`.
@@ -72,13 +99,8 @@ async def verify_credential(credential: str | None, auth_db: sqlite3.Connection)
     if not credential:
         raise AuthenticationError("no credential presented")
 
-    settings = get_settings()
     try:
-        payload = jwt.decode(
-            credential,
-            settings.auth_jwt_secret.get_secret_value(),
-            algorithms=["HS256"],
-        )
+        return await _verify_access_token(credential, auth_db)
     except jwt.PyJWTError:
         # Not a valid/current/correctly-signed access-token JWT -- fall
         # through to the personal-API-token path instead of rejecting
@@ -86,6 +108,20 @@ async def verify_credential(credential: str | None, auth_db: sqlite3.Connection)
         # raises its own `AuthenticationError` on failure, so nothing more
         # is needed in this branch.
         return _verify_api_token(credential, auth_db)
+
+
+async def _verify_access_token(credential: str, auth_db: sqlite3.Connection) -> str:
+    """The session-access-token half of `verify_credential()`. Raises
+    `jwt.PyJWTError` for anything that isn't a valid access-token JWT (so
+    the caller can try it as a personal API token), and
+    `AuthenticationError` for a valid one whose account is gone or
+    inactive."""
+    settings = get_settings()
+    payload = jwt.decode(
+        credential,
+        settings.auth_jwt_secret.get_secret_value(),
+        algorithms=["HS256"],
+    )
 
     user_id = payload.get("sub")
     # Locked even though it's a single read: sqlite3's Connection object is

@@ -402,13 +402,9 @@ async def change_password(
     """Replace an authenticated account's password, after re-checking the
     current one.
 
-    The caller is already authenticated (the route sits behind
-    `get_current_identity`), so this is not a login: there is no username to
-    enumerate and no timing-parity work to do. But a wrong `current_password`
-    still counts toward the same lockout `authenticate()` enforces, and a
-    locked account is refused here too -- otherwise a stolen access token
-    could be used to brute-force the password through this endpoint without
-    ever tripping the lockout login has.
+    The current password is re-checked by `confirm_current_password()`, so
+    a wrong one counts toward the login lockout, and a locked account is
+    refused.
 
     On success, every refresh token the account holds is revoked in the
     same transaction as the hash update. Rotating a password is most often a
@@ -428,6 +424,48 @@ async def change_password(
             f"password must be at least {_MIN_PASSWORD_LENGTH} characters"
         )
 
+    user = await confirm_current_password(user_id, current_password, auth_db)
+
+    new_hash = await anyio.to_thread.run_sync(_password_hasher.hash, new_password)
+    now_iso = datetime.now(UTC).isoformat()
+    with auth_write_lock, auth_db:
+        auth_db.execute(
+            """
+            UPDATE users
+            SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL
+            WHERE id = ?
+            """,
+            (new_hash, user_id),
+        )
+        auth_db.execute(
+            """
+            UPDATE refresh_tokens SET revoked_at = ?
+            WHERE user_id = ? AND revoked_at IS NULL
+            """,
+            (now_iso, user_id),
+        )
+
+    return user
+
+
+async def confirm_current_password(
+    user_id: int, password: str, auth_db: sqlite3.Connection
+) -> User:
+    """Re-check a signed-in account's password before a sensitive change
+    (changing it, linking a sign-in provider), returning the account.
+
+    The caller is already authenticated, so this is not a login: there is
+    no username to enumerate and no timing-parity work to do. But a wrong
+    password still counts toward the same lockout `authenticate()`
+    enforces, and a locked account is refused here too -- otherwise a
+    stolen access token could brute-force the password through these
+    endpoints without ever tripping the lockout login has. A success does
+    not reset the failure count: only a real login or a password change
+    does.
+
+    Raises `InvalidCredentialError` for a wrong password, a locked-out
+    account, or an account that no longer exists or is inactive.
+    """
     with auth_write_lock:
         row = auth_db.execute(
             """
@@ -448,30 +486,11 @@ async def change_password(
         raise InvalidCredentialError("account temporarily locked")
 
     password_ok = await anyio.to_thread.run_sync(
-        _verify_password_or_dummy, row["password_hash"], current_password
+        _verify_password_or_dummy, row["password_hash"], password
     )
     if not password_ok:
         _record_failed_login(auth_db, user_id)
         raise InvalidCredentialError("current password is incorrect")
-
-    new_hash = await anyio.to_thread.run_sync(_password_hasher.hash, new_password)
-    now_iso = datetime.now(UTC).isoformat()
-    with auth_write_lock, auth_db:
-        auth_db.execute(
-            """
-            UPDATE users
-            SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL
-            WHERE id = ?
-            """,
-            (new_hash, user_id),
-        )
-        auth_db.execute(
-            """
-            UPDATE refresh_tokens SET revoked_at = ?
-            WHERE user_id = ? AND revoked_at IS NULL
-            """,
-            (now_iso, user_id),
-        )
 
     return User(
         id=row["id"],

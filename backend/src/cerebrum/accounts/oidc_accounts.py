@@ -17,13 +17,15 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
 
 from cerebrum.accounts.oidc import OidcError, VerifiedIdentity
-from cerebrum.accounts.service import NO_PASSWORD_HASH
+from cerebrum.accounts.service import NO_PASSWORD_HASH, has_password
 from cerebrum.accounts.sessions import insert_session
 from cerebrum.auth_db import auth_write_lock
+from cerebrum.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -205,3 +207,161 @@ def _invite_is_valid(auth_db: sqlite3.Connection, invite_hash: str, now: str) ->
         (invite_hash, now),
     ).fetchone()
     return row is not None
+
+
+# -- linking from Settings -----------------------------------------------------
+
+
+class UnusablePasswordError(Exception):
+    """Unlinking would leave the account with no password it can sign in
+    with (KTD8): it has none, or the password switch has closed it."""
+
+
+@dataclass(frozen=True)
+class IdentityStatus:
+    """What Settings shows about an account's sign-in methods."""
+
+    linked: bool
+    # The preferred username or email captured at link time (KTD9).
+    display_name: str | None
+    has_password: bool
+    password_usable: bool
+
+
+def link_identity(
+    auth_db: sqlite3.Connection, identity: VerifiedIdentity, user_id: int
+) -> None:
+    """Link `identity` to the signed-in account `user_id` (R8), which
+    started the flow from Settings. Each account links at most one identity
+    per issuer, and each identity at most one account.
+
+    Re-linking the account's own identity is a no-op. Raises `OidcError`
+    with `inactive` (the account was deactivated since the flow started) or
+    `already_linked` (the identity belongs to another account, or this
+    account already has a different identity for this issuer). Neither
+    changes anything.
+    """
+    created_at = datetime.now(UTC).isoformat()
+    with auth_write_lock, auth_db:
+        account = auth_db.execute(
+            "SELECT is_active FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if account is None or not account["is_active"]:
+            logger.info("OIDC link refused: account %s is deactivated", user_id)
+            raise OidcError("inactive")
+
+        linked = _linked_account(auth_db, identity)
+        if linked is not None:
+            if linked["id"] == user_id:
+                return
+            logger.info(
+                "OIDC link refused: %r at %r is already linked to account %s",
+                identity.subject,
+                identity.issuer,
+                linked["id"],
+            )
+            raise OidcError("already_linked")
+
+        if _linked_subject(auth_db, user_id, identity.issuer) is not None:
+            logger.info(
+                "OIDC link refused: account %s already has an identity at %r",
+                user_id,
+                identity.issuer,
+            )
+            raise OidcError("already_linked")
+
+        _insert_identity(auth_db, user_id, identity, created_at)
+
+
+def identity_status(auth_db: sqlite3.Connection, user_id: int) -> IdentityStatus:
+    """The account's link to the configured provider, and whether its
+    password still signs in. With no provider configured nothing is
+    linked."""
+    issuer = _configured_issuer()
+    with auth_write_lock:
+        account = _password_row(auth_db, user_id)
+        link = (
+            None
+            if issuer is None
+            else auth_db.execute(
+                """
+                SELECT display_name FROM oidc_identities
+                WHERE user_id = ? AND issuer = ?
+                """,
+                (user_id, issuer),
+            ).fetchone()
+        )
+    linked = link is not None
+    return IdentityStatus(
+        linked=linked,
+        display_name=link["display_name"] if link is not None else None,
+        has_password=has_password(account["password_hash"]),
+        password_usable=is_password_usable(
+            account["password_hash"], bool(account["is_admin"]), linked=linked
+        ),
+    )
+
+
+def unlink_identity(auth_db: sqlite3.Connection, user_id: int) -> None:
+    """Remove the account's link to the configured provider (R9). A no-op
+    when nothing is linked. Links made under a previous issuer stay, inert
+    (KTD9).
+
+    Raises `UnusablePasswordError`, changing nothing, when the account
+    would be left with no password it can sign in with.
+    """
+    issuer = _configured_issuer()
+    if issuer is None:
+        return
+    # One locked transaction for the check and the delete, so the account's
+    # admin flag can't change between them.
+    with auth_write_lock, auth_db:
+        if _linked_subject(auth_db, user_id, issuer) is None:
+            return
+        account = _password_row(auth_db, user_id)
+        if not is_password_usable(
+            account["password_hash"], bool(account["is_admin"]), linked=True
+        ):
+            raise UnusablePasswordError(
+                "You need a password you can sign in with before unlinking"
+            )
+        auth_db.execute(
+            "DELETE FROM oidc_identities WHERE user_id = ? AND issuer = ?",
+            (user_id, issuer),
+        )
+
+
+def is_password_usable(password_hash: str, is_admin: bool, *, linked: bool) -> bool:
+    """Whether an account's password signs it in (KTD8): it has one, and
+    password login is open to it -- the switch is on, or the account is an
+    admin (break-glass, KTD11), or it has no linked identity yet (so it can
+    still sign in to link one)."""
+    return has_password(password_hash) and (
+        get_settings().auth_password_login or is_admin or not linked
+    )
+
+
+def _configured_issuer() -> str | None:
+    settings = get_settings()
+    return settings.oidc_issuer if settings.oidc_enabled else None
+
+
+def _linked_subject(
+    auth_db: sqlite3.Connection, user_id: int, issuer: str
+) -> str | None:
+    """The subject the account has linked at `issuer`, if any. The caller
+    holds `auth_write_lock`."""
+    row = auth_db.execute(
+        "SELECT subject FROM oidc_identities WHERE user_id = ? AND issuer = ?",
+        (user_id, issuer),
+    ).fetchone()
+    return None if row is None else str(row["subject"])
+
+
+def _password_row(auth_db: sqlite3.Connection, user_id: int) -> sqlite3.Row:
+    """The caller holds `auth_write_lock`. The account exists: the caller
+    is signed in as it, which `get_current_identity` just checked."""
+    row: sqlite3.Row = auth_db.execute(
+        "SELECT password_hash, is_admin FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    return row

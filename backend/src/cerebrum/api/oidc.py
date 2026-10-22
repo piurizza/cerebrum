@@ -4,9 +4,10 @@
 authorization URL and sets the `oidc_flow` cookie; the page then navigates
 to that URL. The provider sends the browser back to
 `GET /api/auth/oidc/callback`, which always answers with a 303: to `/?oidc=1`
-with a refresh cookie on success (the page's existing mount-time refresh
-turns it into an access token, so no token ever travels in a URL), or back
-to the page the flow started from with `?oidc_error=<code>` (KTD6).
+with a refresh cookie on a sign-in or sign-up (the page's existing
+mount-time refresh turns it into an access token, so no token ever travels
+in a URL), to `/settings` after linking, or back to the page the flow
+started from with `?oidc_error=<code>` (KTD6).
 
 The protocol lives in `accounts/oidc.py` and the account side in
 `accounts/oidc_accounts.py`; this module owns the request's origin, the
@@ -42,11 +43,23 @@ from cerebrum.accounts.oidc import (
 from cerebrum.accounts.oidc_accounts import (
     create_invited_account,
     is_username_taken,
+    link_identity,
     sign_in,
 )
-from cerebrum.accounts.service import find_valid_invite_token_hash
+from cerebrum.accounts.service import (
+    InvalidCredentialError,
+    confirm_current_password,
+    find_valid_invite_token_hash,
+    has_password,
+)
 from cerebrum.api.auth import set_refresh_cookie
-from cerebrum.api.deps import get_auth_db
+from cerebrum.api.deps import bearer_credential, get_auth_db
+from cerebrum.auth import (
+    AuthenticationError,
+    NotASessionError,
+    verify_session_credential,
+)
+from cerebrum.auth_db import auth_write_lock
 from cerebrum.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -69,9 +82,10 @@ def _require_provider() -> None:
 
 
 # No auth dependency, like `api/auth.py`'s `unauthenticated_router`: the
-# person starting a flow is by definition not signed in yet, and the
-# callback is a top-level navigation from the provider. Mounted directly on
-# `app` in main.py for the same reason.
+# person signing in or up is by definition not signed in yet (a `link`
+# start checks its bearer token itself), and the callback is a top-level
+# navigation from the provider. Mounted directly on `app` in main.py for
+# the same reason.
 oidc_router = APIRouter(dependencies=[Depends(_require_provider)])
 
 
@@ -99,13 +113,12 @@ def _redirect_uri(request: Request) -> str:
 
 
 class OidcStartRequest(BaseModel):
-    # `link` (from Settings, which also needs a bearer token and the current
-    # password) is the third intent `accounts/oidc.py` understands; it is
-    # not accepted here yet.
-    intent: Literal["login", "register"]
+    intent: Literal["login", "register", "link"]
     # `register` only: the username to create and the invite to redeem.
     username: str | None = None
     invite_token: str | None = None
+    # `link` only, for an account that has a password (KTD5).
+    current_password: str | None = None
 
 
 class OidcStartResponse(BaseModel):
@@ -135,6 +148,61 @@ def _register_intent(
     return RegisterIntent(username=body.username, invite_hash=invite_hash)
 
 
+async def _link_intent(
+    body: OidcStartRequest, request: Request, auth_db: sqlite3.Connection
+) -> LinkIntent:
+    """Check that a signed-in browser session is linking its own account
+    (KTD5). This route sits outside `api_router`, so it reads the bearer
+    token itself.
+
+    A personal API token is refused with 403, so a leaked one can't be
+    turned into a lasting sign-in. An account with a password must also
+    re-enter it, through the same check and lockout as changing it, so a
+    stolen ten-minute access token can't do that either. A wrong or missing
+    password counts toward the lockout and is a 403, not a 401, for the same
+    reason `api/account.py`'s change-password gives: the caller *is*
+    authenticated, and a 401 would send the frontend through a pointless
+    token refresh and retry first."""
+    try:
+        identity = await verify_session_credential(bearer_credential(request), auth_db)
+    except NotASessionError as exc:
+        raise HTTPException(
+            status_code=403, detail="Linking needs a signed-in browser session"
+        ) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail="Not authenticated") from exc
+
+    user_id = int(identity)
+    # Locked even though it's a single read -- see `auth_db.py`'s
+    # `auth_write_lock` docstring.
+    with auth_write_lock:
+        row = auth_db.execute(
+            "SELECT password_hash FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+    if has_password(row["password_hash"]):
+        try:
+            # A missing password is checked as an empty one, so it fails --
+            # and counts -- like any wrong guess.
+            await confirm_current_password(
+                user_id, body.current_password or "", auth_db
+            )
+        except InvalidCredentialError as exc:
+            raise HTTPException(
+                status_code=403, detail="Current password is incorrect"
+            ) from exc
+    return LinkIntent(user_id=user_id)
+
+
+async def _intent(
+    body: OidcStartRequest, request: Request, auth_db: sqlite3.Connection
+) -> FlowIntent:
+    if body.intent == "register":
+        return _register_intent(body, auth_db)
+    if body.intent == "link":
+        return await _link_intent(body, request, auth_db)
+    return LoginIntent()
+
+
 @oidc_router.post("/start", response_model=OidcStartResponse)
 async def start(
     body: OidcStartRequest,
@@ -142,9 +210,7 @@ async def start(
     response: Response,
     auth_db: sqlite3.Connection = Depends(get_auth_db),
 ) -> OidcStartResponse:
-    intent: FlowIntent = (
-        _register_intent(body, auth_db) if body.intent == "register" else LoginIntent()
-    )
+    intent = await _intent(body, request, auth_db)
     try:
         started = await start_flow(_redirect_uri(request), intent)
     except OidcError as exc:
@@ -179,20 +245,23 @@ def _failure_location(intent: FlowIntent, code: OidcErrorCode) -> str:
     return f"/login?{urlencode({'oidc_error': code})}"
 
 
-def _complete(result: FlowResult, auth_db: sqlite3.Connection) -> str:
-    """Do what the flow was started for, returning the new session's
-    refresh token."""
+def _complete(result: FlowResult, auth_db: sqlite3.Connection) -> RedirectResponse:
+    """Do what the flow was started for, and redirect to where it leads.
+    Signing in or up sets the new session's refresh cookie; linking issues
+    no session (KTD6) -- the caller is already signed in."""
     intent = result.intent
+    if isinstance(intent, LinkIntent):
+        link_identity(auth_db, result.identity, intent.user_id)
+        return RedirectResponse("/settings", 303)
     if isinstance(intent, RegisterIntent):
-        return create_invited_account(
+        refresh_token = create_invited_account(
             auth_db, result.identity, intent.username, intent.invite_hash
         )
-    if isinstance(intent, LinkIntent):
-        # `start` never issues this intent yet; a cookie carrying it can only
-        # come from a later version of this route. Start over.
-        logger.warning("OIDC link flow reached a callback that can't link yet")
-        raise OidcError("expired")
-    return sign_in(auth_db, result.identity)
+    else:
+        refresh_token = sign_in(auth_db, result.identity)
+    response = RedirectResponse("/?oidc=1", 303)
+    set_refresh_cookie(response, refresh_token)
+    return response
 
 
 @oidc_router.get("/callback", response_class=RedirectResponse, status_code=303)
@@ -218,12 +287,9 @@ async def callback(
             logger.info("OIDC callback without a code or state")
             raise OidcError("provider_error")
         result = await finish_flow(flow_cookie, state=state, code=code)
-        refresh_token = _complete(result, auth_db)
+        response = _complete(result, auth_db)
     except OidcError as exc:
         response = RedirectResponse(_failure_location(intent, exc.code), 303)
-    else:
-        response = RedirectResponse("/?oidc=1", 303)
-        set_refresh_cookie(response, refresh_token)
 
     # Cleared on every outcome, so a callback URL replayed from history (or
     # by anyone who saw it) finds no flow to finish.

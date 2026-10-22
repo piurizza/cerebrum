@@ -12,6 +12,7 @@ import {
 import { IosInstallHint } from "./components/IosInstallHint";
 import { NoteBrowser } from "./components/NoteBrowser/NoteBrowser";
 import { OfflineBanner } from "./components/OfflineBanner";
+import { ReadOnlyBanner } from "./components/ReadOnlyBanner";
 import { ReloadPrompt } from "./components/ReloadPrompt";
 import { useAuth } from "./context/AuthContext";
 import { NotesProvider } from "./context/NotesContext";
@@ -178,6 +179,7 @@ export function AppShell() {
       </aside>
       <main className="app-main" inert={isMobile && drawerOpen}>
         <OfflineBanner />
+        <ReadOnlyBanner />
         <IosInstallHint />
         <Routes>
           <Route

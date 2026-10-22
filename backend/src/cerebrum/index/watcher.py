@@ -62,7 +62,8 @@ async def watch_vault(
     """
     if pending_renames is None:
         pending_renames = PendingRenameCache(
-            settings.watcher_rename_pairing_window_seconds
+            settings.watcher_rename_pairing_window_seconds,
+            retarget=not settings.cerebrum_vault_read_only,
         )
     # `awatch()` always yields absolute paths regardless of the watch root
     # given to it. `vault_root` defaults to a relative path (see

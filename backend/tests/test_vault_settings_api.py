@@ -30,6 +30,7 @@ def test_vault_settings_returns_defaults(authenticated_client: TestClient) -> No
         "daily_note_folder": "daily",
         "templates_folder": "templates",
         "link_format": "markdown",
+        "read_only": False,
     }
 
 
@@ -49,7 +50,16 @@ def test_vault_settings_follows_server_environment(
         "daily_note_folder": "journal/daily",
         "templates_folder": "meta/templates",
         "link_format": "wikilink",
+        "read_only": False,
     }
+
+
+def test_vault_settings_reports_a_read_only_vault(
+    authenticated_read_only_client: TestClient,
+) -> None:
+    response = authenticated_read_only_client.get("/api/vault-settings")
+
+    assert response.json()["read_only"] is True
 
 
 def test_vault_settings_requires_authentication(client: TestClient) -> None:

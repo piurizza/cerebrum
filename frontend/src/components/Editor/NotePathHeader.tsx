@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useState } from "react";
 import { deleteNote, errorMessage, moveNote } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
+import { useVaultReadOnly } from "../../hooks/useCanWrite";
 import { formatTimestamp } from "../../lib/formatDate";
 import type { Note } from "../../types/note";
 import { FolderPickerModal } from "../FolderPicker/FolderPickerModal";
@@ -12,12 +13,14 @@ interface NotePathHeaderProps {
   updated: string | null;
   onRenamed: (updated: Note) => void;
   onDeleted: () => void;
-  /** Disables Rename/Delete while serving cached/offline content (R3) --
-   * both are write paths a cache can't safely satisfy. Only the default
-   * render branch's entry points are gated; a user already mid-rename or
-   * mid-delete-confirm when connectivity drops is an edge case this
-   * doesn't need to solve. Defaults to `false`. */
-  isOffline?: boolean;
+  /** No write can be attempted right now (`!useCanWrite()`): offline (R3),
+   * or a read-only vault. Disables Rename/Delete -- both are write paths a
+   * cache can't safely satisfy. On a read-only vault they are hidden
+   * outright instead, since that unavailability is permanent. Only the
+   * default render branch's entry points are gated; a user already
+   * mid-rename or mid-delete-confirm when connectivity drops is an edge
+   * case this doesn't need to solve. Defaults to `false`. */
+  readOnly?: boolean;
   /** Rendered at the far right of the chrome row (Zen/theme toggles), after
    * a spacer that pushes it away from the de-emphasized path/action
    * cluster -- matches the confirmed visual probe's single combined chrome
@@ -36,9 +39,10 @@ export function NotePathHeader({
   onRenamed,
   onDeleted,
   actions,
-  isOffline = false,
+  readOnly = false,
 }: NotePathHeaderProps) {
   const { notes, refreshNotes } = useNotes();
+  const vaultReadOnly = useVaultReadOnly();
   const [copied, setCopied] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -213,22 +217,26 @@ export function NotePathHeader({
           <button type="button" className="btn btn-sm" onClick={handleCopy}>
             {copied ? "Copied!" : "Copy path"}
           </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={startRename}
-            disabled={isOffline}
-          >
-            Rename
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-danger-outline"
-            onClick={() => setIsConfirmingDelete(true)}
-            disabled={isOffline}
-          >
-            Delete
-          </button>
+          {!vaultReadOnly && (
+            <>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={startRename}
+                disabled={readOnly}
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger-outline"
+                onClick={() => setIsConfirmingDelete(true)}
+                disabled={readOnly}
+              >
+                Delete
+              </button>
+            </>
+          )}
         </div>
         {actions && (
           <>

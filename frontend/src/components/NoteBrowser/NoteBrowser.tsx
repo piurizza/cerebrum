@@ -9,6 +9,7 @@ import {
 } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import { useOffline } from "../../context/OfflineContext";
+import { useCanWrite, useVaultReadOnly } from "../../hooks/useCanWrite";
 import { getDailyNoteDefaultBody, getTodayNotePath } from "../../lib/dailyNote";
 import { findDuplicateTitles } from "../../lib/duplicateTitles";
 import { stripTemplateIdentityFields } from "../../lib/noteContent";
@@ -25,15 +26,20 @@ const SEARCH_DEBOUNCE_MS = 250;
 export function NoteBrowser() {
   const { notes, error, loading, refreshNotes } = useNotes();
   const { isOffline } = useOffline();
-  // writeNoteAndNavigate/handleToday's isOffline guards below run after an
+  const canWrite = useCanWrite();
+  // A read-only vault hides the create controls (permanent); offline only
+  // disables them (temporary).
+  const vaultReadOnly = useVaultReadOnly();
+  // writeNoteAndNavigate/handleToday's canWrite guards below run after an
   // `await` (getNote(templatePath) in handleTemplateConfirm, or nothing in
   // handleToday's own case), so reading the plain `isOffline` binding
   // closes over whatever render started that async chain -- a connectivity
   // drop during the await is invisible to a guard checking a stale value
   // (review finding #2, 2026-09-07 code review). Mirrors OfflineContext's
-  // own fix for the identical problem.
-  const isOfflineRef = useRef(isOffline);
-  isOfflineRef.current = isOffline;
+  // own fix for the identical problem. Covers the vault turning out to be
+  // read-only (vault settings landing) mid-await just the same.
+  const canWriteRef = useRef(canWrite);
+  canWriteRef.current = canWrite;
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [todayError, setTodayError] = useState<string | null>(null);
@@ -137,10 +143,10 @@ export function NoteBrowser() {
     // NoteViewPage.handleBlockedSave: a create/template modal opened while
     // online whose Confirm is clicked after connectivity drops would
     // otherwise fire a real putNote() and surface a raw fetch error. Reads
-    // the ref, not the closed-over `isOffline`, so a drop during
+    // the ref, not the closed-over value, so a drop during
     // handleTemplateConfirm's own `await getNote(...)` above still trips
     // this guard.
-    if (isOfflineRef.current) return;
+    if (!canWriteRef.current) return;
     await putNote(path, content);
     await refreshNotes();
     onSuccess();
@@ -229,7 +235,7 @@ export function NoteBrowser() {
     // ref, not the closed-over binding) -- but placed AFTER the cached-note
     // branch above, so an offline user can still open today's note if it
     // is already in the vault; only the create (putNote) is gated.
-    if (isOfflineRef.current) return;
+    if (!canWriteRef.current) return;
 
     setTodayError(null);
     setIsOpeningToday(true);
@@ -260,36 +266,42 @@ export function NoteBrowser() {
 
   return (
     <nav aria-label="Notes" className="note-browser">
-      <button
-        type="button"
-        className="btn btn-block"
-        onClick={handleToday}
-        disabled={loading || isOpeningToday || isOffline}
-      >
-        Today
-      </button>
+      {!vaultReadOnly && (
+        <button
+          type="button"
+          className="btn btn-block"
+          onClick={handleToday}
+          disabled={loading || isOpeningToday || isOffline}
+        >
+          Today
+        </button>
+      )}
       {todayError && (
         <p className="error-text" role="alert">
           {todayError}
         </p>
       )}
-      <button
-        type="button"
-        className="btn btn-block"
-        onClick={() => {
-          setCreateError(null);
-          setIsPickerOpen(true);
-        }}
-        // Same reasoning as the Today button above: `notes` starts `[]`
-        // before the initial fetch settles, so opening this before then
-        // would make handleCreate's listTemplateOptions() check run
-        // against an empty list and silently skip the template picker
-        // even when a relevant template genuinely exists.
-        disabled={loading || isOffline}
-      >
-        + New note
-      </button>
-      {isPickerOpen && (
+      {!vaultReadOnly && (
+        <button
+          type="button"
+          className="btn btn-block"
+          onClick={() => {
+            setCreateError(null);
+            setIsPickerOpen(true);
+          }}
+          // Same reasoning as the Today button above: `notes` starts `[]`
+          // before the initial fetch settles, so opening this before then
+          // would make handleCreate's listTemplateOptions() check run
+          // against an empty list and silently skip the template picker
+          // even when a relevant template genuinely exists.
+          disabled={loading || isOffline}
+        >
+          + New note
+        </button>
+      )}
+      {/* Both modals vanish if the vault turns out to be read-only while
+          one is open (vault settings landing after the first paint). */}
+      {isPickerOpen && !vaultReadOnly && (
         <FolderPickerModal
           title="New note"
           initialPath=""
@@ -299,7 +311,7 @@ export function NoteBrowser() {
           onCancel={() => setIsPickerOpen(false)}
         />
       )}
-      {pendingCreate && (
+      {pendingCreate && !vaultReadOnly && (
         <TemplatePickerModal
           title="Choose a template"
           options={pendingCreate.options}

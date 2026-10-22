@@ -6,7 +6,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from cerebrum.api.deps import get_db
+from cerebrum.api.deps import get_db, require_writable_vault
 from cerebrum.index.db import list_notes
 from cerebrum.index.indexer import remove_note as remove_note_from_index
 from cerebrum.index.indexer import upsert_note as upsert_note_in_index
@@ -51,7 +51,11 @@ def get_note(path: str) -> Note:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.put("/notes/{path:path}", response_model=Note)
+@router.put(
+    "/notes/{path:path}",
+    response_model=Note,
+    dependencies=[Depends(require_writable_vault)],
+)
 async def put_note(
     path: str, request: Request, db: sqlite3.Connection = Depends(get_db)
 ) -> Note:
@@ -75,7 +79,11 @@ async def put_note(
     return note
 
 
-@router.delete("/notes/{path:path}", status_code=204)
+@router.delete(
+    "/notes/{path:path}",
+    status_code=204,
+    dependencies=[Depends(require_writable_vault)],
+)
 def delete_note_endpoint(
     path: str, db: sqlite3.Connection = Depends(get_db)
 ) -> Response:
@@ -96,7 +104,11 @@ def delete_note_endpoint(
     return Response(status_code=204)
 
 
-@router.post("/notes/{path:path}/move", response_model=Note)
+@router.post(
+    "/notes/{path:path}/move",
+    response_model=Note,
+    dependencies=[Depends(require_writable_vault)],
+)
 def move_note_endpoint(
     path: str, body: MoveNoteRequest, db: sqlite3.Connection = Depends(get_db)
 ) -> Note:

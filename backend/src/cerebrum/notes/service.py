@@ -22,6 +22,7 @@ from cerebrum.notes.parser import (
     retarget_wikilinks,
 )
 from cerebrum.notes.wikilinks import NoteMove
+from cerebrum.read_only import ensure_vault_writable
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,7 @@ def modify_note(vault_root: Path, path: str, change: Callable[[str], str]) -> No
 
 def _render_and_write(file_path: Path, path: str, raw_content: str) -> Note:
     """Parse, stamp `created`/`updated` and save. Callers hold `file_path`'s lock."""
+    ensure_vault_writable()
     parsed = parse_note(path, raw_content)
 
     now = datetime.now(UTC)
@@ -140,6 +142,7 @@ def _render_and_write(file_path: Path, path: str, raw_content: str) -> Note:
 
 
 def delete_note(vault_root: Path, path: str) -> None:
+    ensure_vault_writable()
     file_path = resolve_note_path(vault_root, path)
     with file_lock(file_path):
         if not file_path.is_file():
@@ -315,6 +318,7 @@ def move_note(
     notes whose link text was rewritten, so the caller can keep the
     index in sync for those too.
     """
+    ensure_vault_writable()
     source = resolve_note_path(vault_root, path)
     destination = resolve_note_path(vault_root, new_path)
     is_relocation = source != destination
@@ -421,6 +425,7 @@ def retarget_note_links(
     vault-relative paths of any OTHER notes whose link text was
     rewritten, so the caller can keep the index in sync for those too.
     """
+    ensure_vault_writable()
     destination = resolve_note_path(vault_root, new_path)
 
     with file_lock(destination):

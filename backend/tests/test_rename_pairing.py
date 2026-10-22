@@ -135,6 +135,26 @@ def test_backstop_rescan_pairs_rename_split_across_watcher_and_backstop(
     assert "[Old](new.md)" in linker.content
 
 
+def test_read_only_backstop_rescan_indexes_split_rename_without_relinking(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Read-only mirror of the test above."""
+    pending_renames = PendingRenameCache(30, retarget=False)
+    write_note(vault, "linker.md", "See [Old](old.md).")
+    (vault / "old.md").write_text("shared body", encoding="utf-8")
+    upsert_note(db, vault, "linker.md")
+    upsert_note(db, vault, "old.md")
+    linker_bytes = (vault / "linker.md").read_bytes()
+
+    (vault / "old.md").unlink()
+    apply_watch_batch(db, vault, {"old.md"}, pending_renames)
+    (vault / "new.md").write_text("shared body", encoding="utf-8")
+    rebuild_index(db, vault, pending_renames)
+
+    assert (vault / "linker.md").read_bytes() == linker_bytes
+    assert {note.path for note in list_notes(db)} == {"new.md", "linker.md"}
+
+
 def test_backstop_rescan_prunes_expired_entries_before_matching(
     vault: Path, db: sqlite3.Connection
 ) -> None:
@@ -284,6 +304,29 @@ def test_apply_watch_batch_relinks_third_note_on_rename(
     linker = read_note(vault, "linker.md")
     assert "[T](renamed.md)" in linker.content
     assert [note.path for note in get_backlinks(db, "renamed.md")] == ["linker.md"]
+
+
+def test_read_only_rename_indexes_both_paths_without_relinking(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Read-only mirror of the test above: the rename is indexed as a
+    delete plus a create, and the linking note's bytes are left alone."""
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [T](target.md).")
+    upsert_note(db, vault, "target.md")
+    upsert_note(db, vault, "linker.md")
+    linker_bytes = (vault / "linker.md").read_bytes()
+
+    (vault / "target.md").rename(vault / "renamed.md")
+    apply_watch_batch(
+        db,
+        vault,
+        {"target.md", "renamed.md"},
+        PendingRenameCache(30, retarget=False),
+    )
+
+    assert {note.path for note in list_notes(db)} == {"renamed.md", "linker.md"}
+    assert (vault / "linker.md").read_bytes() == linker_bytes
 
 
 def test_apply_watch_batch_pairs_multiple_independent_renames(
@@ -612,6 +655,31 @@ def test_apply_watch_batch_cross_window_pairing_relocates_attachments(
     assert (new_dir / "abc123.png").read_bytes() == b"fake-png-bytes"
     note = read_note(vault, "better-idea.md")
     assert "better-idea.attachments/abc123.png" in note.content
+
+
+def test_read_only_cross_window_rename_leaves_attachments_in_place(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    """Read-only mirror of the test above: nothing on disk moves."""
+    pending_renames = PendingRenameCache(30, retarget=False)
+    (vault / "idea.md").write_text("![](idea.attachments/abc123.png)", encoding="utf-8")
+    (vault / "idea.attachments").mkdir()
+    (vault / "idea.attachments" / "abc123.png").write_bytes(b"fake-png-bytes")
+    upsert_note(db, vault, "idea.md")
+
+    (vault / "idea.md").unlink()
+    apply_watch_batch(db, vault, {"idea.md"}, pending_renames)
+    (vault / "better-idea.md").write_text(
+        "![](idea.attachments/abc123.png)", encoding="utf-8"
+    )
+    apply_watch_batch(db, vault, {"better-idea.md"}, pending_renames)
+
+    assert (vault / "idea.attachments" / "abc123.png").is_file()
+    assert not (vault / "better-idea.attachments").exists()
+    assert (vault / "better-idea.md").read_text(encoding="utf-8") == (
+        "![](idea.attachments/abc123.png)"
+    )
+    assert [note.path for note in list_notes(db)] == ["better-idea.md"]
 
 
 def test_apply_watch_batch_contains_upsert_failure_for_one_retargeted_path(

@@ -6,5 +6,8 @@ import type { EqualKeys, Expect } from "./pinSchema";
 
 export type VaultSettings = components["schemas"]["VaultSettings"];
 export type _PinVaultSettings = Expect<
-  EqualKeys<VaultSettings, "daily_note_folder" | "templates_folder" | "link_format">
+  EqualKeys<
+    VaultSettings,
+    "daily_note_folder" | "templates_folder" | "link_format" | "read_only"
+  >
 >;

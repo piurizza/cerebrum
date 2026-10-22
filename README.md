@@ -205,6 +205,34 @@ folders (adjust `vault` and `data` if you changed
 
 The index needs no moving: it is rebuilt from the notes on startup.
 
+### Serve a read-only vault
+
+Cerebrum can serve a vault another tool owns without ever writing to it:
+a git checkout a cron job keeps pulled, a folder Syncthing or iCloud
+syncs, an Obsidian vault edited elsewhere. People browse, search and see
+the graph, and MCP agents can read it, but nobody can change it through
+Cerebrum, and Cerebrum itself leaves no files behind (so a `git pull` into
+the checkout never fails on changes Cerebrum made).
+
+1. Move the index and accounts database out of the vault, as in
+   [Accounts and the index](#accounts-and-the-index). Read-only mode
+   refuses to start otherwise.
+2. Set `CEREBRUM_VAULT_READ_ONLY=true` in `.env`, and optionally mount the
+   vault read-only by changing its line in `docker-compose.yml` to end in
+   `:/data/vault:ro`.
+3. `docker compose up -d`.
+
+For example, a checkout that a cron job updates every five minutes:
+
+    */5 * * * * git -C /srv/team-notes pull --ff-only --quiet
+
+What changes: the web app shows "This vault is read-only" and hides
+Today, New note, Edit, Rename and Delete; the note-writing routes answer
+403; MCP lists only its read tools. A rename that arrives with a pull is
+indexed as a delete plus a create, so links in other notes stay exactly as
+the owning tool wrote them. Accounts, sign-in and API tokens work as
+usual.
+
 The frontend also serves HTTPS on `https://localhost:7812` (override via
 `CEREBRUM_HTTPS_PORT`), using a self-signed cert nginx generates on first
 start. Offline mode (see [SPEC.md](SPEC.md#7-tech-stack)) needs this --

@@ -400,3 +400,35 @@ def test_burst_of_rapid_writes_dispatches_once(
     asyncio.run(run())
 
     assert calls == ["a.md"]
+
+
+def test_external_rename_in_read_only_vault_does_not_relink(
+    vault: Path, db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """Read-only variant of `test_external_rename_relinks_third_note`,
+    through the real watch loop: `watch_vault` builds its own rename cache
+    from these settings."""
+    write_note(vault, "target.md", "content")
+    write_note(vault, "linker.md", "See [T](target.md).")
+    linker_bytes = (vault / "linker.md").read_bytes()
+    upsert_note(db, vault, "target.md")
+    upsert_note(db, vault, "linker.md")
+    settings = Settings(
+        auth_jwt_secret="x" * 32,
+        auth_setup_token="y" * 32,
+        watcher_debounce_ms=100,
+        cerebrum_vault_path=vault,
+        cerebrum_vault_read_only=True,
+        cerebrum_index_path=tmp_path / "state" / "index.sqlite3",
+        cerebrum_auth_db_path=tmp_path / "state" / "auth.sqlite3",
+    )
+
+    def mutate() -> None:
+        (vault / "target.md").rename(vault / "renamed.md")
+
+    def check() -> bool:
+        return {note.path for note in list_notes(db)} == {"renamed.md", "linker.md"}
+
+    asyncio.run(_run_and_wait(db, vault, settings, mutate, check))
+
+    assert (vault / "linker.md").read_bytes() == linker_bytes

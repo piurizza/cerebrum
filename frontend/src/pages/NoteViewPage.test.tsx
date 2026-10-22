@@ -1,5 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
+import { loadVaultSettings } from "../lib/vaultSettings";
+import { setCachedVaultReadOnly } from "../test/factories";
 import type { Note } from "../types/note";
 
 const TEST_PATH = "notes/a.md";
@@ -22,6 +25,7 @@ function makeNote(overrides: Partial<Note> = {}): Note {
 const mockGetNote = vi.fn<(path: string) => Promise<Note>>();
 const mockPutNote = vi.fn<(path: string, content: string) => Promise<Note>>();
 const mockGetBacklinks = vi.fn<(path: string) => Promise<unknown[]>>();
+const mockGetVaultSettings = vi.fn<() => Promise<unknown>>();
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
   return {
@@ -29,6 +33,7 @@ vi.mock("../api/client", async () => {
     getNote: (path: string) => mockGetNote(path),
     putNote: (path: string, content: string) => mockPutNote(path, content),
     getBacklinks: (path: string) => mockGetBacklinks(path),
+    getVaultSettings: () => mockGetVaultSettings(),
   };
 });
 
@@ -127,6 +132,9 @@ beforeEach(() => {
   mockUseZenMode.mockReturnValue({ isZen: false, toggleZen: vi.fn() });
   capturedEditorProps = null;
   capturedHeaderProps = null;
+  mockGetVaultSettings.mockReset();
+  // Never fetched: counts as writable.
+  setCachedVaultReadOnly(null);
 });
 
 function pressCtrlS() {
@@ -206,14 +214,14 @@ describe("NoteViewPage offline gating", () => {
     expect(await screen.findByText("boom")).toBeInTheDocument();
   });
 
-  it("passes isOffline through to NotePathHeader", async () => {
+  it("passes readOnly (offline) through to NotePathHeader", async () => {
     mockGetNote.mockResolvedValue(makeNote());
     setOffline(true);
 
     render(<NoteViewPage />);
     await screen.findByTestId("markdown-preview");
 
-    expect(capturedHeaderProps.isOffline).toBe(true);
+    expect(capturedHeaderProps.readOnly).toBe(true);
   });
 
   it("freezes the editor read-only in place, without switching back to preview, when a live offline transition happens mid-edit (KTD6)", async () => {
@@ -238,5 +246,108 @@ describe("NoteViewPage offline gating", () => {
     expect(screen.getByTestId("markdown-editor")).toBeInTheDocument();
     expect(screen.queryByTestId("markdown-preview")).not.toBeInTheDocument();
     expect(capturedEditorProps.readOnly).toBe(true);
+  });
+});
+
+describe("NoteViewPage read-only vault", () => {
+  it("hides Edit, the save status and the save shortcut hint, and tells the header", async () => {
+    mockGetNote.mockResolvedValue(makeNote());
+    setCachedVaultReadOnly(true);
+
+    render(<NoteViewPage />);
+    await screen.findByTestId("markdown-preview");
+
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByText(/to save/)).toBeNull();
+    expect(screen.queryByText("Saved")).toBeNull();
+    expect(capturedHeaderProps.readOnly).toBe(true);
+  });
+
+  it("makes Ctrl+S a no-op", async () => {
+    mockGetNote.mockResolvedValue(makeNote());
+    setCachedVaultReadOnly(true);
+
+    render(<NoteViewPage />);
+    await screen.findByTestId("markdown-preview");
+
+    const event = new KeyboardEvent("keydown", {
+      key: "s",
+      ctrlKey: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(event);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockPutNote).not.toHaveBeenCalled();
+    // Still swallowed, so the browser's own "Save page" dialog stays shut.
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("hides Save and freezes the editor when the vault turns out to be read-only mid-edit", async () => {
+    mockGetNote.mockResolvedValue(makeNote());
+
+    render(<NoteViewPage />);
+    await screen.findByTestId("markdown-preview");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByTestId("markdown-editor");
+    expect(capturedEditorProps.readOnly).toBe(false);
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+
+    // The first-visit vault-settings load lands after the user hit Edit.
+    mockGetVaultSettings.mockResolvedValue({ read_only: true });
+    await act(async () => {
+      await loadVaultSettings();
+    });
+
+    expect(screen.getByTestId("markdown-editor")).toBeInTheDocument();
+    expect(capturedEditorProps.readOnly).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  });
+
+  it("keeps Edit visible but disabled when offline on a writable vault", async () => {
+    mockGetNote.mockResolvedValue(makeNote());
+    setCachedVaultReadOnly(false);
+    setOffline(true);
+
+    render(<NoteViewPage />);
+    await screen.findByTestId("markdown-preview");
+
+    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+  });
+});
+
+describe("NoteViewPage save errors", () => {
+  it("renders a 403 from the server as a persistent inline error", async () => {
+    mockGetNote.mockResolvedValue(makeNote());
+    mockPutNote.mockRejectedValue(new ApiError("This vault is read-only", 403));
+
+    render(<NoteViewPage />);
+    await screen.findByTestId("markdown-preview");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This vault is read-only");
+    // Not a toast: still there later, and the button is usable again.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("alert")).toHaveTextContent("This vault is read-only");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("clears the inline error once a save succeeds", async () => {
+    mockGetNote.mockResolvedValue(makeNote());
+    mockPutNote.mockRejectedValueOnce(new ApiError("boom", 500));
+    mockPutNote.mockResolvedValueOnce(makeNote());
+
+    render(<NoteViewPage />);
+    await screen.findByTestId("markdown-preview");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 });

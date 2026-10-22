@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sqlite3
 import time
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from cerebrum import main as main_module
 from cerebrum.index.db import list_notes
@@ -271,3 +273,80 @@ def test_shutdown_cancels_and_awaits_both_tasks(
         "Task was destroyed but it is pending" in str(warning.message)
         for warning in recwarn.list
     )
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root ignores directory permissions",
+)
+def test_read_only_mode_starts_on_a_vault_it_cannot_write(
+    vault: Path, read_only_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    del read_only_env
+    (vault / "a.md").write_text("---\ntitle: A\n---\nbody", encoding="utf-8")
+    vault.chmod(0o555)
+    try:
+        with mcp_test_client(vault, monkeypatch) as client:
+            token = issue_test_access_token(client)
+            headers = {"Authorization": f"Bearer {token}"}
+
+            assert client.get("/api/health").status_code == 200
+            response = client.get("/api/notes", headers=headers)
+            assert [note["path"] for note in response.json()] == ["a.md"]
+            state = client.app.state  # type: ignore[attr-defined]
+            assert not state.watcher_task.done()
+            assert not state.backstop_task.done()
+    finally:
+        vault.chmod(0o755)
+
+
+@pytest.mark.parametrize("read_only", [True, False])
+def test_lifespan_shares_one_rename_cache_that_relinks_only_when_writable(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    read_only: bool,
+) -> None:
+    """The watcher and the backstop share the cache the lifespan builds, so
+    its `retarget` flag is what keeps a read-only vault from being
+    rewritten when an external rename arrives."""
+    built: list[bool] = []
+
+    class RecordingCache(main_module.PendingRenameCache):
+        def __init__(self, window_seconds: float, *, retarget: bool = True) -> None:
+            super().__init__(window_seconds, retarget=retarget)
+            built.append(retarget)
+
+    monkeypatch.setattr(main_module, "PendingRenameCache", RecordingCache)
+    if read_only:
+        state = tmp_path / "state"
+        monkeypatch.setenv("CEREBRUM_VAULT_READ_ONLY", "true")
+        monkeypatch.setenv("CEREBRUM_INDEX_PATH", str(state / "index.sqlite3"))
+        monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", str(state / "auth.sqlite3"))
+
+    with mcp_test_client(vault, monkeypatch) as client:
+        assert client.get("/api/health").status_code == 200
+
+    assert built == [not read_only]
+
+
+def test_read_only_mode_does_not_create_a_missing_vault(
+    tmp_path: Path, read_only_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    del read_only_env
+    missing = tmp_path / "missing-vault"
+    with mcp_test_client(missing, monkeypatch) as client:
+        assert client.get("/api/health").status_code == 503
+    assert not missing.exists()
+
+
+def test_read_only_mode_refuses_to_start_with_the_index_in_the_vault(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # conftest leaves both state paths blank: inside the vault.
+    monkeypatch.setenv("CEREBRUM_VAULT_READ_ONLY", "true")
+    with (
+        pytest.raises(ValidationError, match="CEREBRUM_INDEX_PATH"),
+        mcp_test_client(vault, monkeypatch),
+    ):
+        pass

@@ -42,6 +42,10 @@ services:
       # existing accounts database.
       CEREBRUM_INDEX_PATH: ${CEREBRUM_INDEX_PATH:-}
       CEREBRUM_AUTH_DB_PATH: ${CEREBRUM_AUTH_DB_PATH:-}
+      # `true` serves the vault without ever writing to it (for a folder
+      # another tool owns, e.g. a git checkout). Needs both paths above set
+      # outside the vault -- see "Serve a read-only vault" in the README.
+      CEREBRUM_VAULT_READ_ONLY: ${CEREBRUM_VAULT_READ_ONLY:-false}
       # Sign in with an OpenID Connect provider (see the README). Blank means
       # off; the issuer, client id and secret go together.
       OIDC_ISSUER: ${OIDC_ISSUER:-}

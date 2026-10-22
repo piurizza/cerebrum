@@ -401,3 +401,74 @@ def test_index_and_accounts_db_must_be_different_files(
             CEREBRUM_INDEX_PATH="/state/cerebrum.sqlite3",
             CEREBRUM_AUTH_DB_PATH="/state/cerebrum.sqlite3",
         )
+
+
+def _read_only_settings(monkeypatch: pytest.MonkeyPatch, **env: str) -> bool:
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", "/notes")
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    _set_valid_auth_env(monkeypatch)
+    get_settings.cache_clear()
+    try:
+        return get_settings().cerebrum_vault_read_only
+    finally:
+        get_settings.cache_clear()
+
+
+def test_vault_is_writable_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CEREBRUM_VAULT_READ_ONLY", raising=False)
+    assert _read_only_settings(monkeypatch) is False
+
+
+def test_read_only_vault_reads_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert (
+        _read_only_settings(
+            monkeypatch,
+            CEREBRUM_VAULT_READ_ONLY="true",
+            CEREBRUM_INDEX_PATH="/state/index.sqlite3",
+            CEREBRUM_AUTH_DB_PATH="/state/auth.sqlite3",
+        )
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    ("index_path", "auth_db_path", "named"),
+    [
+        # Unset means `<vault>/.cerebrum/`, inside the vault.
+        ("", "", "CEREBRUM_INDEX_PATH"),
+        ("/notes/state/index.sqlite3", "/state/auth.sqlite3", "CEREBRUM_INDEX_PATH"),
+        ("/state/index.sqlite3", "", "CEREBRUM_AUTH_DB_PATH"),
+        # Resolved before comparing, so `..` can't hide a path in the vault.
+        ("/state/index.sqlite3", "/state/../notes/a.sqlite3", "CEREBRUM_AUTH_DB_PATH"),
+    ],
+)
+def test_read_only_vault_refuses_state_inside_the_vault(
+    monkeypatch: pytest.MonkeyPatch, index_path: str, auth_db_path: str, named: str
+) -> None:
+    # SQLite writes -wal/-shm files next to each database, so either one
+    # inside the vault would still be Cerebrum writing into it.
+    with pytest.raises(ValidationError, match=named):
+        _read_only_settings(
+            monkeypatch,
+            CEREBRUM_VAULT_READ_ONLY="true",
+            CEREBRUM_INDEX_PATH=index_path,
+            CEREBRUM_AUTH_DB_PATH=auth_db_path,
+        )
+
+
+def test_read_only_vault_accepts_a_sibling_folder_sharing_a_name_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `/notes-state` starts with the string `/notes` but is not inside it.
+    assert (
+        _read_only_settings(
+            monkeypatch,
+            CEREBRUM_VAULT_READ_ONLY="true",
+            CEREBRUM_INDEX_PATH="/notes-state/index.sqlite3",
+            CEREBRUM_AUTH_DB_PATH="/notes-state/auth.sqlite3",
+        )
+        is True
+    )

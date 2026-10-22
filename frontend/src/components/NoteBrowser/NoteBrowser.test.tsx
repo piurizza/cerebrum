@@ -2,7 +2,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { makeNoteMeta } from "../../test/factories";
+import { loadVaultSettings } from "../../lib/vaultSettings";
+import { makeNoteMeta, setCachedVaultReadOnly } from "../../test/factories";
 import type { NoteMeta } from "../../types/note";
 
 // `getTodayNotePath`/`getDailyNoteDefaultBody` have their own dedicated
@@ -27,6 +28,7 @@ vi.mock("react-router-dom", async () => {
 
 const mockPutNote = vi.fn<(path: string, content: string) => Promise<unknown>>();
 const mockGetNote = vi.fn<(path: string) => Promise<{ content: string }>>();
+const mockGetVaultSettings = vi.fn<() => Promise<unknown>>();
 vi.mock("../../api/client", async () => {
   const actual =
     await vi.importActual<typeof import("../../api/client")>("../../api/client");
@@ -34,6 +36,7 @@ vi.mock("../../api/client", async () => {
     ...actual,
     putNote: (path: string, content: string) => mockPutNote(path, content),
     getNote: (path: string) => mockGetNote(path),
+    getVaultSettings: () => mockGetVaultSettings(),
   };
 });
 
@@ -85,6 +88,8 @@ function renderBrowser() {
 beforeEach(() => {
   mockUseOffline.mockReset();
   mockUseOffline.mockReturnValue({ isOffline: false, lastSyncedAt: null });
+  // Never fetched: counts as writable.
+  setCachedVaultReadOnly(null);
 });
 
 describe("NoteBrowser Today button", () => {
@@ -455,6 +460,70 @@ describe("NoteBrowser offline gating (R3)", () => {
       await Promise.resolve();
     });
 
+    expect(mockPutNote).not.toHaveBeenCalled();
+  });
+});
+
+// Read-only vault (CEREBRUM_VAULT_READ_ONLY): the create controls are
+// permanently unavailable, so they are hidden rather than disabled --
+// unlike offline above, which is temporary and keeps them visible.
+describe("NoteBrowser read-only vault", () => {
+  it("hides Today and + New note when the vault is read-only", () => {
+    setNotesState([makeNoteMeta("other.md")]);
+    setCachedVaultReadOnly(true);
+
+    renderBrowser();
+
+    expect(screen.queryByRole("button", { name: "Today" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "+ New note" })).toBeNull();
+    // Browsing still works.
+    expect(screen.getByPlaceholderText("Search notes...")).toBeInTheDocument();
+  });
+
+  it("hides them, not just disables them, when read-only and offline at once", () => {
+    setNotesState([makeNoteMeta("other.md")]);
+    setCachedVaultReadOnly(true);
+    mockUseOffline.mockReturnValue({ isOffline: true, lastSyncedAt: null });
+
+    renderBrowser();
+
+    expect(screen.queryByRole("button", { name: "Today" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "+ New note" })).toBeNull();
+  });
+
+  it("shows both when the vault is known to be writable", () => {
+    setNotesState([makeNoteMeta("other.md")]);
+    setCachedVaultReadOnly(false);
+
+    renderBrowser();
+
+    expect(screen.getByRole("button", { name: "Today" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "+ New note" })).toBeEnabled();
+  });
+
+  it("closes the template picker without writing when the vault turns out to be read-only", async () => {
+    const user = userEvent.setup();
+    mockPutNote.mockClear();
+    mockGetNote.mockReset();
+    mockGetNote.mockResolvedValue({ content: "# Agenda" });
+    setNotesState([makeNoteMeta("templates/Meeting.md")]);
+
+    renderBrowser();
+    await user.click(screen.getByRole("button", { name: "+ New note" }));
+    await user.type(screen.getByPlaceholderText("note.md"), "note1.md");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    expect(
+      screen.getByRole("dialog", { name: "Choose a template" }),
+    ).toBeInTheDocument();
+
+    // The first-visit vault-settings load lands while the picker is open.
+    mockGetVaultSettings.mockResolvedValue({ read_only: true });
+    await act(async () => {
+      await loadVaultSettings();
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Choose a template" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "+ New note" })).toBeNull();
     expect(mockPutNote).not.toHaveBeenCalled();
   });
 });

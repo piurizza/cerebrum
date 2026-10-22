@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path, PurePosixPath
 
 from cerebrum.notes.wikilinks import closest_path, is_hidden_path, name_key
+from cerebrum.read_only import ensure_vault_writable
 from cerebrum.settings import Settings
 
 # content_type -> filename extension used when writing an attachment to
@@ -172,6 +173,7 @@ async def save_attachment(
     Returns the path relative to the note's own directory (what gets
     embedded in the note's markdown), not the vault-relative path.
     """
+    ensure_vault_writable()
     if content_type not in _EXTENSION_BY_CONTENT_TYPE:
         raise UnsupportedAttachmentTypeError(content_type)
 
@@ -206,6 +208,7 @@ def move_attachment_dir(
 
     No-op if the note has no attachment folder.
     """
+    ensure_vault_writable()
     old_dir = attachment_dir_for_note(vault_root, old_note_path)
     if not old_dir.exists():
         return
@@ -233,6 +236,7 @@ def delete_attachment_dir(vault_root: Path, note_path: str) -> None:
 
     No-op if the note has no attachment folder.
     """
+    ensure_vault_writable()
     attachment_dir = attachment_dir_for_note(vault_root, note_path)
     if attachment_dir.exists():
         shutil.rmtree(attachment_dir)

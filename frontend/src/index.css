@@ -972,7 +972,8 @@ a {
 /* R5: always-visible while offline, distinct from `.error-text` -- this
    isn't a failure state, it's an expected mode the user needs to notice
    at a glance without it reading as alarming. */
-.offline-banner {
+.offline-banner,
+.read-only-banner {
   color: var(--text);
   background: var(--bg-subtle);
   border: 1px solid var(--border);

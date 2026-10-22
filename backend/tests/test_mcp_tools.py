@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastmcp import Client, FastMCP
 from fastmcp.client.client import CallToolResult
+from fastmcp.exceptions import ToolError
 
 from cerebrum.index.indexer import upsert_note
 from cerebrum.mcp.server import create_mcp_server
@@ -808,3 +809,38 @@ def test_note_writing_tools_say_which_link_form_to_write(
                 assert also in description
 
     asyncio.run(run())
+
+
+def test_read_only_vault_offers_only_the_read_tools(
+    vault: Path,
+    db: sqlite3.Connection,
+    read_only_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del read_only_env
+    monkeypatch.setenv("CEREBRUM_VAULT_PATH", str(vault))
+    get_settings.cache_clear()
+    _write_note(vault, "a.md", "---\ntitle: A\n---\nhello world")
+    mcp = _mcp_server(db)
+
+    async def run() -> None:
+        async with Client(mcp) as client:
+            tools = await client.list_tools()
+            assert sorted(tool.name for tool in tools) == [
+                "get-backlinks",
+                "get-graph",
+                "get-note",
+                "list-notes",
+                "search-notes",
+            ]
+            assert all(
+                tool.annotations is not None and tool.annotations.readOnlyHint
+                for tool in tools
+            )
+            with pytest.raises(ToolError, match="Unknown tool"):
+                await client.call_tool("create-note", {"path": "b.md", "content": "x"})
+            result = await client.call_tool("get-note", {"path": "a.md"})
+            assert "hello world" in result.data.content
+
+    asyncio.run(run())
+    assert not (vault / "b.md").exists()

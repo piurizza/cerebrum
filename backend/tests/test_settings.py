@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from cerebrum.settings import get_settings
+from cerebrum.settings import Settings, get_settings
+from tests.oidc_fake import OIDC_ENV_KEYS
 
 # auth_jwt_secret/auth_setup_token are required settings with no default
 # (see settings.py) -- every test below that constructs Settings() for an
@@ -129,6 +131,33 @@ def test_watcher_settings_read_from_environment(
         get_settings.cache_clear()
 
 
+# --- OpenID Connect provider settings ---------------------------------------
+
+_VALID_OIDC_ENV = {
+    "OIDC_ISSUER": "https://idp.example/realms/home",
+    "OIDC_CLIENT_ID": "cerebrum",
+    "OIDC_CLIENT_SECRET": "s3cret",
+}
+
+
+def _set_oidc_env(monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:
+    """Start every OIDC test from a clean slate -- none of the OIDC
+    variables set -- then apply `overrides` (keys as the env var names)."""
+    _set_valid_auth_env(monkeypatch)
+    for key in OIDC_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    for key, value in overrides.items():
+        monkeypatch.setenv(key, value)
+
+
+def _build_settings() -> Settings:
+    get_settings.cache_clear()
+    try:
+        return get_settings()
+    finally:
+        get_settings.cache_clear()
+
+
 def _state_paths(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[Path, Path]:
     monkeypatch.setenv("CEREBRUM_VAULT_PATH", "/notes")
     for name in ("CEREBRUM_INDEX_PATH", "CEREBRUM_AUTH_DB_PATH"):
@@ -143,6 +172,191 @@ def _state_paths(monkeypatch: pytest.MonkeyPatch, **env: str) -> tuple[Path, Pat
         return settings.index_path, settings.auth_db_path
     finally:
         get_settings.cache_clear()
+
+
+def test_oidc_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_oidc_env(monkeypatch)
+
+    settings = _build_settings()
+
+    assert settings.oidc_enabled is False
+    assert settings.oidc_issuer is None
+    assert settings.oidc_client_id is None
+    assert settings.oidc_client_secret is None
+    assert settings.oidc_provider_name == "SSO"
+    assert settings.oidc_scopes == "openid profile email"
+    assert settings.oidc_admin_group == ""
+    assert settings.oidc_groups_claim == "groups"
+    assert settings.auth_password_login is True
+    assert settings.oidc_allow_insecure_issuer is False
+
+
+def test_oidc_enabled_when_issuer_client_id_and_secret_are_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_oidc_env(monkeypatch, **_VALID_OIDC_ENV, OIDC_PROVIDER_NAME="Keycloak")
+
+    settings = _build_settings()
+
+    assert settings.oidc_enabled is True
+    assert settings.oidc_issuer == "https://idp.example/realms/home"
+    assert settings.oidc_client_id == "cerebrum"
+    assert settings.oidc_client_secret is not None
+    assert settings.oidc_client_secret.get_secret_value() == "s3cret"
+    assert "s3cret" not in repr(settings)
+    assert settings.oidc_provider_name == "Keycloak"
+
+
+@pytest.mark.parametrize(
+    ("missing", "expected_names"),
+    [
+        (("OIDC_CLIENT_SECRET",), ["OIDC_CLIENT_SECRET"]),
+        (("OIDC_CLIENT_ID",), ["OIDC_CLIENT_ID"]),
+        (("OIDC_ISSUER", "OIDC_CLIENT_ID"), ["OIDC_ISSUER", "OIDC_CLIENT_ID"]),
+    ],
+)
+def test_partial_oidc_configuration_fails_naming_the_missing_variables(
+    monkeypatch: pytest.MonkeyPatch,
+    missing: tuple[str, ...],
+    expected_names: list[str],
+) -> None:
+    present = {k: v for k, v in _VALID_OIDC_ENV.items() if k not in missing}
+    _set_oidc_env(monkeypatch, **present)
+
+    with pytest.raises(ValidationError) as exc_info:
+        _build_settings()
+
+    message = str(exc_info.value)
+    assert f"missing: {', '.join(expected_names)} " in message
+    # The configured secret never ends up in the startup error.
+    assert "s3cret" not in message
+
+
+def test_partial_oidc_configuration_counts_a_blank_secret_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_oidc_env(monkeypatch, **{**_VALID_OIDC_ENV, "OIDC_CLIENT_SECRET": "  "})
+
+    with pytest.raises(ValidationError, match="OIDC_CLIENT_SECRET"):
+        _build_settings()
+
+
+def test_blank_oidc_variables_mean_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A compose `${VAR:-}` passthrough sets every variable to "" -- that
+    # must read as "no provider", not as a half-configured one.
+    _set_oidc_env(
+        monkeypatch,
+        OIDC_ISSUER="",
+        OIDC_CLIENT_ID="",
+        OIDC_CLIENT_SECRET="",
+        OIDC_PROVIDER_NAME="",
+        OIDC_SCOPES="",
+        OIDC_ADMIN_GROUP="",
+        OIDC_GROUPS_CLAIM="",
+    )
+
+    settings = _build_settings()
+
+    assert settings.oidc_enabled is False
+    assert settings.oidc_issuer is None
+    assert settings.oidc_provider_name == "SSO"
+    assert settings.oidc_scopes == "openid profile email"
+    assert settings.oidc_admin_group == ""
+    assert settings.oidc_groups_claim == "groups"
+
+
+def test_blank_issuer_alone_counts_as_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_oidc_env(monkeypatch, OIDC_ISSUER="")
+
+    assert _build_settings().oidc_enabled is False
+
+
+@pytest.mark.parametrize(
+    "issuer",
+    [
+        "http://idp.example",
+        "http://192.168.1.10:8080/realms/x",
+        "idp.example/realms/x",
+        "ftp://idp.example",
+        "https://",
+    ],
+)
+def test_insecure_or_malformed_issuer_fails_startup(
+    monkeypatch: pytest.MonkeyPatch, issuer: str
+) -> None:
+    _set_oidc_env(monkeypatch, **{**_VALID_OIDC_ENV, "OIDC_ISSUER": issuer})
+
+    with pytest.raises(ValidationError, match="OIDC_ISSUER"):
+        _build_settings()
+
+
+@pytest.mark.parametrize(
+    "issuer",
+    [
+        "https://idp.example/realms/x",
+        "http://localhost:8080/realms/x",
+        "http://127.0.0.1:9000/application/o/cerebrum/",
+    ],
+)
+def test_https_or_loopback_issuer_is_accepted(
+    monkeypatch: pytest.MonkeyPatch, issuer: str
+) -> None:
+    _set_oidc_env(monkeypatch, **{**_VALID_OIDC_ENV, "OIDC_ISSUER": issuer})
+
+    assert _build_settings().oidc_issuer == issuer
+
+
+def test_http_issuer_on_any_host_is_accepted_with_allow_insecure_and_warns(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _set_oidc_env(
+        monkeypatch,
+        **{**_VALID_OIDC_ENV, "OIDC_ISSUER": "http://192.168.1.10:8080/realms/x"},
+        OIDC_ALLOW_INSECURE_ISSUER="true",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="cerebrum.settings"):
+        settings = _build_settings()
+
+    assert settings.oidc_issuer == "http://192.168.1.10:8080/realms/x"
+    assert any(
+        record.levelno == logging.WARNING
+        and "OIDC_ALLOW_INSECURE_ISSUER" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_allow_insecure_still_rejects_an_issuer_with_no_scheme(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_oidc_env(
+        monkeypatch,
+        **{**_VALID_OIDC_ENV, "OIDC_ISSUER": "idp.example/realms/x"},
+        OIDC_ALLOW_INSECURE_ISSUER="true",
+    )
+
+    with pytest.raises(ValidationError, match="OIDC_ISSUER"):
+        _build_settings()
+
+
+def test_password_login_off_without_a_provider_fails_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_oidc_env(monkeypatch, AUTH_PASSWORD_LOGIN="false")
+
+    with pytest.raises(ValidationError, match="AUTH_PASSWORD_LOGIN"):
+        _build_settings()
+
+
+def test_password_login_off_with_a_provider_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_oidc_env(monkeypatch, **_VALID_OIDC_ENV, AUTH_PASSWORD_LOGIN="false")
+
+    settings = _build_settings()
+
+    assert settings.auth_password_login is False
+    assert settings.oidc_enabled is True
 
 
 def test_index_and_accounts_db_default_to_inside_the_vault(

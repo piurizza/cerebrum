@@ -5,10 +5,13 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import jwt
+import pytest
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 
+from cerebrum.accounts.service import NO_PASSWORD_HASH
 from cerebrum.settings import get_settings
+from tests.mcp_test_support import issue_test_access_token
 
 # Matches conftest.py's `client` fixture, which sets AUTH_SETUP_TOKEN to
 # this exact value before constructing the app.
@@ -40,6 +43,30 @@ def _insert_user(
                 datetime.now(UTC).isoformat(),
             ),
         )
+
+
+def _insert_user_with_hash(
+    client: TestClient, username: str, password_hash: str
+) -> None:
+    """Insert an account whose `password_hash` is stored verbatim -- for the
+    password-less sentinel and for a corrupt value no hasher would produce."""
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    with auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO users (username, password_hash, is_admin, is_active, created_at)
+            VALUES (?, ?, 0, 1, ?)
+            """,
+            (username, password_hash, datetime.now(UTC).isoformat()),
+        )
+
+
+def _failed_login_attempts(client: TestClient, username: str) -> int:
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    row = auth_db.execute(
+        "SELECT failed_login_attempts FROM users WHERE username = ?", (username,)
+    ).fetchone()
+    return int(row["failed_login_attempts"])
 
 
 def test_register_first_account_with_valid_setup_token_succeeds(
@@ -377,3 +404,255 @@ def test_refresh_route_reachable_without_authorization_header(
     response = client.post("/api/auth/refresh")
 
     assert response.status_code not in (401, 403)
+
+
+def test_login_for_password_less_account_returns_generic_401_and_counts_failure(
+    client: TestClient,
+) -> None:
+    _insert_user_with_hash(client, "jules", NO_PASSWORD_HASH)
+
+    response = client.post(
+        "/api/auth/login", json={"username": "jules", "password": _PASSWORD}
+    )
+    baseline = client.post(
+        "/api/auth/login", json={"username": "no-such-user", "password": _PASSWORD}
+    )
+
+    assert response.status_code == 401
+    assert response.json() == baseline.json()
+    assert _failed_login_attempts(client, "jules") == 1
+
+
+@pytest.mark.parametrize(
+    "corrupt_hash",
+    [
+        "not-a-hash",
+        "",
+        "$argon2id$v=19$m=65536,t=3,p=4$truncated",
+    ],
+)
+def test_login_for_account_with_corrupt_hash_returns_401_not_500(
+    client: TestClient, corrupt_hash: str
+) -> None:
+    _insert_user_with_hash(client, "kim", corrupt_hash)
+
+    response = client.post(
+        "/api/auth/login", json={"username": "kim", "password": _PASSWORD}
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid username or password"}
+    assert _failed_login_attempts(client, "kim") == 1
+
+
+# --- GET /api/auth/methods ---------------------------------------------------
+
+_OIDC_ISSUER = "https://idp.example/realms/home"
+_OIDC_CLIENT_ID = "cerebrum-client-id"
+
+
+def _configure_oidc(monkeypatch: pytest.MonkeyPatch, **extra: str) -> None:
+    """Turn the provider on for a `client` that already exists. The routes
+    read `get_settings()` per request, so clearing its cache is enough; the
+    `client` fixture clears it again on teardown."""
+    monkeypatch.setenv("OIDC_ISSUER", _OIDC_ISSUER)
+    monkeypatch.setenv("OIDC_CLIENT_ID", _OIDC_CLIENT_ID)
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "client-secret-value")
+    for key, value in extra.items():
+        monkeypatch.setenv(key, value)
+    get_settings.cache_clear()
+
+
+def test_auth_methods_without_a_provider_offers_password_only(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/auth/methods")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "password_login": True,
+        "oidc": None,
+        "setup_required": True,
+    }
+
+
+def test_auth_methods_with_a_provider_names_it_without_leaking_its_config(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_oidc(monkeypatch, OIDC_PROVIDER_NAME="Authentik")
+
+    response = client.get("/api/auth/methods")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "password_login": True,
+        "oidc": {"provider_name": "Authentik"},
+        "setup_required": True,
+    }
+    assert _OIDC_ISSUER not in response.text
+    assert "idp.example" not in response.text
+    assert _OIDC_CLIENT_ID not in response.text
+    assert "client-secret-value" not in response.text
+
+
+def test_auth_methods_reports_password_login_off(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_oidc(monkeypatch, AUTH_PASSWORD_LOGIN="false")
+
+    response = client.get("/api/auth/methods")
+
+    assert response.json() == {
+        "password_login": False,
+        "oidc": {"provider_name": "SSO"},
+        "setup_required": True,
+    }
+
+
+def test_auth_methods_stops_asking_for_setup_once_an_account_exists(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The register page keeps the first-admin password form only while no
+    account exists, even with password login off."""
+    _configure_oidc(monkeypatch, AUTH_PASSWORD_LOGIN="false")
+    issue_test_access_token(client, "root", _PASSWORD)
+
+    response = client.get("/api/auth/methods")
+
+    assert response.json()["setup_required"] is False
+
+
+# --- AUTH_PASSWORD_LOGIN=false ------------------------------------------------
+
+
+def _switch_password_login_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_oidc(monkeypatch, AUTH_PASSWORD_LOGIN="false")
+
+
+def _link(client: TestClient, username: str, subject: str) -> None:
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    with auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO oidc_identities (issuer, subject, user_id, created_at)
+            SELECT ?, ?, id, ? FROM users WHERE username = ?
+            """,
+            (_OIDC_ISSUER, subject, datetime.now(UTC).isoformat(), username),
+        )
+
+
+def _login(client: TestClient, username: str, password: str = _PASSWORD) -> int:
+    return client.post(
+        "/api/auth/login", json={"username": username, "password": password}
+    ).status_code
+
+
+def test_password_switch_off_admin_still_signs_in_with_a_password(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    issue_test_access_token(client, "root", _PASSWORD)
+    _link(client, "root", "root-subject")
+    _switch_password_login_off(monkeypatch)
+
+    assert _login(client, "root") == 200
+
+
+def test_password_switch_off_linked_non_admin_is_refused_like_a_wrong_password(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _insert_user(client, "lena", _PASSWORD)
+    _link(client, "lena", "lena-subject")
+    _switch_password_login_off(monkeypatch)
+    assert _login(client, "lena", "wrong password") == 401
+
+    refused = client.post(
+        "/api/auth/login", json={"username": "lena", "password": _PASSWORD}
+    )
+    wrong = client.post(
+        "/api/auth/login", json={"username": "lena", "password": "wrong password"}
+    )
+
+    assert refused.status_code == 401
+    assert refused.json() == wrong.json() == {"detail": "Invalid username or password"}
+    assert "refresh_token" not in refused.cookies
+    # The refusal is not a successful login: it does not reset the lockout
+    # count the two wrong passwords built up.
+    assert _failed_login_attempts(client, "lena") == 2
+
+
+def test_password_switch_off_unlinked_non_admin_signs_in_until_linked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _insert_user(client, "milo", _PASSWORD)
+    _switch_password_login_off(monkeypatch)
+
+    assert _login(client, "milo") == 200
+
+    _link(client, "milo", "milo-subject")
+    assert _login(client, "milo") == 401
+
+
+def test_password_switch_off_ignores_a_link_from_another_issuer(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _insert_user(client, "nico", _PASSWORD)
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    with auth_db:
+        auth_db.execute(
+            """
+            INSERT INTO oidc_identities (issuer, subject, user_id, created_at)
+            SELECT 'https://old-idp.test', 'nico-subject', id, ? FROM users
+            WHERE username = 'nico'
+            """,
+            (datetime.now(UTC).isoformat(),),
+        )
+    _switch_password_login_off(monkeypatch)
+
+    assert _login(client, "nico") == 200
+
+
+def test_password_switch_off_refuses_invite_registration(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    admin_token = issue_test_access_token(client, "root", _PASSWORD)
+    invite = client.post(
+        "/api/invites", headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert invite.status_code == 201, invite.text
+    _configure_oidc(
+        monkeypatch, AUTH_PASSWORD_LOGIN="false", OIDC_PROVIDER_NAME="Authentik"
+    )
+
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "username": "omar",
+            "password": _PASSWORD,
+            "token": invite.json()["token"],
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Password registration is turned off; sign up with Authentik"
+    }
+    auth_db: sqlite3.Connection = client.app.state.auth_db
+    assert (
+        auth_db.execute("SELECT 1 FROM users WHERE username = 'omar'").fetchone()
+        is None
+    )
+
+
+def test_password_switch_off_still_bootstraps_the_first_admin(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _switch_password_login_off(monkeypatch)
+
+    response = client.post(
+        "/api/auth/register",
+        json={"username": "root", "password": _PASSWORD, "token": _SETUP_TOKEN},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["is_admin"] is True
+    assert _login(client, "root") == 200

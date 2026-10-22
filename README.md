@@ -347,6 +347,61 @@ To have the editor and MCP agents *write* wikilinks too, set
 never converted. See [SPEC.md](SPEC.md#wikilinks) for how a wikilink picks
 between notes with the same name.
 
+## Sign in with an identity provider
+
+Cerebrum can let people sign in with an OpenID Connect provider you already
+run (Keycloak, Authentik, Pocket ID, ...) or with Google. The provider only
+proves who someone is: Cerebrum keeps its own accounts, sessions and API
+tokens, so MCP clients and the apps work as before.
+
+1. At the provider, create a **confidential** client (client id + secret)
+   for Cerebrum. Register one redirect URI for every address you open
+   Cerebrum on, exactly, with no wildcards:
+   `https://<host>:<port>/api/auth/oidc/callback` (for example both
+   `https://192.168.1.14:7812/...` and
+   `https://cerebrum.tail1234.ts.net:8443/...`).
+2. In `.env`, set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and
+   optionally `OIDC_PROVIDER_NAME` (the button says "Sign in with
+   <name>"), then `docker compose up -d`.
+   - Copy the issuer exactly as the provider shows it. Authentik's ends in
+     `/`. A mismatch shows up as a failed sign-in and a log line with both
+     values.
+   - Keycloak: `https://<keycloak>/realms/<realm>`.
+     Authentik: `https://<authentik>/application/o/<app-slug>/`.
+     Pocket ID: `https://<pocket-id>`.
+   - The backend container must reach the issuer URL too, not just your
+     browser.
+3. People get in two ways, never by matching email addresses:
+   - **New people:** create an invite in Settings as usual. On the
+     Register page they pick a username, paste the invite and press
+     "Sign up with <name>". Their account has no password.
+   - **Existing accounts:** sign in with your password, open Settings, and
+     press "Link" under "Sign-in provider".
+
+Optional:
+
+- `OIDC_ADMIN_GROUP=<group>` makes members of that provider group admins
+  and removes admin from everyone else, each time they sign in with the
+  provider. Your provider has to put the groups in the ID token
+  (`OIDC_GROUPS_CLAIM`, default `groups`; in Keycloak add a "Group
+  Membership" mapper). Removing someone from the group takes effect at
+  their next provider sign-in; to remove someone right away, deactivate
+  their account in Settings.
+- `AUTH_PASSWORD_LOGIN=false` makes the provider the way in: invites can
+  only be redeemed through it, and anyone who has linked can no longer use
+  a password. Admins always keep their password, so a provider outage
+  never locks you out. Ask everyone to link first: accounts that haven't
+  linked yet can still sign in with their password, so they can.
+
+Keep `OIDC_ISSUER` stable. If you change provider or remove these settings,
+accounts created through the provider can't sign in any more: they have no
+password, and there is no way to give them one yet.
+
+Known limits: on an iPhone, sign-in from the home-screen app opens the
+provider in Safari and finishes there, not in the app, so use the site in
+Safari. Google refuses sign-in from embedded browsers, which includes the
+desktop app; self-hosted providers work there.
+
 ## MCP server
 
 An MCP server is mounted at `/api/mcp`, reachable through the same

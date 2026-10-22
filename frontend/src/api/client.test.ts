@@ -360,3 +360,143 @@ describe("refreshFailureWasAuthRejection() -- reachable 401/403 vs everything el
     expect(client.refreshFailureWasAuthRejection()).toBe(false);
   });
 });
+
+describe("OIDC sign-in helpers", () => {
+  function lastCall(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit] {
+    const call = fetchMock.mock.calls.at(-1);
+    if (!call) throw new Error("fetch was not called");
+    return call as [string, RequestInit];
+  }
+
+  it("getAuthMethods() GETs /api/auth/methods and returns the body", async () => {
+    const client = await freshClient();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ password_login: true, oidc: { provider_name: "Keycloak" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const methods = await client.getAuthMethods();
+
+    expect(methods).toEqual({
+      password_login: true,
+      oidc: { provider_name: "Keycloak" },
+    });
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("/api/auth/methods");
+    expect(init.method ?? "GET").toBe("GET");
+  });
+
+  it("startOidc() POSTs the intent and fields as JSON and returns the authorization URL", async () => {
+    const client = await freshClient();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ authorization_url: "https://idp.example/authorize?x=1" }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await client.startOidc({
+      intent: "register",
+      username: "ana",
+      invite_token: "invite-123",
+    });
+
+    expect(result.authorization_url).toBe("https://idp.example/authorize?x=1");
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("/api/auth/oidc/start");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(String(init.body))).toEqual({
+      intent: "register",
+      username: "ana",
+      invite_token: "invite-123",
+    });
+  });
+
+  it("startOidc() surfaces the server's detail as an ApiError (409 username taken)", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ detail: "Username already taken" }, { status: 409 }),
+        ),
+    );
+
+    const failure = client.startOidc({ intent: "register", username: "ana" });
+
+    await expect(failure).rejects.toBeInstanceOf(client.ApiError);
+    await expect(failure).rejects.toMatchObject({
+      status: 409,
+      message: "Username already taken",
+    });
+  });
+
+  it("startOidc() for link sends the bearer token and does not refresh on a wrong-password 403", async () => {
+    const client = await freshClient();
+    client.setAccessToken("access-token");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ detail: "Current password is incorrect" }, { status: 403 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      client.startOidc({ intent: "link", current_password: "wrong" }),
+    ).rejects.toThrow("Current password is incorrect");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = lastCall(fetchMock);
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-token");
+  });
+
+  it("getLinkedIdentity() GETs /api/account/identity", async () => {
+    const client = await freshClient();
+    const identity = {
+      linked: true,
+      provider_name: "Keycloak",
+      display_name: "ana@example.com",
+      has_password: true,
+      password_usable: true,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(identity));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.getLinkedIdentity()).resolves.toEqual(identity);
+    expect(lastCall(fetchMock)[0]).toBe("/api/account/identity");
+  });
+
+  it("unlinkIdentity() DELETEs /api/account/identity and resolves on 204", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.unlinkIdentity()).resolves.toBeUndefined();
+    const [url, init] = lastCall(fetchMock);
+    expect(url).toBe("/api/account/identity");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("unlinkIdentity() surfaces the 409 lock-out refusal", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(
+            { detail: "You need a password you can sign in with before unlinking" },
+            { status: 409 },
+          ),
+        ),
+    );
+
+    await expect(client.unlinkIdentity()).rejects.toThrow(
+      "You need a password you can sign in with before unlinking",
+    );
+  });
+});

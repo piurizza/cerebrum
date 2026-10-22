@@ -38,3 +38,29 @@ export type _PinCreateInviteResult = Expect<EqualKeys<CreateInviteResult, "token
 
 export type LoginResponse = components["schemas"]["LoginResponse"];
 export type _PinLoginResponse = Expect<EqualKeys<LoginResponse, "access_token">>;
+
+export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
+export type _PinAuthMethods = Expect<
+  EqualKeys<AuthMethods, "password_login" | "oidc" | "setup_required">
+>;
+
+export type OidcStartRequest = components["schemas"]["OidcStartRequest"];
+export type _PinOidcStartRequest = Expect<
+  EqualKeys<
+    OidcStartRequest,
+    "intent" | "username" | "invite_token" | "current_password"
+  >
+>;
+
+export type OidcStartResult = components["schemas"]["OidcStartResponse"];
+export type _PinOidcStartResult = Expect<
+  EqualKeys<OidcStartResult, "authorization_url">
+>;
+
+export type LinkedIdentity = components["schemas"]["AccountIdentityResponse"];
+export type _PinLinkedIdentity = Expect<
+  EqualKeys<
+    LinkedIdentity,
+    "linked" | "provider_name" | "display_name" | "has_password" | "password_usable"
+  >
+>;

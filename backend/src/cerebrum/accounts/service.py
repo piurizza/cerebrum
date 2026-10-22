@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import contextlib
 import secrets
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import anyio
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import (
+    InvalidHashError,
+    VerificationError,
+    VerifyMismatchError,
+)
 from pydantic import BaseModel
 
 from cerebrum.auth_db import auth_write_lock, hash_token
@@ -37,6 +43,20 @@ _LOCKOUT_DURATION = timedelta(minutes=15)
 # identical error message and status code.
 _DUMMY_PASSWORD_HASH = _password_hasher.hash("dummy-password-for-timing-parity")
 
+# Stored in `users.password_hash` (which stays NOT NULL) for an account
+# created through the OpenID Connect provider, which has no password. Not
+# an Argon2 hash, and no `PasswordHasher.hash()` output can ever equal it,
+# so no typed password matches it -- `_verify_password_or_dummy` refuses
+# it outright rather than relying on Argon2 to reject it.
+NO_PASSWORD_HASH = "!no-password"
+
+
+def has_password(password_hash: str) -> bool:
+    """Whether an account has a password at all, i.e. isn't one created
+    through the provider. Not whether password login is open to it -- that
+    also depends on `auth_password_login` and the account's links."""
+    return password_hash != NO_PASSWORD_HASH
+
 
 class InvalidCredentialError(Exception):
     """Wrong username/password, or a deactivated account, at login. One
@@ -54,6 +74,12 @@ class InvalidTokenError(Exception):
 
 class UsernameTakenError(Exception):
     """Registration with an existing username."""
+
+
+class PasswordRegistrationClosedError(Exception):
+    """Registration with an invite while `AUTH_PASSWORD_LOGIN` is off: new
+    people sign up through the provider instead (KTD11). The setup-token
+    bootstrap of the first account is never refused."""
 
 
 class TokenReuseDetectedError(Exception):
@@ -82,7 +108,7 @@ class User(BaseModel):
     created_at: str
 
 
-def _is_first_account(auth_db: sqlite3.Connection) -> bool:
+def is_first_account(auth_db: sqlite3.Connection) -> bool:
     # Locked even though it's a single read: sqlite3's Connection object is
     # not safe for concurrent statement execution from multiple threads --
     # an unlocked read here can race a concurrent thread's locked write
@@ -96,21 +122,34 @@ def _is_first_account(auth_db: sqlite3.Connection) -> bool:
         return auth_db.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None
 
 
-def _find_valid_invite_token_hash(
-    auth_db: sqlite3.Connection, token: str
-) -> str | None:
+def find_valid_invite_token_hash(auth_db: sqlite3.Connection, token: str) -> str | None:
+    """The hash of `token` when it names an invite that is unexpired and
+    not yet consumed, else None. Also used by the OpenID Connect sign-up
+    (`api/oidc.py`), which checks the invite before sending the browser to
+    the provider and consumes it, by hash, in the callback."""
     token_hash = hash_token(token)
     now = datetime.now(UTC).isoformat()
-    # Locked for the same reason as `_is_first_account` above.
+    # Locked for the same reason as `is_first_account` above.
     with auth_write_lock:
-        row = auth_db.execute(
-            """
-            SELECT token_hash FROM invites
-            WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
-            """,
-            (token_hash, now),
-        ).fetchone()
-    return token_hash if row is not None else None
+        valid = invite_hash_is_valid(auth_db, token_hash, now)
+    return token_hash if valid else None
+
+
+def invite_hash_is_valid(
+    auth_db: sqlite3.Connection, token_hash: str, now: str
+) -> bool:
+    """Whether `token_hash` names an invite that is unexpired at `now` and
+    not yet consumed. Lock-free: the caller holds `auth_write_lock` -- the
+    OpenID Connect sign-up re-checks the invite inside the transaction that
+    consumes it (`accounts/oidc_accounts.py`)."""
+    row = auth_db.execute(
+        """
+        SELECT 1 FROM invites
+        WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
+        """,
+        (token_hash, now),
+    ).fetchone()
+    return row is not None
 
 
 def _bootstrap_first_admin(
@@ -185,19 +224,25 @@ async def register_account(
     unauthenticated caller must not be able to learn whether a username is
     taken by presenting no token, or a bad one, and comparing error
     messages (see `InvalidTokenError` vs `UsernameTakenError` below).
+
+    With `AUTH_PASSWORD_LOGIN` off, every registration but the bootstrap
+    raises `PasswordRegistrationClosedError`, before the invite is even
+    looked at.
     """
     settings = get_settings()
-    is_first_account = _is_first_account(auth_db)
+    bootstrapping = is_first_account(auth_db)
 
     invite_token_hash: str | None = None
-    if is_first_account:
+    if bootstrapping:
         if not secrets.compare_digest(
             token.encode("utf-8"),
             settings.auth_setup_token.get_secret_value().encode("utf-8"),
         ):
             raise InvalidTokenError("invalid setup token")
+    elif not settings.auth_password_login:
+        raise PasswordRegistrationClosedError("password registration is turned off")
     else:
-        invite_token_hash = _find_valid_invite_token_hash(auth_db, token)
+        invite_token_hash = find_valid_invite_token_hash(auth_db, token)
         if invite_token_hash is None:
             raise InvalidTokenError(
                 "invalid, expired, or already-consumed invite token"
@@ -231,7 +276,7 @@ async def register_account(
     return User(
         id=user_id,
         username=username,
-        is_admin=is_first_account,
+        is_admin=bootstrapping,
         is_active=True,
         created_at=created_at,
     )
@@ -241,12 +286,25 @@ def _verify_password_or_dummy(password_hash: str, password: str) -> bool:
     """Run one Argon2 verify, off the event loop via the caller's
     `anyio.to_thread.run_sync`. Used for both the real hash (an existing
     user) and `_DUMMY_PASSWORD_HASH` (no such user) so both paths pay the
-    identical CPU cost -- see `_DUMMY_PASSWORD_HASH`'s docstring."""
-    try:
-        _password_hasher.verify(password_hash, password)
-        return True
-    except VerifyMismatchError:
-        return False
+    identical CPU cost -- see `_DUMMY_PASSWORD_HASH`'s docstring.
+
+    A password-less account (`NO_PASSWORD_HASH`) and a stored value Argon2
+    can't even parse are both a mismatch, after verifying against the dummy
+    hash instead: neither may answer faster than a wrong password does, and
+    a corrupt row must fail login like one rather than surface as a 500."""
+    if has_password(password_hash):
+        try:
+            _password_hasher.verify(password_hash, password)
+            return True
+        except VerifyMismatchError:
+            return False
+        except (InvalidHashError, VerificationError, UnicodeEncodeError):
+            # Corrupt or truncated hash; `VerificationError` is argon2's
+            # "Decoding failed" for a hash that looks Argon2 but isn't.
+            pass
+    with contextlib.suppress(VerifyMismatchError):
+        _password_hasher.verify(_DUMMY_PASSWORD_HASH, password)
+    return False
 
 
 def _record_failed_login(auth_db: sqlite3.Connection, user_id: int) -> None:
@@ -293,7 +351,11 @@ def _record_successful_login(auth_db: sqlite3.Connection, user_id: int) -> None:
 
 
 async def authenticate(
-    username: str, password: str, auth_db: sqlite3.Connection
+    username: str,
+    password: str,
+    auth_db: sqlite3.Connection,
+    *,
+    password_login_open: Callable[[User], bool] | None = None,
 ) -> User:
     """Verify a username/password login, returning the `User` on success.
 
@@ -302,9 +364,17 @@ async def authenticate(
     locked-out account -- deliberately one exception type for all four, so
     the API layer has no distinguishable cause to leak by mapping them
     differently (see `InvalidCredentialError`'s own docstring).
+
+    `password_login_open`, when given, is asked whether password login is
+    open to the account (KTD11). A refusal is the same
+    `InvalidCredentialError`, and is decided only once the password has
+    been verified, so it reveals nothing about the account to someone who
+    doesn't know the password. It is not a successful login, so it leaves
+    the lockout count alone; nor a failed one, since the password was
+    right.
     """
-    # Locked for the same reason as `_is_first_account`/
-    # `_find_valid_invite_token_hash` above -- a read against the shared
+    # Locked for the same reason as `is_first_account`/
+    # `find_valid_invite_token_hash` above -- a read against the shared
     # `auth_db` connection is not safe to run unlocked while another thread
     # may be mid-write against it.
     with auth_write_lock:
@@ -348,15 +418,18 @@ async def authenticate(
         _record_failed_login(auth_db, row["id"])
         raise InvalidCredentialError("invalid username or password")
 
-    _record_successful_login(auth_db, row["id"])
-
-    return User(
+    user = User(
         id=row["id"],
         username=row["username"],
         is_admin=bool(row["is_admin"]),
         is_active=bool(row["is_active"]),
         created_at=row["created_at"],
     )
+    if password_login_open is not None and not password_login_open(user):
+        raise InvalidCredentialError("password login is closed to this account")
+
+    _record_successful_login(auth_db, row["id"])
+    return user
 
 
 async def change_password(
@@ -368,13 +441,9 @@ async def change_password(
     """Replace an authenticated account's password, after re-checking the
     current one.
 
-    The caller is already authenticated (the route sits behind
-    `get_current_identity`), so this is not a login: there is no username to
-    enumerate and no timing-parity work to do. But a wrong `current_password`
-    still counts toward the same lockout `authenticate()` enforces, and a
-    locked account is refused here too -- otherwise a stolen access token
-    could be used to brute-force the password through this endpoint without
-    ever tripping the lockout login has.
+    The current password is re-checked by `confirm_current_password()`, so
+    a wrong one counts toward the login lockout, and a locked account is
+    refused.
 
     On success, every refresh token the account holds is revoked in the
     same transaction as the hash update. Rotating a password is most often a
@@ -394,6 +463,48 @@ async def change_password(
             f"password must be at least {_MIN_PASSWORD_LENGTH} characters"
         )
 
+    user = await confirm_current_password(user_id, current_password, auth_db)
+
+    new_hash = await anyio.to_thread.run_sync(_password_hasher.hash, new_password)
+    now_iso = datetime.now(UTC).isoformat()
+    with auth_write_lock, auth_db:
+        auth_db.execute(
+            """
+            UPDATE users
+            SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL
+            WHERE id = ?
+            """,
+            (new_hash, user_id),
+        )
+        auth_db.execute(
+            """
+            UPDATE refresh_tokens SET revoked_at = ?
+            WHERE user_id = ? AND revoked_at IS NULL
+            """,
+            (now_iso, user_id),
+        )
+
+    return user
+
+
+async def confirm_current_password(
+    user_id: int, password: str, auth_db: sqlite3.Connection
+) -> User:
+    """Re-check a signed-in account's password before a sensitive change
+    (changing it, linking a sign-in provider), returning the account.
+
+    The caller is already authenticated, so this is not a login: there is
+    no username to enumerate and no timing-parity work to do. But a wrong
+    password still counts toward the same lockout `authenticate()`
+    enforces, and a locked account is refused here too -- otherwise a
+    stolen access token could brute-force the password through these
+    endpoints without ever tripping the lockout login has. A success does
+    not reset the failure count: only a real login or a password change
+    does.
+
+    Raises `InvalidCredentialError` for a wrong password, a locked-out
+    account, or an account that no longer exists or is inactive.
+    """
     with auth_write_lock:
         row = auth_db.execute(
             """
@@ -414,30 +525,11 @@ async def change_password(
         raise InvalidCredentialError("account temporarily locked")
 
     password_ok = await anyio.to_thread.run_sync(
-        _verify_password_or_dummy, row["password_hash"], current_password
+        _verify_password_or_dummy, row["password_hash"], password
     )
     if not password_ok:
         _record_failed_login(auth_db, user_id)
         raise InvalidCredentialError("current password is incorrect")
-
-    new_hash = await anyio.to_thread.run_sync(_password_hasher.hash, new_password)
-    now_iso = datetime.now(UTC).isoformat()
-    with auth_write_lock, auth_db:
-        auth_db.execute(
-            """
-            UPDATE users
-            SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL
-            WHERE id = ?
-            """,
-            (new_hash, user_id),
-        )
-        auth_db.execute(
-            """
-            UPDATE refresh_tokens SET revoked_at = ?
-            WHERE user_id = ? AND revoked_at IS NULL
-            """,
-            (now_iso, user_id),
-        )
 
     return User(
         id=row["id"],

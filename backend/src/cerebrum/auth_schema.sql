@@ -51,7 +51,24 @@ CREATE TABLE IF NOT EXISTS invites (
     consumed_by  INTEGER REFERENCES users(id)
 );
 -- Same rationale as the two token_hash indexes above -- invite redemption
--- (accounts/service.py's _find_valid_invite_token_hash()) looks this up by
+-- (accounts/service.py's find_valid_invite_token_hash()) looks this up by
 -- exact hash too; cheap to add alongside the other two while touching this
 -- file, even though invite volume is low at this app's household scale.
 CREATE INDEX IF NOT EXISTS idx_invites_token_hash ON invites(token_hash);
+
+-- An account's link to an identity at the OpenID Connect provider: `sub`
+-- as issued by `issuer`. Lookups always use the configured issuer, so after
+-- the operator switches provider, old rows are inert rather than wrong.
+-- `display_name` is the preferred username or email at link time, for
+-- Settings only -- never matched against anything.
+CREATE TABLE IF NOT EXISTS oidc_identities (
+    issuer       TEXT NOT NULL,
+    subject      TEXT NOT NULL,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    display_name TEXT,
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (issuer, subject)
+);
+-- At most one linked identity per account per provider.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_oidc_identities_user_issuer
+    ON oidc_identities(user_id, issuer);

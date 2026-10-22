@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setCachedVaultReadOnly } from "../../test/factories";
 
 // NotePathHeader reads `notes`/`refreshNotes` from NotesContext (used by
 // the rename-path-collision check and the post-mutation refresh) -- these
@@ -12,8 +13,13 @@ vi.mock("../../context/NotesContext", () => ({
 
 import { NotePathHeader } from "./NotePathHeader";
 
+beforeEach(() => {
+  // Never fetched: counts as writable.
+  setCachedVaultReadOnly(null);
+});
+
 // Regression coverage for review finding #3 (2026-08-31 code review): this
-// file did not exist before -- the `disabled={isOffline}` JSX on Rename and
+// file did not exist before -- the `disabled={readOnly}` JSX on Rename and
 // Delete was never rendered or asserted anywhere in the suite (the only
 // prior coverage, in NoteViewPage.test.tsx, mocks this component entirely
 // and only checks that the prop value reaches the mock).
@@ -35,10 +41,43 @@ describe("NotePathHeader offline gating (R3)", () => {
   });
 
   it("disables Rename and Delete while offline", () => {
-    render(<NotePathHeader {...baseProps} isOffline={true} />);
+    // NoteViewPage passes `readOnly={!canWrite}`; on a writable vault that
+    // is the offline case.
+    render(<NotePathHeader {...baseProps} readOnly={true} />);
 
     expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+  });
+});
+
+describe("NotePathHeader read-only vault", () => {
+  const baseProps = {
+    path: "notes/example.md",
+    title: "Example",
+    created: null,
+    updated: null,
+    onRenamed: vi.fn(),
+    onDeleted: vi.fn(),
+  };
+
+  it("hides Rename and Delete, keeping Copy path", () => {
+    setCachedVaultReadOnly(true);
+
+    render(<NotePathHeader {...baseProps} readOnly={true} />);
+
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Copy path" })).toBeEnabled();
+    expect(screen.getByText("notes/example.md")).toBeInTheDocument();
+  });
+
+  it("shows Rename and Delete on a vault known to be writable", () => {
+    setCachedVaultReadOnly(false);
+
+    render(<NotePathHeader {...baseProps} readOnly={false} />);
+
+    expect(screen.getByRole("button", { name: "Rename" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
   });
 });
 

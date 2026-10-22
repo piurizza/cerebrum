@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setCachedVaultReadOnly } from "./test/factories";
 
 const mockIsZen = vi.fn<() => boolean>(() => false);
 
@@ -12,7 +13,11 @@ vi.mock("./context/ZenModeContext", () => ({
   useZenMode: () => ({ isZen: mockIsZen(), toggleZen: vi.fn() }),
   ZenModeProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock("./components/OfflineBanner", () => ({ OfflineBanner: () => null }));
+const mockIsOffline = vi.fn<() => boolean>(() => false);
+vi.mock("./components/OfflineBanner", () => ({
+  OfflineBanner: () =>
+    mockIsOffline() ? <p role="status">offline banner stub</p> : null,
+}));
 vi.mock("./components/IosInstallHint", () => ({ IosInstallHint: () => null }));
 // Uncontrolled input: its value survives parent re-renders but not an
 // unmount -- exactly the signal for "the drawer subtree is hidden with
@@ -59,6 +64,8 @@ const menu = () => screen.getByRole("button", { name: "Menu" });
 
 afterEach(() => {
   mockIsZen.mockReturnValue(false);
+  mockIsOffline.mockReturnValue(false);
+  setCachedVaultReadOnly(null);
   setViewport(false);
 });
 
@@ -159,5 +166,30 @@ describe("AppShell mobile drawer (U2)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Close menu" }));
 
     expect(screen.getByLabelText("note-search-stub")).toHaveValue("graph theory");
+  });
+});
+
+describe("AppShell banners", () => {
+  it("stacks the read-only banner under the offline banner when both apply", () => {
+    setViewport(false);
+    mockIsOffline.mockReturnValue(true);
+    setCachedVaultReadOnly(true);
+
+    renderShell();
+
+    const banners = screen.getAllByRole("status");
+    expect(banners.map((banner) => banner.textContent)).toEqual([
+      "offline banner stub",
+      "This vault is read-only",
+    ]);
+  });
+
+  it("shows no read-only banner on a writable vault", () => {
+    setViewport(false);
+    setCachedVaultReadOnly(false);
+
+    renderShell();
+
+    expect(screen.queryByText("This vault is read-only")).toBeNull();
   });
 });

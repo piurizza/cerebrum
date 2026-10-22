@@ -1,3 +1,4 @@
+import { resetVaultFoldersForTests, VAULT_SETTINGS_KEY } from "../lib/vaultSettings";
 import type { NoteMeta } from "../types/note";
 
 /** Builds a minimal `NoteMeta` fixture -- `tags`/`created`/`updated` default
@@ -17,4 +18,20 @@ export function setNavigatorOnLine(value: boolean): void {
     configurable: true,
     value,
   });
+}
+
+/** Seeds the cached vault settings as if the server last reported
+ * `read_only: readOnly` (or clears them, for `null` = never fetched), and
+ * drops the in-memory copy so the next read picks it up. Call before
+ * rendering: it does not notify mounted subscribers. */
+export function setCachedVaultReadOnly(readOnly: boolean | null): void {
+  if (readOnly === null) {
+    window.localStorage.removeItem(VAULT_SETTINGS_KEY);
+  } else {
+    window.localStorage.setItem(
+      VAULT_SETTINGS_KEY,
+      JSON.stringify({ read_only: readOnly }),
+    );
+  }
+  resetVaultFoldersForTests();
 }

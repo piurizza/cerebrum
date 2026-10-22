@@ -9,6 +9,7 @@ import { NotePathHeader } from "../components/Editor/NotePathHeader";
 import { useOffline } from "../context/OfflineContext";
 import { useTheme } from "../context/ThemeContext";
 import { useZenMode } from "../context/ZenModeContext";
+import { useCanWrite, useVaultReadOnly } from "../hooks/useCanWrite";
 import { setEditorDirty } from "../lib/editorDirty";
 import { stripFrontmatter } from "../lib/noteContent";
 
@@ -34,6 +35,9 @@ export function NoteViewPage() {
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<ViewMode>("preview");
   const [blockerError, setBlockerError] = useState<string | null>(null);
+  // Inline and persistent, not a toast: a refused save (a 403 from a
+  // read-only vault, say) must stay visible until the next attempt.
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Holds the raw fetch failure, not a pre-formatted message -- whether to
   // show the offline-specific copy or the raw error text is decided at
   // render time from the *current* `isOffline`, not baked in when the
@@ -46,6 +50,11 @@ export function NoteViewPage() {
   const { isZen, toggleZen } = useZenMode();
   const { theme, toggleTheme } = useTheme();
   const { isOffline } = useOffline();
+  // Every write entry point below is gated on canWrite (online and the
+  // vault not read-only). How an unavailable control looks depends on why:
+  // hidden on a read-only vault (permanent), disabled offline (temporary).
+  const canWrite = useCanWrite();
+  const vaultReadOnly = useVaultReadOnly();
 
   useEffect(() => {
     if (!path) return;
@@ -61,6 +70,7 @@ export function NoteViewPage() {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
+    setSaveError(null);
     setMode("preview");
     getNote(path)
       .then((note) => {
@@ -101,6 +111,17 @@ export function NoteViewPage() {
     }
   }, [path, content]);
 
+  // The Save button's and Cmd+S's entry point: unlike handleSave (which
+  // handleBlockedSave needs to throw), reports a failure inline.
+  const handleSaveWithError = useCallback(async () => {
+    setSaveError(null);
+    try {
+      await handleSave();
+    } catch (err) {
+      setSaveError(errorMessage(err));
+    }
+  }, [handleSave]);
+
   // Warns on tab close/refresh (R2) -- browsers only allow a native,
   // unstyled confirmation here, no custom Save/Discard/Cancel UI is
   // possible (KTD3), unlike the router-navigation case below.
@@ -136,8 +157,9 @@ export function NoteViewPage() {
     // attempted a real putNote() and surfaced a raw fetch-failure message
     // instead of the app's established offline messaging. The dialog's own
     // Save button is now also disabled via the isOffline prop below; this
-    // is defense in depth for any other caller of this handler.
-    if (isOffline) return;
+    // is defense in depth for any other caller of this handler. canWrite
+    // also covers a read-only vault.
+    if (!canWrite) return;
     setBlockerError(null);
     try {
       await handleSave();
@@ -149,7 +171,7 @@ export function NoteViewPage() {
       // Discard is chosen, or Cancel is chosen (R3).
       setBlockerError(errorMessage(err));
     }
-  }, [handleSave, blocker, isOffline]);
+  }, [handleSave, blocker, canWrite]);
 
   function handleBlockedDiscard() {
     setBlockerError(null);
@@ -168,7 +190,9 @@ export function NoteViewPage() {
         (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
       if (!isSaveShortcut) return;
       event.preventDefault();
-      if (saving || isOffline) return;
+      // A no-op offline or on a read-only vault (still preventDefault'ed
+      // above, so the browser's own "Save page" never opens).
+      if (saving || !canWrite) return;
       // Route through the dialog's own Save handler while it's blocking
       // navigation, so blocker.proceed()/the dialog's error state stay in
       // sync -- the plain handleSave() never calls blocker.proceed(), so
@@ -178,12 +202,12 @@ export function NoteViewPage() {
       if (blocker.state === "blocked") {
         handleBlockedSave();
       } else {
-        handleSave();
+        handleSaveWithError();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [path, saving, isOffline, handleSave, blocker.state, handleBlockedSave]);
+  }, [path, saving, canWrite, handleSaveWithError, blocker.state, handleBlockedSave]);
 
   if (!path) {
     return (
@@ -209,7 +233,7 @@ export function NoteViewPage() {
         <UnsavedChangesDialog
           error={blockerError}
           busy={saving}
-          isOffline={isOffline}
+          isOffline={!canWrite}
           onSave={handleBlockedSave}
           onDiscard={handleBlockedDiscard}
           onCancel={handleBlockedCancel}
@@ -231,7 +255,7 @@ export function NoteViewPage() {
             }
           }}
           onDeleted={() => navigate("/")}
-          isOffline={isOffline}
+          readOnly={!canWrite}
           actions={
             <>
               <button
@@ -259,7 +283,7 @@ export function NoteViewPage() {
             value={content}
             onChange={setContent}
             currentPath={path}
-            readOnly={isOffline}
+            readOnly={!canWrite}
           />
         ) : (
           <MarkdownPreview body={stripFrontmatter(content)} currentPath={path} />
@@ -267,35 +291,46 @@ export function NoteViewPage() {
 
         <div className="note-editor-actions">
           <span className="save-status">{isDirty ? "Unsaved changes" : "Saved"}</span>
-          <span className="shortcut-hint">
-            <kbd>{isMac ? "⌘" : "Ctrl"}</kbd>+<kbd>S</kbd> to save
-          </span>
+          {!vaultReadOnly && (
+            <span className="shortcut-hint">
+              <kbd>{isMac ? "⌘" : "Ctrl"}</kbd>+<kbd>S</kbd> to save
+            </span>
+          )}
           <span className="chrome-spacer" />
           {mode === "edit" ? (
             <>
               <button type="button" className="btn" onClick={() => setMode("preview")}>
                 Preview
               </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleSave}
-                disabled={saving || isOffline}
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
+              {!vaultReadOnly && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleSaveWithError}
+                  disabled={saving || isOffline}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              )}
             </>
           ) : (
-            <button
-              type="button"
-              className="btn btn-edit"
-              onClick={() => setMode("edit")}
-              disabled={isOffline}
-            >
-              Edit
-            </button>
+            !vaultReadOnly && (
+              <button
+                type="button"
+                className="btn btn-edit"
+                onClick={() => setMode("edit")}
+                disabled={isOffline}
+              >
+                Edit
+              </button>
+            )
           )}
         </div>
+        {saveError && (
+          <p className="error-text save-error" role="alert">
+            {saveError}
+          </p>
+        )}
       </div>
       <aside className="note-backlinks">
         <h2>Backlinks</h2>

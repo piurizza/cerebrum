@@ -9,19 +9,33 @@ import {
 } from "../../api/client";
 import { useNotes } from "../../context/NotesContext";
 import { useOffline } from "../../context/OfflineContext";
+import { useTagSelection } from "../../context/TagSelectionContext";
 import { useCanWrite, useVaultReadOnly } from "../../hooks/useCanWrite";
 import { getDailyNoteDefaultBody, getTodayNotePath } from "../../lib/dailyNote";
 import { findDuplicateTitles } from "../../lib/duplicateTitles";
 import { stripTemplateIdentityFields } from "../../lib/noteContent";
 import { buildNoteTree, splitNotePath } from "../../lib/noteTree";
+import {
+  collectTagCounts,
+  hasWords,
+  noteMatchesTags,
+  parseQueryText,
+  serializeQuery,
+  type TagChip,
+} from "../../lib/tagQuery";
 import type { TemplateOption } from "../../lib/templates";
 import { hasRelevantTemplate, listTemplateOptions } from "../../lib/templates";
 import type { NoteMeta } from "../../types/note";
 import { FolderPickerModal } from "../FolderPicker/FolderPickerModal";
 import { TemplatePickerModal } from "../TemplatePicker/TemplatePickerModal";
 import { NoteTreeList } from "./NoteTreeList";
+import { TagSearchBox } from "./TagSearchBox";
 
 const SEARCH_DEBOUNCE_MS = 250;
+
+function describeChips(chips: readonly TagChip[]): string {
+  return chips.map((chip) => `${chip.excluded ? "-" : ""}#${chip.tag}`).join(" ");
+}
 
 export function NoteBrowser() {
   const { notes, error, loading, refreshNotes } = useNotes();
@@ -54,28 +68,58 @@ export function NoteBrowser() {
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
-  const [query, setQuery] = useState("");
+  // The search box's typed text, minus the tag still being typed.
+  const [queryText, setQueryText] = useState("");
   const [results, setResults] = useState<NoteMeta[] | null>(null);
   const [searching, setSearching] = useState(false);
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const { chips } = useTagSelection();
   const navigate = useNavigate();
 
+  // Tags typed but not turned into chips (`#unknown`, or one left without
+  // a trailing space) filter exactly like chips do.
+  const activeChips = useMemo(() => {
+    const typed = parseQueryText(queryText);
+    return [
+      ...chips,
+      ...typed.include.map((tag) => ({ tag, excluded: false })),
+      ...typed.exclude.map((tag) => ({ tag, excluded: true })),
+    ];
+  }, [chips, queryText]);
+
+  // Only a query with words goes to the server (a flat, ranked list); tags
+  // alone filter the cached notes here, keeping the tree and working offline.
+  const serverQuery = hasWords(parseQueryText(queryText).text)
+    ? serializeQuery(queryText, chips)
+    : "";
+
   useEffect(() => {
-    const trimmed = query.trim();
-    if (!trimmed) {
+    if (!serverQuery) {
       setResults(null);
       setSearching(false);
       return;
     }
+    // A response for a query that is no longer current is dropped: chips
+    // change the query often, and an older response landing last would
+    // otherwise replace the newer one's results.
+    let current = true;
     setSearching(true);
     const handle = window.setTimeout(() => {
-      searchNotes(trimmed)
-        .then(setResults)
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false));
+      searchNotes(serverQuery)
+        .then((found) => {
+          if (current) setResults(found);
+        })
+        .catch(() => {
+          if (current) setResults([]);
+        })
+        .finally(() => {
+          if (current) setSearching(false);
+        });
     }, SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [query]);
+    return () => {
+      current = false;
+      window.clearTimeout(handle);
+    };
+  }, [serverQuery]);
 
   // Only show the disambiguating path for titles that actually collide,
   // so the common case (unique titles) stays uncluttered.
@@ -84,18 +128,14 @@ export function NoteBrowser() {
     [notes],
   );
 
-  const allTags = useMemo(() => {
-    const tags = new Set<string>();
-    for (const note of notes) {
-      for (const tag of note.tags) tags.add(tag);
-    }
-    return [...tags].sort();
-  }, [notes]);
+  const tagCounts = useMemo(() => collectTagCounts(notes, chips), [notes, chips]);
 
   const tagFilteredNotes = useMemo(
     () =>
-      selectedTag ? notes.filter((note) => note.tags.includes(selectedTag)) : notes,
-    [notes, selectedTag],
+      activeChips.length > 0
+        ? notes.filter((note) => noteMatchesTags(note.tags, activeChips))
+        : notes,
+    [notes, activeChips],
   );
 
   const tree = useMemo(() => buildNoteTree(tagFilteredNotes), [tagFilteredNotes]);
@@ -321,32 +361,12 @@ export function NoteBrowser() {
           onCancel={handleTemplateCancel}
         />
       )}
-      <input
-        type="search"
-        className="search-input"
-        placeholder="Search notes..."
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-      />
-      {results === null && allTags.length > 0 && (
-        <div className="tag-filter">
-          {allTags.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              className={selectedTag === tag ? "tag-pill is-active" : "tag-pill"}
-              onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
-      )}
+      <TagSearchBox counts={tagCounts} onQueryTextChange={setQueryText} />
       {results !== null ? (
         searching ? (
           <p className="loading-indicator">Searching...</p>
         ) : results.length === 0 ? (
-          <p className="empty-hint">No matches for "{query.trim()}".</p>
+          <p className="empty-hint">No matches for "{serverQuery}".</p>
         ) : (
           <NoteTreeList
             nodes={searchResultNodes}
@@ -358,7 +378,7 @@ export function NoteBrowser() {
       ) : notes.length === 0 ? (
         <p className="empty-hint">No notes yet.</p>
       ) : tagFilteredNotes.length === 0 ? (
-        <p className="empty-hint">No notes tagged "{selectedTag}".</p>
+        <p className="empty-hint">No notes match {describeChips(activeChips)}.</p>
       ) : (
         <NoteTreeList
           nodes={tree}

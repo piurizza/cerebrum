@@ -191,7 +191,12 @@ export function HomePage() {
               />
               <ul className="tag-groups">
                 {groups.map((group) => (
-                  <li key={group.parent.key} className="tag-group">
+                  <li
+                    key={group.parent.key}
+                    className={
+                      group.children.length > 0 ? "tag-group has-children" : "tag-group"
+                    }
+                  >
                     {tagButton(group.parent, group.parent.tag)}
                     {group.children.length > 0 && (
                       <div className="tag-group-children">

@@ -490,16 +490,22 @@ a {
 
 .tag-group {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.3rem;
+}
+
+/* A tag with nested tags takes a row of its own, children after it, so a
+   tall group never leaves gaps in the rows around it. */
+.tag-group.has-children {
+  flex-basis: 100%;
 }
 
 .tag-group-children {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
-  padding-left: 0.9rem;
+  padding-left: 0.6rem;
   border-left: 1px solid var(--border);
 }
 
@@ -1593,7 +1599,18 @@ a {
   }
 
   .search-box {
+    min-height: 44px;
     max-height: 7.5rem;
+  }
+
+  /* 16px also keeps iOS Safari from zooming in when the field gets focus. */
+  .search-box-input,
+  .tag-index-filter {
+    font-size: 16px;
+  }
+
+  .tag-index-filter {
+    min-height: 44px;
   }
 
   .tag-home.has-selection {

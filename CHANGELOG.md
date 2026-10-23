@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0](https://github.com/piurizza/cerebrum/compare/v0.4.0...v0.5.0) (2026-10-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* ignore hidden folders and files when indexing and watching the vault ([#68](https://github.com/piurizza/cerebrum/issues/68))
+
+### Features
+
+* **auth:** sign in with an OpenID Connect provider ([#65](https://github.com/piurizza/cerebrum/issues/65)) ([ac47a0f](https://github.com/piurizza/cerebrum/commit/ac47a0fabe46aa76a66d9b7ca777bc45aac66351))
+* ignore hidden folders and files when indexing and watching the vault ([#68](https://github.com/piurizza/cerebrum/issues/68)) ([f772e2a](https://github.com/piurizza/cerebrum/commit/f772e2a5ccfc9a7131cc099b77b75b4eead8932d))
+* make the accounts database location configurable (CEREBRUM_AUTH_DB_PATH) ([#64](https://github.com/piurizza/cerebrum/issues/64)) ([fdb1ee6](https://github.com/piurizza/cerebrum/commit/fdb1ee632755e8cab4f56e1f4970ea7750f90434))
+* read-only vault mode (CEREBRUM_VAULT_READ_ONLY) ([#66](https://github.com/piurizza/cerebrum/issues/66)) ([7c29937](https://github.com/piurizza/cerebrum/commit/7c29937cdd06ae19ec66cc4d08b8cf52bc7a7e2c))
+
+
+### Bug Fixes
+
+* keep a password admin, start a second read-only instance, reject hidden note folders ([#70](https://github.com/piurizza/cerebrum/issues/70)) ([37c8c45](https://github.com/piurizza/cerebrum/commit/37c8c45814bccb14b20f4b5c0b39b96894c97f2f))
+* save the loaded note on Cmd+S pressed right after it opens ([#69](https://github.com/piurizza/cerebrum/issues/69)) ([e7b1078](https://github.com/piurizza/cerebrum/commit/e7b107880b5ec14ee878ed304bc037e27fc40749))
+
 ## [0.4.0](https://github.com/piurizza/cerebrum/compare/v0.3.0...v0.4.0) (2026-10-21)
 
 

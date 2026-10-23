@@ -27,6 +27,7 @@ from cerebrum.accounts.service import (
     User,
     has_password,
     invite_hash_is_valid,
+    other_admin_has_password,
 )
 from cerebrum.accounts.sessions import insert_session
 from cerebrum.auth_db import auth_write_lock
@@ -148,7 +149,7 @@ def _sync_admin(
     if is_member == bool(account["is_admin"]):
         return
     user_id = account["id"]
-    if not is_member and not _other_admin_has_usable_password(auth_db, user_id):
+    if not is_member and not other_admin_has_password(auth_db, user_id):
         logger.warning(
             "OIDC admin sync: account %s is no longer in the %r group, but it "
             "stays an admin because no other active admin has a usable password",
@@ -163,24 +164,6 @@ def _sync_admin(
         "OIDC admin sync: account %s %s",
         user_id,
         "promoted to admin" if is_member else "demoted from admin",
-    )
-
-
-def _other_admin_has_usable_password(auth_db: sqlite3.Connection, user_id: int) -> bool:
-    """Whether an active admin other than `user_id` has a password that
-    signs them in (KTD8). The caller holds `auth_write_lock`. Being admins,
-    password login is open to all of them (KTD11), so this comes down to
-    whether they have a password at all."""
-    rows = auth_db.execute(
-        """
-        SELECT password_hash FROM users
-        WHERE is_admin = 1 AND is_active = 1 AND id != ?
-        """,
-        (user_id,),
-    ).fetchall()
-    return any(
-        is_password_usable(row["password_hash"], is_admin=True, linked=True)
-        for row in rows
     )
 
 

@@ -6,7 +6,11 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel
 
-from cerebrum.accounts.service import ForbiddenError
+from cerebrum.accounts.service import (
+    ForbiddenError,
+    has_password,
+    other_admin_has_password,
+)
 from cerebrum.auth_db import auth_write_lock, hash_token
 
 # How long an admin-generated invite stays redeemable. A few days is
@@ -116,6 +120,21 @@ def deactivate_account(
 
     now = datetime.now(UTC).isoformat()
     with auth_write_lock, auth_db:
+        target = auth_db.execute(
+            "SELECT is_admin, is_active, password_hash FROM users WHERE id = ?",
+            (target_user_id,),
+        ).fetchone()
+        if (
+            target is not None
+            and target["is_admin"]
+            and target["is_active"]
+            and has_password(target["password_hash"])
+            and not other_admin_has_password(auth_db, target_user_id)
+        ):
+            # Raised before any write, so the rollback leaves nothing behind.
+            raise ForbiddenError(
+                "cannot deactivate the last admin who can sign in with a password"
+            )
         auth_db.execute(
             "UPDATE users SET is_active = 0 WHERE id = ?", (target_user_id,)
         )

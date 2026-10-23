@@ -52,11 +52,20 @@ OIDC_ENV_KEYS = (
 Signing = Literal["rs256", "none", "hs256_client_secret"]
 
 
+def pin_oidc_env_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every OIDC variable at its "no provider" value. Set, not deleted: a
+    variable that is merely unset would let a developer's backend/.env
+    decide, while a blank one outranks it (blank means the default)."""
+    for key in OIDC_ENV_KEYS:
+        monkeypatch.setenv(key, "")
+    monkeypatch.setenv("OIDC_ALLOW_INSECURE_ISSUER", "false")
+    monkeypatch.setenv("AUTH_PASSWORD_LOGIN", "true")
+
+
 def configure_oidc_env(monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:
     """Point the settings at the fake provider. `overrides` maps env var
     names to values (for example `OIDC_GROUPS_CLAIM="roles"`)."""
-    for key in OIDC_ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
+    pin_oidc_env_off(monkeypatch)
     env = {
         "OIDC_ISSUER": ISSUER,
         "OIDC_CLIENT_ID": CLIENT_ID,

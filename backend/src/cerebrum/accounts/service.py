@@ -58,6 +58,22 @@ def has_password(password_hash: str) -> bool:
     return password_hash != NO_PASSWORD_HASH
 
 
+def other_admin_has_password(auth_db: sqlite3.Connection, user_id: int) -> bool:
+    """Whether an active admin other than `user_id` has a password. Admins
+    can always sign in with theirs (break-glass for a provider outage), so
+    the last such admin is never demoted by the provider's admin group nor
+    deactivated. The caller holds `auth_write_lock`."""
+    row = auth_db.execute(
+        """
+        SELECT 1 FROM users
+        WHERE is_admin = 1 AND is_active = 1 AND id != ? AND password_hash != ?
+        LIMIT 1
+        """,
+        (user_id, NO_PASSWORD_HASH),
+    ).fetchone()
+    return row is not None
+
+
 class InvalidCredentialError(Exception):
     """Wrong username/password, or a deactivated account, at login. One
     class covers both causes so the API layer cannot leak which one

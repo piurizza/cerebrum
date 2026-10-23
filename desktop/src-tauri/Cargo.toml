@@ -3,7 +3,7 @@
 # (/usr/bin/cerebrum), and "desktop" would be a needlessly generic name
 # to occupy in a user's PATH.
 name = "cerebrum"
-version = "0.4.0"
+version = "0.5.0"
 description = "Native desktop client for Cerebrum -- a self-hosted second brain"
 authors = ["Cerebrum"]
 edition = "2021"

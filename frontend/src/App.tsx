@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createBrowserRouter,
   Navigate,
@@ -19,7 +19,9 @@ import { NotesProvider } from "./context/NotesContext";
 import { TagSelectionProvider } from "./context/TagSelectionContext";
 import { useZenMode, ZenModeProvider } from "./context/ZenModeContext";
 import { useFocusTrap } from "./hooks/useFocusTrap";
+import { MOBILE_QUERY, useMediaQuery } from "./hooks/useMediaQuery";
 import { GraphViewPage } from "./pages/GraphViewPage";
+import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { NoteViewPage } from "./pages/NoteViewPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -40,26 +42,10 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** Subscribes to a media query and re-renders on match changes. Local to
- * this file -- the only consumer is the mobile drawer gate below. Reads
- * `window.matchMedia` once (captured on first render) so a test can swap
- * the implementation per-case before mounting. */
-function useMediaQuery(query: string): boolean {
-  const [mql] = useState(() => window.matchMedia(query));
-  return useSyncExternalStore(
-    (onChange) => {
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    },
-    () => mql.matches,
-    () => false,
-  );
-}
-
 export function AppShell() {
   const { logout } = useAuth();
   const { isZen } = useZenMode();
-  const isMobile = useMediaQuery("(max-width: 768px)");
+  const isMobile = useMediaQuery(MOBILE_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
@@ -186,14 +172,7 @@ export function AppShell() {
           <ReadOnlyBanner />
           <IosInstallHint />
           <Routes>
-            <Route
-              path="/"
-              element={
-                <p className="empty-hint">
-                  Select a note from the sidebar, or create a new one.
-                </p>
-              }
-            />
+            <Route path="/" element={<HomePage />} />
             <Route path="/notes/*" element={<NoteViewPage />} />
             <Route path="/graph" element={<GraphViewPage />} />
             <Route path="/tasks" element={<TasksPage />} />

@@ -227,7 +227,7 @@ All endpoints under `/api`.
 | POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's links that pointed at it (markdown links always, wikilinks only where they would stop resolving to it -- see [Wikilinks](#wikilinks); a move into a hidden folder such as `.trash/` leaves both kinds as written, so they work again once the note is restored); `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
-| GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`; empty/whitespace `q` returns `[]` |
+| GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`. `#tag` keeps notes carrying that tag or one nested under it (`#work` matches `work/clientA`, not `workshop`), `-#tag` drops them, `#"two words"` quotes a tag with a space; tags ignore case and must all match. A `#` only starts a tag at the start of `q` or after a space. With tags but no words, every note carrying them is listed by path. Empty/whitespace `q` returns `[]` |
 | GET | `/api/tasks` | Every open (unchecked) markdown checkbox across the vault, joined with its note's title, ordered by note path then line; read-only |
 | GET | `/api/vault-settings` | `{ daily_note_folder, templates_folder, link_format, read_only }` -- the server's vault conventions (see `CEREBRUM_DAILY_NOTE_FOLDER` / `CEREBRUM_TEMPLATES_FOLDER` / `CEREBRUM_LINK_FORMAT` below); the web app loads it on start and on login and keeps the last copy for offline use |
 | POST | `/api/attachments?note_path=...` | Upload a pasted image (raw bytes) into the note's `<stem>.attachments/` folder |
@@ -252,7 +252,7 @@ The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated wit
 |---|---|
 | `list-notes` | Every note's metadata from the index |
 | `get-note` | One note's raw markdown + parsed metadata |
-| `search-notes` | Full-text search, same semantics as `/api/search` |
+| `search-notes` | Full-text search, same semantics as `/api/search`, `#tag` / `-#tag` included |
 | `get-graph` | The whole link graph, including unresolved links |
 | `get-backlinks` | Notes that link to a note |
 | `create-note` | Create a note; fails if one exists at the path |
@@ -528,16 +528,40 @@ history.
       only needed `GET /api/search` (`index/db.py::search_notes`) plus a
       search box in the sidebar. Debounced (250ms) as-you-type, replacing
       the folder tree with a flat, relevance-ranked result list while a
-      query is active; clearing the box restores the tree.
-- [x] filter notes by tag. **Scope decision: filtering only** — no
-      dedicated tags-browser page. Purely client-side: tags are already
-      in every `NoteMeta` returned by `GET /api/notes`, so the sidebar
-      derives the distinct tag set and renders it as clickable pills;
-      clicking one filters the folder tree to notes carrying that tag
-      (click again to clear), no new API surface needed. Independent of
-      full-text search rather than combined with it -- the tag pills are
-      hidden while a search query is active, to keep the two filters from
-      producing confusing combined semantics for a first pass.
+      query has words; clearing the box restores the tree.
+- [x] filter notes by tag, in the sidebar search box. Typing `#` (or `-#`
+      to leave a tag out) opens a list of matching tags with their note
+      counts; picking one, or finishing a known tag with a space, turns it
+      into a removable chip. The query syntax is the one `GET /api/search`
+      and MCP `search-notes` share (`index/search_query.py` and
+      `frontend/src/lib/tagQuery.ts`, both run against
+      `fixtures/tag-query.json`):
+      - `#work` matches the tags `work`, `Work` and `work/clientA`, not
+        `workshop`; several tags must all match; `-#tag` drops notes
+        carrying it (or one nested under it);
+      - tags alone filter the cached notes in the browser, keeping the
+        folder tree and working offline; once there is a word, the whole
+        query goes to the server and the result is the ranked flat list.
+        The browser never splits words itself (JavaScript's `\w` is
+        ASCII-only), so accented words reach the server unchanged;
+      - the tag still being typed only drives the suggestions; it filters
+        once finished. Once a tag is picked, suggestion counts show what
+        picking another would leave, and tags that would leave nothing
+        are not suggested.
+
+      Replaces the first pass's wall of tag pills, which grew with the
+      number of tags and pushed the filtered tree off-screen.
+- [x] browse by tag on the front page (`/`, `pages/HomePage.tsx`): every
+      tag with its note count, nested tags on a line under their parent
+      (a parent is listed even when only its children are used), and a
+      field to filter the list. Tapping tags selects them and lists the
+      matching notes, most recently updated first. The selection is the
+      sidebar search box's chips (`TagSelectionContext`), so it follows
+      the user into a note and back, but not across a reload. At phone
+      width the first pick collapses the tag list to the chosen chips and
+      a "Show all tags" toggle; wider, tags and results sit side by side.
+      Leaving a tag out (`-#`) is done in the search box only. No per-tag
+      pages or tag URLs.
 - [x] see backlinks for the current note
 - [x] traverse the link graph visually
 - [x] click a graph node to jump to that note

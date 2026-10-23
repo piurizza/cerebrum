@@ -19,8 +19,19 @@ from fastapi.testclient import TestClient
 # default for the duration of the test and restores it after.
 os.environ.setdefault("AUTH_JWT_SECRET", "x" * 32)
 os.environ.setdefault("AUTH_SETUP_TOKEN", "y" * 32)
+# That same early construction must not see a provider half-configured in
+# the shell or backend/.env either: every OIDC variable is pinned to its "no
+# provider" value (blank outranks backend/.env) before `cerebrum.main` is
+# imported. `_state_paths_inside_test_vault` re-pins them per test, and
+# `fake_provider` turns the provider on.
+# pylint: disable=wrong-import-position,ungrouped-imports
+from tests.oidc_fake import OIDC_ENV_KEYS  # noqa: E402
 
-# pylint: disable=wrong-import-position
+for _oidc_key in OIDC_ENV_KEYS:
+    os.environ[_oidc_key] = ""
+os.environ["OIDC_ALLOW_INSECURE_ISSUER"] = "false"
+os.environ["AUTH_PASSWORD_LOGIN"] = "true"
+
 from cerebrum.accounts.oidc import use_transport  # noqa: E402
 from cerebrum.auth_db import connect as connect_auth_db  # noqa: E402
 from cerebrum.index.db import connect  # noqa: E402
@@ -28,9 +39,13 @@ from cerebrum.index.indexer import PendingRenameCache  # noqa: E402
 from cerebrum.main import create_app  # noqa: E402
 from cerebrum.settings import get_settings  # noqa: E402
 from tests.mcp_test_support import issue_test_access_token  # noqa: E402
-from tests.oidc_fake import FakeProvider, configure_oidc_env  # noqa: E402
+from tests.oidc_fake import (  # noqa: E402
+    FakeProvider,
+    configure_oidc_env,
+    pin_oidc_env_off,
+)
 
-# pylint: enable=wrong-import-position
+# pylint: enable=wrong-import-position,ungrouped-imports
 
 
 @pytest.fixture(autouse=True)
@@ -39,11 +54,12 @@ def _state_paths_inside_test_vault(monkeypatch: pytest.MonkeyPatch) -> None:
     every test. A blank variable outranks backend/.env, so a developer's
     CEREBRUM_AUTH_DB_PATH (or one in the shell) can never point the suite at
     a real accounts database. Tests that need other paths set them again.
-    Read-only mode is pinned off for the same reason; `read_only_env` turns
-    it back on."""
+    Read-only mode and the OpenID Connect provider are pinned off for the
+    same reason; `read_only_env` and `fake_provider` turn them back on."""
     monkeypatch.setenv("CEREBRUM_INDEX_PATH", "")
     monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", "")
     monkeypatch.setenv("CEREBRUM_VAULT_READ_ONLY", "false")
+    pin_oidc_env_off(monkeypatch)
 
 
 @pytest.fixture

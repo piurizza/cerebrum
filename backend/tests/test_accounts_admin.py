@@ -9,6 +9,7 @@ import pytest
 
 from cerebrum.accounts.admin import create_invite, deactivate_account, list_accounts
 from cerebrum.accounts.service import (
+    NO_PASSWORD_HASH,
     ForbiddenError,
     InvalidTokenError,
     User,
@@ -215,6 +216,62 @@ def test_admin_cannot_deactivate_their_own_account(
         "SELECT is_active FROM users WHERE id = ?", (admin.id,)
     ).fetchone()
     assert row["is_active"] == 1
+
+
+def _make_password_less_admin(auth_db: sqlite3.Connection, user: User) -> None:
+    """What an admin created through the OpenID Connect provider looks
+    like: admin, no usable password."""
+    auth_db.execute(
+        "UPDATE users SET is_admin = 1, password_hash = ? WHERE id = ?",
+        (NO_PASSWORD_HASH, user.id),
+    )
+    auth_db.commit()
+
+
+def test_cannot_deactivate_the_last_admin_who_has_a_password(
+    auth_db: sqlite3.Connection,
+) -> None:
+    # A provider outage would otherwise leave no admin able to sign in.
+    owner = _bootstrap_admin(auth_db)
+    sso_admin = _register_via_invite(auth_db, owner, "sso-admin")
+    _make_password_less_admin(auth_db, sso_admin)
+
+    with pytest.raises(ForbiddenError, match="password"):
+        deactivate_account(sso_admin.id, owner.id, auth_db)
+
+    row = auth_db.execute(
+        "SELECT is_active FROM users WHERE id = ?", (owner.id,)
+    ).fetchone()
+    assert row["is_active"] == 1
+
+
+def test_can_deactivate_a_password_admin_when_another_has_one(
+    auth_db: sqlite3.Connection,
+) -> None:
+    owner = _bootstrap_admin(auth_db)
+    second = _register_via_invite(auth_db, owner, "second")
+    auth_db.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (second.id,))
+    auth_db.commit()
+
+    deactivate_account(second.id, owner.id, auth_db)
+
+    row = auth_db.execute(
+        "SELECT is_active FROM users WHERE id = ?", (owner.id,)
+    ).fetchone()
+    assert row["is_active"] == 0
+
+
+def test_can_deactivate_a_password_less_admin(auth_db: sqlite3.Connection) -> None:
+    owner = _bootstrap_admin(auth_db)
+    sso_admin = _register_via_invite(auth_db, owner, "sso-admin")
+    _make_password_less_admin(auth_db, sso_admin)
+
+    deactivate_account(owner.id, sso_admin.id, auth_db)
+
+    row = auth_db.execute(
+        "SELECT is_active FROM users WHERE id = ?", (sso_admin.id,)
+    ).fetchone()
+    assert row["is_active"] == 0
 
 
 def test_deactivate_nonexistent_account_is_a_noop(

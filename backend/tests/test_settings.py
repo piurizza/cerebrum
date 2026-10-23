@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from cerebrum.settings import Settings, get_settings
-from tests.oidc_fake import OIDC_ENV_KEYS
+from tests.oidc_fake import pin_oidc_env_off
 
 # auth_jwt_secret/auth_setup_token are required settings with no default
 # (see settings.py) -- every test below that constructs Settings() for an
@@ -144,8 +144,7 @@ def _set_oidc_env(monkeypatch: pytest.MonkeyPatch, **overrides: str) -> None:
     """Start every OIDC test from a clean slate -- none of the OIDC
     variables set -- then apply `overrides` (keys as the env var names)."""
     _set_valid_auth_env(monkeypatch)
-    for key in OIDC_ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
+    pin_oidc_env_off(monkeypatch)
     for key, value in overrides.items():
         monkeypatch.setenv(key, value)
 

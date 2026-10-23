@@ -215,6 +215,55 @@ def test_app_refuses_to_start_when_accounts_db_was_not_moved(
     assert not (tmp_path / "state" / "auth.sqlite3").exists()
 
 
+def test_refusal_explains_how_to_start_a_second_instance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The in-vault database may belong to another instance serving the same
+    # vault (a read-only second instance): the message must not only say
+    # "move it", which would empty that instance's accounts.
+    vault = tmp_path / "vault"
+    connect(_auth_db_path(vault)).close()
+    monkeypatch.setenv(
+        "CEREBRUM_AUTH_DB_PATH", str(tmp_path / "state" / "auth.sqlite3")
+    )
+
+    with (
+        pytest.raises(RuntimeError, match="another Cerebrum") as refused,
+        mcp_test_client(vault, monkeypatch),
+    ):
+        pass
+
+    assert "empty file" in str(refused.value)
+
+
+def test_read_only_second_instance_starts_with_an_empty_accounts_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The documented second instance: the main instance keeps its accounts
+    # in the vault; this one gets its own, created as an empty file first.
+    vault = tmp_path / "vault"
+    main_accounts = _auth_db_path(vault)
+    connect(main_accounts).close()
+    main_before = main_accounts.read_bytes()
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "auth.sqlite3").touch()
+    monkeypatch.setenv("CEREBRUM_VAULT_READ_ONLY", "true")
+    monkeypatch.setenv("CEREBRUM_INDEX_PATH", str(state / "index.sqlite3"))
+    monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", str(state / "auth.sqlite3"))
+
+    with mcp_test_client(vault, monkeypatch) as client:
+        token = issue_test_access_token(client)
+        assert (
+            client.get(
+                "/api/vault-settings", headers={"Authorization": f"Bearer {token}"}
+            ).json()["read_only"]
+            is True
+        )
+
+    assert main_accounts.read_bytes() == main_before
+
+
 def test_app_starts_once_the_accounts_db_was_moved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

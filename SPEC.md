@@ -583,7 +583,14 @@ history.
       access), each independently revocable, from Settings.
 - [x] (admin) generate invite tokens and deactivate other accounts from
       Settings; deactivating a user immediately revokes their sessions
-      and API tokens. Self-deactivation is rejected.
+      and API tokens. Self-deactivation is rejected, and so is deactivating
+      the last active admin who has a password (the break-glass sign-in
+      when an OpenID Connect provider is down).
+- [x] serve a vault some other tool owns without writing to it
+      (`CEREBRUM_VAULT_READ_ONLY=true`, see
+      [Storage model](#2-storage-model)): everyone can read, search and
+      graph it, and the web app hides its write controls behind a "This
+      vault is read-only" banner.
 - [x] sign in with one OpenID Connect provider (Keycloak, Authentik, Pocket
       ID, Google, ...) configured by `OIDC_*` variables. The provider only
       proves identity: Cerebrum still issues its own sessions, and API
@@ -780,7 +787,10 @@ how consistently each was cited as high-value across that research.
 - **Read-only is per instance, not per account or token.** There is no
   read-only account or API token on a writable vault yet. The workaround
   is a second instance with `CEREBRUM_VAULT_READ_ONLY=true` over the same
-  vault folder, with its own index and accounts database.
+  vault folder, with its own index and accounts database. While the main
+  instance keeps its accounts database in the vault, create the second
+  one's as an empty file first: startup otherwise reads the in-vault
+  database as one that was never moved, and refuses.
 - **The watcher still watches hidden folders.** `watchfiles` filters events
   in Python after its native watcher has seen them, so inotify watches
   (or polling) still cover `.git/objects` in a git checkout; only the

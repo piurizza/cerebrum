@@ -138,6 +138,12 @@ class Settings(BaseSettings):
                 f"{info.field_name} must be a plain vault-relative folder like "
                 f"'daily' or 'journal/daily', got {value!r}"
             )
+        # Same rule as `notes/wikilinks.py`'s `is_hidden_path`.
+        if any(segment.startswith(".") for segment in folder.split("/")):
+            raise ValueError(
+                f"{info.field_name} can't be inside a hidden folder, got "
+                f"{value!r}: notes there are never indexed or listed"
+            )
         return folder
 
     @field_validator("cerebrum_index_path", "cerebrum_auth_db_path", mode="before")

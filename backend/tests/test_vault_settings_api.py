@@ -80,6 +80,16 @@ def test_folder_with_dot_or_empty_segments_fails_startup(bad: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "hidden", [".templates", "notes/.daily", ".obsidian/templates"]
+)
+def test_folder_inside_a_hidden_folder_fails_startup(hidden: str) -> None:
+    # Hidden folders are never indexed, so notes created there would vanish
+    # from every list.
+    with pytest.raises(ValidationError, match="hidden"):
+        _folders(cerebrum_templates_folder=hidden)
+
+
+@pytest.mark.parametrize(
     ("value", "expected"),
     [("markdown", "markdown"), (" WikiLink ", "wikilink"), ("", "markdown")],
 )

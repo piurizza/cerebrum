@@ -226,6 +226,13 @@ For example, a checkout that a cron job updates every five minutes:
 
     */5 * * * * git -C /srv/team-notes pull --ff-only --quiet
 
+To give people read-only access to a vault another Cerebrum instance
+already writes to, run a second instance with its own folder for state.
+If the main instance still keeps its accounts database in the vault,
+create the second one's as an empty file first
+(`touch data/auth.sqlite3` with the default data folder); otherwise startup reads the in-vault
+database as one you forgot to move, and refuses.
+
 What changes: the web app shows "This vault is read-only" and hides
 Today, New note, Edit, Rename and Delete; the note-writing routes answer
 403; MCP lists only its read tools. A rename that arrives with a pull is

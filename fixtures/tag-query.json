@@ -1,0 +1,30 @@
+{
+  "description": "Shared tag-search cases. The backend (backend/tests/test_search_query.py) and the search box (frontend/src/lib/tagQuery.test.ts) both run every case, so the two parsers can't drift apart. `text` is what is left once the tag tokens are removed, with whitespace collapsed; tags are normalised (one leading # dropped, trimmed, lower-cased).",
+  "parse": [
+    { "name": "one tag", "query": "#work", "text": "", "include": ["work"], "exclude": [] },
+    { "name": "exclusion, case folded", "query": "-#Draft", "text": "", "include": [], "exclude": ["draft"] },
+    { "name": "quoted tag with a space", "query": "#\"two words\"", "text": "", "include": ["two words"], "exclude": [] },
+    { "name": "unterminated quote runs to the end", "query": "#\"two words", "text": "", "include": ["two words"], "exclude": [] },
+    { "name": "bare # and -# are not tags", "query": "# -#", "text": "# -#", "include": [], "exclude": [] },
+    { "name": "empty quoted tag is dropped", "query": "#\"\" bread", "text": "bread", "include": [], "exclude": [] },
+    { "name": "word and tag", "query": "bread #work", "text": "bread", "include": ["work"], "exclude": [] },
+    { "name": "accented word", "query": "caffè #work", "text": "caffè", "include": ["work"], "exclude": [] },
+    { "name": "cyrillic word, no tags", "query": "привет", "text": "привет", "include": [], "exclude": [] },
+    { "name": "nested tag keeps the slash", "query": "#a/b", "text": "", "include": ["a/b"], "exclude": [] },
+    { "name": "# inside a word is not a tag", "query": "pre#fix", "text": "pre#fix", "include": [], "exclude": [] },
+    { "name": "- inside a word is not an exclusion", "query": "a-#b", "text": "a-#b", "include": [], "exclude": [] },
+    { "name": "accented tag", "query": "#Café", "text": "", "include": ["café"], "exclude": [] },
+    { "name": "double # drops one", "query": "##work", "text": "", "include": ["work"], "exclude": [] },
+    { "name": "mixed, in any order", "query": "  -#old  bread #A   butter ", "text": "bread butter", "include": ["a"], "exclude": ["old"] }
+  ],
+  "match": [
+    { "name": "same tag", "note": "work", "query": "work", "expected": true },
+    { "name": "case ignored", "note": "Work", "query": "work", "expected": true },
+    { "name": "leading # in the note tag", "note": "#work", "query": "work", "expected": true },
+    { "name": "nested child", "note": "work/clientA", "query": "work", "expected": true },
+    { "name": "deeper child", "note": "work/a/b", "query": "work/a", "expected": true },
+    { "name": "prefix is not a match", "note": "workshop", "query": "work", "expected": false },
+    { "name": "parent does not match a child query", "note": "work", "query": "work/clientA", "expected": false },
+    { "name": "suffix is not a match", "note": "old/work", "query": "work", "expected": false }
+  ]
+}

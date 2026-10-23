@@ -114,6 +114,21 @@ def test_search_notes_with_matching_query_returns_hits(
     asyncio.run(run())
 
 
+def test_search_notes_filters_by_tag(vault: Path, db: sqlite3.Connection) -> None:
+    _write_note(vault, "a.md", "---\ntags: [work/clientA]\n---\nbody")
+    _write_note(vault, "b.md", "---\ntags: [home]\n---\nbody")
+    upsert_note(db, vault, "a.md")
+    upsert_note(db, vault, "b.md")
+    mcp = _mcp_server(db)
+
+    async def run() -> None:
+        async with Client(mcp) as client:
+            result = await client.call_tool("search-notes", {"query": "#work"})
+            assert [item.path for item in result.data] == ["a.md"]
+
+    asyncio.run(run())
+
+
 def test_search_notes_with_no_matches_returns_empty_list(
     db: sqlite3.Connection,
 ) -> None:

@@ -59,11 +59,16 @@ test("note links in the tree meet the 44px target", async ({ page }) => {
 test("tag suggestions and chip remove buttons meet the 44px target", async ({
   page,
 }) => {
-  // Needs a vault with at least one tag.
+  // Runs against a real vault, so it never seeds notes: a vault without
+  // tags has no suggestions to measure, and the test is skipped there.
   const box = page.getByRole("combobox", { name: "Search notes" });
   await box.tap();
   await box.fill("#");
   const option = page.getByRole("option").first();
+  test.skip(
+    !(await option.isVisible().catch(() => false)),
+    "the vault has no tags to suggest",
+  );
   await expect(option).toBeVisible();
   expect((await option.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
 

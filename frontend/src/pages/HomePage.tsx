@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { encodeNotePath } from "../api/client";
+import { TagChip } from "../components/TagChip";
 import { useNotes } from "../context/NotesContext";
 import { useTagSelection } from "../context/TagSelectionContext";
 import { MOBILE_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
@@ -8,6 +9,7 @@ import { formatRelativeDate } from "../lib/formatDate";
 import { splitNotePath } from "../lib/noteTree";
 import {
   collectTagCounts,
+  describeChips,
   normalizeTag,
   noteMatchesTags,
   type TagCount,
@@ -136,26 +138,11 @@ export function HomePage() {
           {chips.length > 0 && (
             <div className="tag-selected">
               {chips.map((chip) => (
-                <span
+                <TagChip
                   key={normalizeTag(chip.tag)}
-                  className={chip.excluded ? "tag-chip is-excluded" : "tag-chip"}
-                >
-                  <span className="tag-chip-label">
-                    {chip.excluded ? "−" : "#"}
-                    {chip.tag}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={
-                      chip.excluded
-                        ? `Remove excluded tag ${chip.tag}`
-                        : `Remove tag ${chip.tag}`
-                    }
-                    onClick={() => removeChip(chip.tag)}
-                  >
-                    ×
-                  </button>
-                </span>
+                  chip={chip}
+                  onRemove={() => removeChip(chip.tag)}
+                />
               ))}
               <button type="button" className="btn btn-sm" onClick={clearChips}>
                 Clear
@@ -201,10 +188,9 @@ export function HomePage() {
                     {group.children.length > 0 && (
                       <div className="tag-group-children">
                         {group.children.map((child) =>
-                          tagButton(
-                            child,
-                            child.tag.slice(group.parent.key.length + 1),
-                          ),
+                          // By segment, not by length: lower-casing can
+                          // change a string's length.
+                          tagButton(child, child.tag.split("/").slice(1).join("/")),
                         )}
                       </div>
                     )}
@@ -220,13 +206,7 @@ export function HomePage() {
             {chips.length > 0 && (
               <section className="tag-results" aria-label="Matching notes">
                 {results.length === 0 ? (
-                  <p className="empty-hint">
-                    No notes match{" "}
-                    {chips
-                      .map((chip) => `${chip.excluded ? "-" : ""}#${chip.tag}`)
-                      .join(" ")}
-                    .
-                  </p>
+                  <p className="empty-hint">No notes match {describeChips(chips)}.</p>
                 ) : (
                   <ul className="tag-result-list">
                     {results.map((note) => {

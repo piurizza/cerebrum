@@ -204,6 +204,7 @@ describe("tagFragmentAt", () => {
       end: 9,
       fragment: "wo",
       excluded: false,
+      quoted: false,
     });
   });
 
@@ -213,6 +214,7 @@ describe("tagFragmentAt", () => {
       end: 4,
       fragment: "ar",
       excluded: true,
+      quoted: false,
     });
   });
 
@@ -222,11 +224,15 @@ describe("tagFragmentAt", () => {
       end: 1,
       fragment: "",
       excluded: false,
+      quoted: false,
     });
   });
 
   it("finds a quoted fragment with a space", () => {
-    expect(tagFragmentAt('#"two wo', 8)?.fragment).toBe("two wo");
+    expect(tagFragmentAt('#"two wo', 8)).toMatchObject({
+      fragment: "two wo",
+      quoted: true,
+    });
   });
 
   it("finds nothing outside a tag", () => {

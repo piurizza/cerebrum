@@ -677,6 +677,31 @@ describe("NoteBrowser tag search", () => {
     expect(visiblePaths()).toHaveLength(4);
   });
 
+  it("does not apply a half-typed tag when the box loses focus", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#wo");
+    // Blur by clicking elsewhere (Tab would pick the active suggestion).
+    await user.click(document.body);
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(visiblePaths()).toHaveLength(4);
+  });
+
+  it("keeps a space inside a quoted tag instead of making a chip", async () => {
+    setNotesState([
+      tagged("a.md", "work"),
+      tagged("b.md", "work log"),
+      tagged("c.md", "home"),
+    ]);
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), '#"work log" ');
+
+    expect(screen.queryByRole("button", { name: "Remove tag work" })).toBeNull();
+    expect(visiblePaths()).toEqual(["b.md"]);
+  });
+
   it("filters on an unknown typed tag, down to nothing", async () => {
     const user = userEvent.setup();
     renderBrowser();

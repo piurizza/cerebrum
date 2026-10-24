@@ -14,6 +14,7 @@ import {
   type TagCount,
   tagFragmentAt,
 } from "../../lib/tagQuery";
+import { TagChip } from "../TagChip";
 
 interface TagSearchBoxProps {
   /** Every tag in the vault with its count (`collectTagCounts`). */
@@ -47,9 +48,14 @@ export function TagSearchBox({ counts, onQueryTextChange }: TagSearchBoxProps) {
   const pendingCaret = useRef<number | null>(null);
   const listId = useId();
 
-  const fragment = focused ? tagFragmentAt(text, caret) : null;
-  const suggestions = fragment ? suggestTags(counts, fragment.fragment, chips) : [];
-  const listVisible = fragment !== null && !dismissed && counts.length > 0;
+  // The tag at the caret never filters, focused or not: applying it on
+  // blur would reflow the tree under a click on one of its notes. It
+  // starts filtering once finished with a space, picked, or left behind
+  // by moving the caret.
+  const fragment = tagFragmentAt(text, caret);
+  const suggestions =
+    focused && fragment ? suggestTags(counts, fragment.fragment, chips) : [];
+  const listVisible = focused && fragment !== null && !dismissed && counts.length > 0;
   const expanded = listVisible && suggestions.length > 0;
   const active = Math.min(activeIndex, suggestions.length - 1);
   const queryText = fragment ? joinAround(text, fragment.start, fragment.end) : text;
@@ -87,8 +93,11 @@ export function TagSearchBox({ counts, onQueryTextChange }: TagSearchBoxProps) {
     // turns it into a chip; an unknown one stays text (and still filters).
     if (at > 0 && /\s/.test(value[at - 1])) {
       const typed = tagFragmentAt(value, at - 1);
+      // Inside `#"two words` the space belongs to the tag.
       const known =
-        typed?.fragment &&
+        typed &&
+        !typed.quoted &&
+        typed.fragment &&
         counts.find((entry) => entry.key === normalizeTag(typed.fragment));
       if (typed && known) {
         addChip(known.tag, typed.excluded);
@@ -138,29 +147,14 @@ export function TagSearchBox({ counts, onQueryTextChange }: TagSearchBoxProps) {
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: see above. */}
       <div className="search-box" onClick={() => inputRef.current?.focus()}>
         {chips.map((chip) => (
-          <span
+          <TagChip
             key={normalizeTag(chip.tag)}
-            className={chip.excluded ? "tag-chip is-excluded" : "tag-chip"}
-          >
-            <span className="tag-chip-label">
-              {chip.excluded ? "−" : "#"}
-              {chip.tag}
-            </span>
-            <button
-              type="button"
-              aria-label={
-                chip.excluded
-                  ? `Remove excluded tag ${chip.tag}`
-                  : `Remove tag ${chip.tag}`
-              }
-              onClick={() => {
-                removeChip(chip.tag);
-                inputRef.current?.focus();
-              }}
-            >
-              ×
-            </button>
-          </span>
+            chip={chip}
+            onRemove={() => {
+              removeChip(chip.tag);
+              inputRef.current?.focus();
+            }}
+          />
         ))}
         <input
           ref={inputRef}

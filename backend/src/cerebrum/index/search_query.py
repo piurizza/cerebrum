@@ -12,18 +12,21 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-# A tag starts the query or follows whitespace, so `pre#fix` stays a word.
-# An unterminated quote runs to the end of the query.
-_TAG_TOKEN = re.compile(r'(?<!\S)(-?)#(?:"([^"]*)"?|([^\s"]+))')
+# A tag starts the query or follows whitespace, so `pre#fix` stays a word,
+# and needs something besides digits, so `issue #42` stays words (as in
+# Obsidian). An unterminated quote runs to the end of the query.
+_TAG_TOKEN = re.compile(r'(?<!\S)(-?)#(?:"([^"]*)"?|([^\s"]*[^\s"\d][^\s"]*))')
 
 
 def normalize_tag(tag: str) -> str:
-    """One leading `#` dropped, trimmed, case-folded -- the form two tags
-    are compared in, so `#Work` in a note's frontmatter matches `#work`."""
+    """One leading `#` and any outer `/` dropped, trimmed, lower-cased --
+    the form two tags are compared in, so `#Work` in a note's frontmatter
+    matches `#work`. `lower`, not `casefold`, to agree with the search
+    box's `toLowerCase` (`casefold` turns `Straße` into `strasse`)."""
     tag = tag.strip()
     if tag.startswith("#"):
         tag = tag[1:].strip()
-    return tag.casefold()
+    return tag.strip("/").lower()
 
 
 def tags_match(note_tag: str, query_tag: str) -> bool:

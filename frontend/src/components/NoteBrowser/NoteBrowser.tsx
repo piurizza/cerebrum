@@ -17,11 +17,11 @@ import { stripTemplateIdentityFields } from "../../lib/noteContent";
 import { buildNoteTree, splitNotePath } from "../../lib/noteTree";
 import {
   collectTagCounts,
+  describeChips,
   hasWords,
   noteMatchesTags,
   parseQueryText,
   serializeQuery,
-  type TagChip,
 } from "../../lib/tagQuery";
 import type { TemplateOption } from "../../lib/templates";
 import { hasRelevantTemplate, listTemplateOptions } from "../../lib/templates";
@@ -32,10 +32,6 @@ import { NoteTreeList } from "./NoteTreeList";
 import { TagSearchBox } from "./TagSearchBox";
 
 const SEARCH_DEBOUNCE_MS = 250;
-
-function describeChips(chips: readonly TagChip[]): string {
-  return chips.map((chip) => `${chip.excluded ? "-" : ""}#${chip.tag}`).join(" ");
-}
 
 export function NoteBrowser() {
   const { notes, error, loading, refreshNotes } = useNotes();

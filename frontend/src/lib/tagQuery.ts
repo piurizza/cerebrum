@@ -39,11 +39,14 @@ export interface TagFragment {
   end: number;
   fragment: string;
   excluded: boolean;
+  /** Typed as `#"...`: a space continues the tag rather than ending it. */
+  quoted: boolean;
 }
 
-// A tag starts the text or follows whitespace, so `pre#fix` stays a word.
-// An unterminated quote runs to the end of the text.
-const TAG_TOKEN = /(?<!\S)(-?)#(?:"([^"]*)"?|([^\s"]+))/gu;
+// A tag starts the text or follows whitespace, so `pre#fix` stays a word,
+// and needs something besides digits, so `issue #42` stays words (as in
+// Obsidian). An unterminated quote runs to the end of the text.
+const TAG_TOKEN = /(?<!\S)(-?)#(?:"([^"]*)"?|([^\s"]*[^\s"\d][^\s"]*))/gu;
 // The tag being typed: a token reaching the caret, quoted or not.
 const FRAGMENT_AT_END = /(?<!\S)(-?)#(?:"([^"]*)|([^\s"]*))$/u;
 const WORD_CHARACTER = /[\p{L}\p{N}_]/u;
@@ -51,11 +54,14 @@ const SUGGESTION_LIMIT = 8;
 
 function displayTag(tag: string): string {
   const trimmed = tag.trim();
-  return trimmed.startsWith("#") ? trimmed.slice(1).trim() : trimmed;
+  const bare = trimmed.startsWith("#") ? trimmed.slice(1).trim() : trimmed;
+  return bare.replace(/^\/+|\/+$/g, "");
 }
 
-/** One leading `#` dropped, trimmed, lower-cased -- the form two tags are
- * compared in, so `#Work` in a note's frontmatter matches `#work`. */
+/** One leading `#` and any outer `/` dropped, trimmed, lower-cased -- the
+ * form two tags are compared in, so `#Work` in a note's frontmatter matches
+ * `#work`. `toLowerCase`, like the server's `str.lower`: `casefold` would
+ * turn `Straße` into `strasse` there but not here. */
 export function normalizeTag(tag: string): string {
   return displayTag(tag).toLowerCase();
 }
@@ -171,6 +177,11 @@ export function suggestTags(
   return [...prefix, ...contains].slice(0, SUGGESTION_LIMIT);
 }
 
+/** How a selection reads in an empty-result hint: `#work -#archive`. */
+export function describeChips(chips: readonly TagChip[]): string {
+  return chips.map((chip) => `${chip.excluded ? "-" : ""}#${chip.tag}`).join(" ");
+}
+
 /** The query sent to the server: the chips as `#tag` / `-#tag`, then the
  * typed text unchanged. */
 export function serializeQuery(text: string, chips: readonly TagChip[]): string {
@@ -193,5 +204,6 @@ export function tagFragmentAt(text: string, caret: number): TagFragment | null {
     end: caret,
     fragment: match[2] ?? match[3] ?? "",
     excluded: match[1] === "-",
+    quoted: match[2] !== undefined,
   };
 }

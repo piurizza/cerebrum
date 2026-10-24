@@ -15,6 +15,11 @@
     { "name": "- inside a word is not an exclusion", "query": "a-#b", "text": "a-#b", "include": [], "exclude": [] },
     { "name": "accented tag", "query": "#Café", "text": "", "include": ["café"], "exclude": [] },
     { "name": "double # drops one", "query": "##work", "text": "", "include": ["work"], "exclude": [] },
+    { "name": "digits only stay words", "query": "issue #42 -#7", "text": "issue #42 -#7", "include": [], "exclude": [] },
+    { "name": "digits with a letter are a tag", "query": "#2024a", "text": "", "include": ["2024a"], "exclude": [] },
+    { "name": "quoted digits are a tag", "query": "#\"42\"", "text": "", "include": ["42"], "exclude": [] },
+    { "name": "sharp s is lower-cased, not folded", "query": "#Straße", "text": "", "include": ["straße"], "exclude": [] },
+    { "name": "outer slashes dropped", "query": "#/work/", "text": "", "include": ["work"], "exclude": [] },
     { "name": "mixed, in any order", "query": "  -#old  bread #A   butter ", "text": "bread butter", "include": ["a"], "exclude": ["old"] }
   ],
   "match": [
@@ -25,6 +30,8 @@
     { "name": "deeper child", "note": "work/a/b", "query": "work/a", "expected": true },
     { "name": "prefix is not a match", "note": "workshop", "query": "work", "expected": false },
     { "name": "parent does not match a child query", "note": "work", "query": "work/clientA", "expected": false },
+    { "name": "sharp s", "note": "Straße", "query": "straße", "expected": true },
+    { "name": "outer slashes in the note tag", "note": "/work/", "query": "work", "expected": true },
     { "name": "suffix is not a match", "note": "old/work", "query": "work", "expected": false }
   ]
 }

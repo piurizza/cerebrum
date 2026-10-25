@@ -3,7 +3,10 @@
         format format-backend format-frontend format-desktop \
         type-check test test-backend test-frontend test-desktop \
         check clean up down logs \
-        generate-api-types check-api-types build-desktop audit-deps
+        generate-api-types check-api-types build-desktop audit-deps \
+        lint-website format-website test-website \
+        docs-serve docs-build docs-check docs-check-runtime \
+        generate-docs-api check-docs-api docs-screenshots
 
 UV ?= uv
 NPM ?= npm
@@ -23,7 +26,7 @@ install-desktop:
 	cd desktop && $(NPM) install
 	cp -n desktop/.env.example desktop/.env
 
-lint: lint-backend lint-frontend lint-desktop
+lint: lint-backend lint-frontend lint-desktop lint-website
 
 lint-backend:
 	cd backend && $(UV) run ruff check src tests && $(UV) run pylint src tests
@@ -34,7 +37,10 @@ lint-frontend:
 lint-desktop:
 	cd desktop && $(NPM) run check
 
-format: format-backend format-frontend format-desktop
+lint-website:
+	cd website && $(UV) run ruff check scripts tests && $(UV) run ruff format --check scripts tests
+
+format: format-backend format-frontend format-desktop format-website
 
 format-backend:
 	cd backend && $(UV) run ruff format src tests && $(UV) run ruff check --fix src tests
@@ -45,6 +51,9 @@ format-frontend:
 format-desktop:
 	cd desktop && $(NPM) run format
 
+format-website:
+	cd website && $(UV) run ruff format scripts tests && $(UV) run ruff check --fix scripts tests
+
 # Not split into -backend/-frontend/-desktop variants, unlike the other
 # umbrella targets above -- this predates the desktop app and there's no
 # need to retrofit the split just to add one more `cd && run` line.
@@ -53,7 +62,7 @@ type-check:
 	cd frontend && $(NPM) run type-check
 	cd desktop && $(NPM) run type-check
 
-test: test-backend test-frontend test-desktop
+test: test-backend test-frontend test-desktop test-website
 
 test-backend:
 	cd backend && $(UV) run pytest
@@ -65,7 +74,31 @@ test-frontend:
 test-desktop:
 	cd desktop && $(NPM) run test:run
 
+test-website:
+	cd website && $(UV) run pytest
+
 check: lint type-check test
+
+# The documentation site (website/, Zensical). Its URL lives only in
+# website/zensical.toml; the checks read it from there.
+
+docs-serve:
+	cd website && $(UV) run zensical serve
+
+docs-build:
+	cd website && $(UV) sync --locked && $(UV) run zensical build --clean
+
+# Static checks on the built site: nothing loads from another host (R19),
+# and every local link, image and nav entry resolves.
+docs-check: docs-build
+	cd website && $(UV) run python scripts/check_no_third_party.py site
+	cd website && $(UV) run python scripts/check_local_links.py site
+
+# Runtime check: loads every page in Chromium and fails on any request to
+# another origin. Needs the frontend's Playwright (npm ci; npx playwright
+# install chromium in frontend/) and Node 22, so it is local, not CI.
+docs-check-runtime: docs-build
+	cd website && node scripts/check_runtime_requests.mjs site "$$($(UV) run python scripts/site_config.py prefix)"
 
 # Not part of `check` -- a Tauri build needs platform deps and produces real
 # installers, not just a compile check. Linux builds the .deb and .rpm
@@ -93,6 +126,29 @@ generate-api-types:
 check-api-types: generate-api-types
 	git diff --exit-code -- frontend/src/api/generated/schema.ts || \
 		(echo "Generated API types are out of date -- run 'make generate-api-types' and commit the result." && exit 1)
+
+# Captures the documentation's screenshots from a throwaway stack on a
+# generated demo vault (website/scripts/demo_stack.sh), then removes it.
+# Needs Docker and Node 22; installs the frontend's Playwright and Chromium.
+# Run it after a UI change and commit the images.
+docs-screenshots:
+	cd frontend && $(NPM) ci && npx playwright install chromium
+	@work=$$(mktemp -d) && \
+		trap 'website/scripts/demo_stack.sh down "$$work"' EXIT && \
+		website/scripts/demo_stack.sh up "$$work" && \
+		node website/scripts/screenshots.mjs "$$work/credentials.json" website/docs/assets/screenshots
+
+# Regenerates the REST API reference page from the backend's current
+# OpenAPI schema (the same gitignored bridge file generate-api-types uses).
+generate-docs-api:
+	cd backend && $(UV) run cerebrum-export-openapi-schema --output ../openapi.json
+	cd website && $(UV) run python scripts/openapi_to_markdown.py ../openapi.json docs/reference/rest-api.md
+
+# Fails if the committed REST API page doesn't match the backend -- run in CI
+# beside check-api-types.
+check-docs-api: generate-docs-api
+	git diff --exit-code -- website/docs/reference/rest-api.md || \
+		(echo "The REST API docs page is out of date -- run 'make generate-docs-api' and commit the result." && exit 1)
 
 # Checks every committed lockfile against the OSV vulnerability database
 # (git-ignored folders such as node_modules are skipped). Advisories that

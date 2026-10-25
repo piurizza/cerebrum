@@ -1,0 +1,90 @@
+# Cerebrum's documentation site. Build with `make docs-build` from the repo
+# root; pages live in docs/, the built site in site/ (gitignored).
+#
+# Privacy (R19): nothing here may make a visitor's browser contact another
+# host. That rules out Google Fonts (font = false), a `repo_url` (the theme
+# would fetch star and fork counts from GitHub's API) and Mermaid (loaded
+# from a CDN). `make docs-check` and `make docs-check-runtime` enforce it.
+
+[project]
+site_name = "Cerebrum"
+site_url = "https://piurizza.github.io/cerebrum/"
+site_description = "Self-hosted second brain: markdown notes with a traversable link graph."
+copyright = """
+Cerebrum and this documentation are <a href="https://github.com/piurizza/cerebrum/blob/main/LICENSE">MIT licensed</a>.
+<a href="https://github.com/piurizza/cerebrum">Source on GitHub</a>.
+Product names are trademarks of their respective owners; Cerebrum is not affiliated with them.
+Hosted on GitHub Pages, which sets no cookies here; see the
+<a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub privacy statement</a>.
+"""
+strict = true
+
+nav = [
+  { "Home" = "index.md" },
+  { "Quick start" = "quick-start.md" },
+  { "Install" = ["install/index.md"] },
+  { "Features" = ["features/index.md"] },
+  { "Running Cerebrum" = ["running/index.md"] },
+  { "Agents (MCP)" = ["agents/index.md"] },
+  { "Import" = ["import/index.md"] },
+  { "Help" = ["help/index.md"] },
+  { "Upgrade notes" = ["upgrade/index.md"] },
+  { "Reference" = [
+    "reference/index.md",
+    "reference/configuration.md",
+    "reference/rest-api.md",
+  ] },
+  { "Development" = ["development/index.md"] },
+]
+
+[project.validation]
+invalid_links = true
+invalid_link_anchors = true
+
+[project.theme]
+language = "en"
+font = false
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.tabs",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.inlinehilite = {}
+pymdownx.keys = {}
+pymdownx.superfences = {}
+pymdownx.tabbed.alternate_style = true
+pymdownx.tasklist.custom_checkbox = true

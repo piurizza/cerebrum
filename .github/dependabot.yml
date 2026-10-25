@@ -18,6 +18,18 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
 
+  - package-ecosystem: uv
+    directory: /website
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      website-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
   - package-ecosystem: npm
     directory: /frontend
     schedule:

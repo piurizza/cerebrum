@@ -2,9 +2,11 @@
 # root; pages live in docs/, the built site in site/ (gitignored).
 #
 # Privacy (R19): nothing here may make a visitor's browser contact another
-# host. That rules out Google Fonts (font = false), a `repo_url` (the theme
-# would fetch star and fork counts from GitHub's API) and Mermaid (loaded
-# from a CDN). `make docs-check` and `make docs-check-runtime` enforce it.
+# host. That rules out Google Fonts (font = false) and a `repo_url` (the
+# theme would fetch star and fork counts from GitHub's API). Mermaid is
+# served from the site itself: the theme fetches it from a CDN only when no
+# `mermaid` is loaded yet, and `make docs-assets` copies a pinned one in.
+# `make docs-check` and `make docs-check-runtime` enforce all of it.
 
 [project]
 site_name = "Cerebrum"
@@ -18,23 +20,79 @@ Hosted on GitHub Pages, which sets no cookies here; see the
 <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub privacy statement</a>.
 """
 strict = true
+extra_javascript = ["assets/javascripts/vendor/mermaid.min.js"]
 
 nav = [
   { "Home" = "index.md" },
   { "Quick start" = "quick-start.md" },
-  { "Install" = ["install/index.md"] },
-  { "Features" = ["features/index.md"] },
-  { "Running Cerebrum" = ["running/index.md"] },
-  { "Agents (MCP)" = ["agents/index.md"] },
-  { "Import" = ["import/index.md"] },
-  { "Help" = ["help/index.md"] },
-  { "Upgrade notes" = ["upgrade/index.md"] },
+  { "Install" = [
+    "install/index.md",
+    "install/docker.md",
+    "install/by-hand.md",
+    "install/phone.md",
+    "install/desktop.md",
+    "install/upgrade.md",
+  ] },
+  { "Features" = [
+    "features/index.md",
+    "features/notes-and-templates.md",
+    "features/daily-notes.md",
+    "features/links.md",
+    "features/tags-and-search.md",
+    "features/tag-front-page.md",
+    "features/graph.md",
+    "features/tasks.md",
+    "features/offline.md",
+    "features/read-only.md",
+  ] },
+  { "Running Cerebrum" = [
+    "running/index.md",
+    "running/accounts.md",
+    "running/https.md",
+    "running/backups.md",
+    "running/identity-provider.md",
+    "running/read-only-and-second-instance.md",
+    "running/security.md",
+  ] },
+  { "Agents (MCP)" = [
+    "agents/index.md",
+    "agents/mcp-setup.md",
+    "agents/mcp-tools.md",
+  ] },
+  { "Import" = [
+    "import/index.md",
+    "import/obsidian.md",
+    "import/notion.md",
+    "import/logseq.md",
+    "import/bear.md",
+    "import/joplin.md",
+    "import/evernote.md",
+    "import/apple-notes.md",
+  ] },
+  { "Help" = [
+    "help/index.md",
+    "help/faq.md",
+    "help/troubleshooting.md",
+  ] },
+  { "Upgrade notes" = [
+    "upgrade/index.md",
+    "upgrade/0.5.0.md",
+    "upgrade/0.4.0.md",
+    "upgrade/0.3.0.md",
+    "upgrade/0.2.0.md",
+    "upgrade/0.1.0.md",
+  ] },
   { "Reference" = [
     "reference/index.md",
     "reference/configuration.md",
     "reference/rest-api.md",
   ] },
-  { "Development" = ["development/index.md"] },
+  { "Development" = [
+    "development/index.md",
+    "development/architecture.md",
+    "development/testing.md",
+    "development/releases.md",
+  ] },
 ]
 
 [project.validation]
@@ -85,6 +143,8 @@ pymdownx.details = {}
 pymdownx.highlight.anchor_linenums = true
 pymdownx.inlinehilite = {}
 pymdownx.keys = {}
-pymdownx.superfences = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
 pymdownx.tabbed.alternate_style = true
 pymdownx.tasklist.custom_checkbox = true

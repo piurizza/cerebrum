@@ -14,10 +14,12 @@
 #     and refuses on any sign of the above going wrong.
 #
 # Usage:
-#   demo_stack.sh up   <work-folder>   # folder must not exist or be empty
+#   demo_stack.sh up   <work-folder> [read-only]   # folder must not exist or be empty
 #   demo_stack.sh down <work-folder>
 #
-# `up` leaves <work-folder>/credentials.json for screenshots.mjs.
+# `up` leaves <work-folder>/credentials.json for screenshots.mjs. With
+# `read-only`, the stack serves the demo vault in read-only mode, keeping its
+# index and accounts database in <work-folder>/data.
 set -euo pipefail
 
 PROJECT=cerebrum-docs-demo
@@ -27,24 +29,28 @@ SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPTS/../.." && pwd)"
 
 usage() {
-  echo "usage: $0 up|down <work-folder>" >&2
+  echo "usage: $0 up <work-folder> [read-only] | down <work-folder>" >&2
   exit 2
 }
-[ $# -eq 2 ] || usage
+[ $# -eq 2 ] || { [ $# -eq 3 ] && [ "$1" = up ] && [ "$3" = read-only ]; } || usage
 command="$1"
 work="$(realpath -m "$2")"
+mode="${3:-}"
 
 compose() {
   # Relative paths in the Compose files (the build contexts) resolve
   # against the repo; variables come only from the generated env file.
+  local files=(-f "$REPO/docker-compose.yml" -f "$REPO/docker-compose.build.yml")
+  if [ -f "$work/read-only.yml" ]; then
+    files+=(-f "$work/read-only.yml")
+  fi
   env -i PATH="$PATH" HOME="$HOME" \
     ${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} \
     ${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} \
     ${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} \
     ${XDG_RUNTIME_DIR:+XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"} \
     docker compose -p "$PROJECT" --project-directory "$REPO" \
-    --env-file "$work/demo.env" \
-    -f "$REPO/docker-compose.yml" -f "$REPO/docker-compose.build.yml" "$@"
+    --env-file "$work/demo.env" "${files[@]}" "$@"
 }
 
 up() {
@@ -74,6 +80,23 @@ AUTH_JWT_SECRET=$(openssl rand -hex 32)
 AUTH_SETUP_TOKEN=$setup_token
 EOF
   )
+  if [ "$mode" = read-only ]; then
+    # Read-only mode needs the index and accounts database outside the
+    # vault; docker-compose.yml ships the mount for them commented out.
+    mkdir -p "$work/data"
+    cat >>"$work/demo.env" <<EOF
+CEREBRUM_VAULT_READ_ONLY=true
+CEREBRUM_DATA_HOST_PATH=$work/data
+CEREBRUM_INDEX_PATH=/data/cerebrum/index.sqlite3
+CEREBRUM_AUTH_DB_PATH=/data/cerebrum/auth.sqlite3
+EOF
+    cat >"$work/read-only.yml" <<'EOF'
+services:
+  backend:
+    volumes:
+      - ${CEREBRUM_DATA_HOST_PATH}:/data/cerebrum
+EOF
+  fi
 
   compose config --format json |
     (cd "$REPO/website" && uv run python scripts/check_demo_compose.py "$work" "$PORT" "$HTTPS_PORT")

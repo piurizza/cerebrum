@@ -1,0 +1,8 @@
+{
+  "name": "cerebrum-website",
+  "private": true,
+  "description": "Browser libraries the documentation site serves itself, so no page loads them from a CDN.",
+  "dependencies": {
+    "mermaid": "12.2.0"
+  }
+}

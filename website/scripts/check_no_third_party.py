@@ -12,6 +12,13 @@ CDN or GitHub's API if switched on. Those URLs are listed in
 a Zensical upgrade that adds a new outbound request is caught here.
 `check_runtime_requests.mjs` then proves the listed loaders stay dormant.
 
+Libraries the site serves itself (Mermaid) live under
+`assets/javascripts/vendor/`. They come from npm, pinned in
+`website/package-lock.json` and covered by the dependency scans; their
+minified code is full of URLs in licence comments and error messages, so
+their text is not scanned for URLs here. The runtime check covers what they
+actually load.
+
 Usage: check_no_third_party.py <site-dir> [<site-url>]
 (the site URL defaults to `site_url` in zensical.toml)
 """
@@ -28,6 +35,7 @@ from urllib.parse import urlsplit
 from site_config import site_url
 
 _ALLOWLIST = Path(__file__).with_name("allowed_bundle_urls.txt")
+VENDOR = "assets/javascripts/vendor/"
 _CSS_URL = re.compile(r"""url\(\s*['"]?([^'")\s]+)""")
 _CSS_IMPORT = re.compile(r"""@import\s+['"]([^'"]+)""")
 _JS_URL = re.compile(r"""https?://[A-Za-z0-9.-]+[A-Za-z0-9/._@%~+-]*""")
@@ -131,6 +139,8 @@ def find_external_requests(
         elif path.suffix == ".css":
             urls = _css_urls(text)
         elif path.suffix in {".js", ".mjs"}:
+            if name.startswith(VENDOR):
+                continue
             urls = [
                 url
                 for url in _JS_URL.findall(text)

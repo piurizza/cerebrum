@@ -75,6 +75,24 @@ def test_flags_unknown_urls_in_javascript_bundles(tmp_path: Path) -> None:
     ]
 
 
+def test_skips_url_text_only_in_vendored_libraries(tmp_path: Path) -> None:
+    # A licence link in a library the site serves itself is not a request;
+    # the same text in the theme's bundle still is.
+    text = 'var x="https://example.org/license";'
+    files = {
+        "assets/javascripts/vendor/mermaid.min.js": text,
+        "assets/javascripts/bundle.js": text,
+    }
+    assert _found(tmp_path, files) == ["https://example.org/license"]
+
+
+def test_still_flags_html_loading_from_another_host(tmp_path: Path) -> None:
+    page = '<script src="https://cdn.example.com/assets/javascripts/vendor/m.js">'
+    assert _found(tmp_path, {"index.html": page}) == [
+        "https://cdn.example.com/assets/javascripts/vendor/m.js"
+    ]
+
+
 def test_allows_reviewed_dormant_loader_urls(tmp_path: Path) -> None:
     js = 'load("https://unpkg.com/mermaid@11/dist/mermaid.min.js")'
     allowed = ("https://unpkg.com/mermaid",)

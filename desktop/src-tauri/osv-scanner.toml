@@ -1,0 +1,44 @@
+# Advisories OSV-Scanner may skip for this Cargo.lock. Each entry is a crate
+# Tauri itself pulls in that this project cannot upgrade on its own; the
+# expiry date forces a fresh look at whether a Tauri release has moved on.
+
+# glib 0.18 (GTK3 bindings on Linux, via tauri -> muda -> gtk). The unsound
+# code is VariantStrIter, which neither Tauri nor this app calls.
+# Listed under its GHSA id, which also covers the RUSTSEC-2024-0429 alias.
+[[IgnoredVulns]]
+id = "GHSA-wrw7-89jp-8q8g"
+ignoreUntil = 2027-04-30T00:00:00Z
+reason = "glib 0.18 comes from Tauri's GTK3 stack; VariantStrIter is unused"
+
+# Unmaintained-crate notices (no vulnerability, no fixed version): a build-time
+# proc macro under glib, and the unic-* crates under urlpattern
+# (tauri-plugin-http, tauri-utils).
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+ignoreUntil = 2027-04-30T00:00:00Z
+reason = "proc-macro-error is unmaintained; build-time only, via glib-macros"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0075"
+ignoreUntil = 2027-04-30T00:00:00Z
+reason = "unic-char-range is unmaintained; via urlpattern in Tauri"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0080"
+ignoreUntil = 2027-04-30T00:00:00Z
+reason = "unic-common is unmaintained; via urlpattern in Tauri"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0081"
+ignoreUntil = 2027-04-30T00:00:00Z
+reason = "unic-char-property is unmaintained; via urlpattern in Tauri"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0098"
+ignoreUntil = 2027-04-30T00:00:00Z
+reason = "unic-ucd-version is unmaintained; via urlpattern in Tauri"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0100"
+ignoreUntil = 2027-04-30T00:00:00Z
+reason = "unic-ucd-ident is unmaintained; via urlpattern in Tauri"

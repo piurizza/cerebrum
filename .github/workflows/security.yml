@@ -1,0 +1,36 @@
+name: Security
+
+# Checks every lockfile in the repository against the OSV vulnerability
+# database (which includes GitHub's advisories). It runs on pull requests, on
+# main, and weekly, because new advisories land against code that has not
+# changed. Advisories that cannot be fixed here are listed, with a reason and
+# an expiry date, in an osv-scanner.toml next to the lockfile.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  dependencies:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan lockfiles (OSV-Scanner)
+        run: make audit-deps

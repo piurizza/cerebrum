@@ -1,0 +1,79 @@
+# Security updates only. When GitHub publishes an advisory for a dependency and
+# a fixed version exists, Dependabot opens a pull request that bumps it (the
+# repository's "Dependabot security updates" setting must be on). Routine
+# version bumps are off: open-pull-requests-limit 0 applies to version updates
+# only. The Security workflow's OSV-Scanner job is the other half: it reads the
+# lockfiles directly, on every pull request and weekly.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      backend-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /website
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      website-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      frontend-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      desktop-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /desktop/src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      desktop-rust-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]

@@ -3,7 +3,7 @@
         format format-backend format-frontend format-desktop \
         type-check test test-backend test-frontend test-desktop \
         check clean up down logs \
-        generate-api-types check-api-types build-desktop \
+        generate-api-types check-api-types build-desktop audit-deps \
         lint-website format-website test-website \
         docs-serve docs-build docs-check docs-check-runtime \
         generate-docs-api check-docs-api docs-screenshots
@@ -149,6 +149,14 @@ generate-docs-api:
 check-docs-api: generate-docs-api
 	git diff --exit-code -- website/docs/reference/rest-api.md || \
 		(echo "The REST API docs page is out of date -- run 'make generate-docs-api' and commit the result." && exit 1)
+
+# Checks every committed lockfile against the OSV vulnerability database
+# (git-ignored folders such as node_modules are skipped). Advisories that
+# can't be fixed here go in an osv-scanner.toml next to the lockfile.
+OSV_SCANNER ?= ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
+
+audit-deps:
+	docker run --rm -v "$(CURDIR)":/src:ro $(OSV_SCANNER) scan source --recursive /src
 
 clean:
 	rm -rf backend/.mypy_cache backend/.pytest_cache backend/.ruff_cache backend/dist backend/build backend/*.egg-info

@@ -144,6 +144,13 @@ jobs:
       - name: Check generated API types are current
         run: make check-api-types
 
+      - name: Install website dependencies
+        working-directory: website
+        run: uv sync --locked
+
+      - name: Check the REST API docs page is current
+        run: make check-docs-api
+
   docs:
     # The documentation site (website/): its own tests, a strict build (broken
     # links or anchors fail it), and the static checks that nothing loads

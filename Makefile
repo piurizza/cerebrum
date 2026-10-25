@@ -5,7 +5,8 @@
         check clean up down logs \
         generate-api-types check-api-types build-desktop \
         lint-website format-website test-website \
-        docs-serve docs-build docs-check docs-check-runtime
+        docs-serve docs-build docs-check docs-check-runtime \
+        generate-docs-api check-docs-api
 
 UV ?= uv
 NPM ?= npm
@@ -128,6 +129,18 @@ generate-api-types:
 check-api-types: generate-api-types
 	git diff --exit-code -- frontend/src/api/generated/schema.ts || \
 		(echo "Generated API types are out of date -- run 'make generate-api-types' and commit the result." && exit 1)
+
+# Regenerates the REST API reference page from the backend's current
+# OpenAPI schema (the same gitignored bridge file generate-api-types uses).
+generate-docs-api:
+	cd backend && $(UV) run cerebrum-export-openapi-schema --output ../openapi.json
+	cd website && $(UV) run python scripts/openapi_to_markdown.py ../openapi.json docs/reference/rest-api.md
+
+# Fails if the committed REST API page doesn't match the backend -- run in CI
+# beside check-api-types.
+check-docs-api: generate-docs-api
+	git diff --exit-code -- website/docs/reference/rest-api.md || \
+		(echo "The REST API docs page is out of date -- run 'make generate-docs-api' and commit the result." && exit 1)
 
 clean:
 	rm -rf backend/.mypy_cache backend/.pytest_cache backend/.ruff_cache backend/dist backend/build backend/*.egg-info

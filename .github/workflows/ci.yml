@@ -144,6 +144,45 @@ jobs:
       - name: Check generated API types are current
         run: make check-api-types
 
+  docs:
+    # The documentation site (website/): its own tests, a strict build (broken
+    # links or anchors fail it), and the static checks that nothing loads
+    # from another host and that every local link, image and nav entry
+    # resolves. The release workflow publishes it; this only checks it.
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "website/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Lint (ruff)
+        run: uv run ruff check scripts tests && uv run ruff format --check scripts tests
+
+      - name: Test
+        run: uv run pytest
+
+      - name: Build (strict)
+        run: uv run zensical build --clean
+
+      - name: No third-party requests
+        run: uv run python scripts/check_no_third_party.py site https://piurizza.github.io/cerebrum/
+
+      - name: Local links resolve
+        run: uv run python scripts/check_local_links.py site https://piurizza.github.io/cerebrum/
+
   installer:
     # Runs deploy/install.sh the way a user would, against images built from
     # this commit, on both architectures the release publishes. The two

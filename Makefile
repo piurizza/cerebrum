@@ -3,7 +3,9 @@
         format format-backend format-frontend format-desktop \
         type-check test test-backend test-frontend test-desktop \
         check clean up down logs \
-        generate-api-types check-api-types build-desktop
+        generate-api-types check-api-types build-desktop \
+        lint-website format-website test-website \
+        docs-serve docs-build docs-check docs-check-runtime
 
 UV ?= uv
 NPM ?= npm
@@ -23,7 +25,7 @@ install-desktop:
 	cd desktop && $(NPM) install
 	cp -n desktop/.env.example desktop/.env
 
-lint: lint-backend lint-frontend lint-desktop
+lint: lint-backend lint-frontend lint-desktop lint-website
 
 lint-backend:
 	cd backend && $(UV) run ruff check src tests && $(UV) run pylint src tests
@@ -34,7 +36,10 @@ lint-frontend:
 lint-desktop:
 	cd desktop && $(NPM) run check
 
-format: format-backend format-frontend format-desktop
+lint-website:
+	cd website && $(UV) run ruff check scripts tests && $(UV) run ruff format --check scripts tests
+
+format: format-backend format-frontend format-desktop format-website
 
 format-backend:
 	cd backend && $(UV) run ruff format src tests && $(UV) run ruff check --fix src tests
@@ -45,6 +50,9 @@ format-frontend:
 format-desktop:
 	cd desktop && $(NPM) run format
 
+format-website:
+	cd website && $(UV) run ruff format scripts tests && $(UV) run ruff check --fix scripts tests
+
 # Not split into -backend/-frontend/-desktop variants, unlike the other
 # umbrella targets above -- this predates the desktop app and there's no
 # need to retrofit the split just to add one more `cd && run` line.
@@ -53,7 +61,7 @@ type-check:
 	cd frontend && $(NPM) run type-check
 	cd desktop && $(NPM) run type-check
 
-test: test-backend test-frontend test-desktop
+test: test-backend test-frontend test-desktop test-website
 
 test-backend:
 	cd backend && $(UV) run pytest
@@ -65,7 +73,34 @@ test-frontend:
 test-desktop:
 	cd desktop && $(NPM) run test:run
 
+test-website:
+	cd website && $(UV) run pytest
+
 check: lint type-check test
+
+# The documentation site (website/, Zensical). The URL must match
+# `site_url` in website/zensical.toml; the checks use it to tell the site's
+# own links from other hosts.
+DOCS_URL := https://piurizza.github.io/cerebrum/
+DOCS_PREFIX := /cerebrum/
+
+docs-serve:
+	cd website && $(UV) run zensical serve
+
+docs-build:
+	cd website && $(UV) sync --locked && $(UV) run zensical build --clean
+
+# Static checks on the built site: nothing loads from another host (R19),
+# and every local link, image and nav entry resolves.
+docs-check: docs-build
+	cd website && $(UV) run python scripts/check_no_third_party.py site $(DOCS_URL)
+	cd website && $(UV) run python scripts/check_local_links.py site $(DOCS_URL)
+
+# Runtime check: loads every page in Chromium and fails on any request to
+# another origin. Needs the frontend's Playwright (npm ci; npx playwright
+# install chromium in frontend/) and Node 22, so it is local, not CI.
+docs-check-runtime: docs-build
+	cd website && node scripts/check_runtime_requests.mjs site $(DOCS_PREFIX)
 
 # Not part of `check` -- a Tauri build needs platform deps and produces real
 # installers, not just a compile check. Linux builds the .deb and .rpm

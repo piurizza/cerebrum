@@ -1,0 +1,35 @@
+[project]
+name = "cerebrum-website"
+version = "0.0.0"
+description = "Cerebrum's documentation site (Zensical)."
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    # Pre-1.0: pinned exactly, with the whole tree locked in uv.lock.
+    "zensical==0.0.72",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2.0",
+    "ruff>=0.4.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["A", "B", "C4", "E", "F", "I", "N", "SIM", "UP", "W"]

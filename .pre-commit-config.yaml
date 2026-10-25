@@ -21,6 +21,12 @@ repos:
         entry: bash -c 'cd backend && uv run pylint src tests'
         language: system
         pass_filenames: false
+      - id: ruff-website
+        name: ruff (website)
+        entry: bash -c 'cd website && uv run ruff check --fix && uv run ruff format'
+        language: system
+        files: ^website/
+        types_or: [python, pyi]
       - id: biome
         name: biome (frontend)
         entry: bash -c 'cd frontend && npm run check'

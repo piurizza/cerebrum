@@ -1,0 +1,19 @@
+# URL prefixes the Zensical theme bundle may contain, reviewed by hand.
+# Each is a loader for an optional feature this site does not enable, so it
+# never fires; `make docs-check-runtime` proves no page requests any of them.
+# A Zensical upgrade that adds a URL not listed here fails `make docs-check`:
+# review what feature uses it before adding it.
+#
+# Mermaid diagrams (not used: we never write ```mermaid blocks).
+https://unpkg.com/mermaid
+# Image lightbox (not enabled).
+https://unpkg.com/glightbox
+# Code playgrounds (not enabled).
+https://unpkg.com/pyodide
+https://cdn.jsdelivr.net/pyodide/
+https://unpkg.com/ace-builds
+# ResizeObserver polyfill, only for browsers that lack it.
+https://unpkg.com/resize-observer-polyfill
+# Repository stats; fetched only when `repo_url` is set, which we never do.
+https://api.github.com/repos/
+https://api.github.com/users/

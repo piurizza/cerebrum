@@ -57,3 +57,7 @@ desktop/.env
 *.ts.net.crt
 *.ts.net.key
 *.pem
+
+# Built documentation site (make docs-build)
+/website/site/
+/website/.venv/

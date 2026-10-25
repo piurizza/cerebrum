@@ -13,13 +13,24 @@ name: Release
 # The monthly schedule rebuilds the latest release's images so they pick up
 # security fixes in their Python/nginx base images. A manual run rebuilds the
 # images and the desktop packages for the latest release, which is how an
-# existing release gets a package added after the fact.
+# existing release gets a package added after the fact. A manual run with
+# `docs_only` republishes just the documentation site.
+#
+# The documentation site (website/) is built here too, from the release's
+# tag, and deployed to GitHub Pages once the repository variable
+# DOCS_PUBLISH is "true" (set it after enabling Pages with source "GitHub
+# Actions"). Releases older than website/ skip it.
 on:
   push:
     branches: [main]
   schedule:
     - cron: "0 6 1 * *"
   workflow_dispatch:
+    inputs:
+      docs_only:
+        description: Only rebuild and republish the documentation site
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -72,7 +83,7 @@ jobs:
 
   images:
     needs: target
-    if: needs.target.outputs.tag != ''
+    if: needs.target.outputs.tag != '' && !inputs.docs_only
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -134,7 +145,7 @@ jobs:
   # Linux packages. The schedule only refreshes images, never packages.
   desktop:
     needs: target
-    if: needs.target.outputs.tag != '' && github.event_name != 'schedule'
+    if: needs.target.outputs.tag != '' && github.event_name != 'schedule' && !inputs.docs_only
     # The oldest supported Ubuntu, so the .deb links against an older glibc
     # and installs on more distributions.
     runs-on: ubuntu-22.04
@@ -195,7 +206,7 @@ jobs:
   # user to allow it once -- see README "Run desktop app".
   desktop-macos:
     needs: target
-    if: needs.target.outputs.tag != '' && github.event_name != 'schedule'
+    if: needs.target.outputs.tag != '' && github.event_name != 'schedule' && !inputs.docs_only
     runs-on: macos-15
     permissions:
       contents: write
@@ -248,7 +259,7 @@ jobs:
   # test workflow installs and launches this same build on every desktop PR.
   desktop-windows:
     needs: target
-    if: needs.target.outputs.tag != '' && github.event_name != 'schedule'
+    if: needs.target.outputs.tag != '' && github.event_name != 'schedule' && !inputs.docs_only
     runs-on: windows-2025
     permissions:
       contents: write
@@ -298,7 +309,7 @@ jobs:
   # still being built. Attested like every other release asset.
   install-assets:
     needs: [target, images]
-    if: needs.target.outputs.tag != '' && github.event_name != 'schedule'
+    if: needs.target.outputs.tag != '' && github.event_name != 'schedule' && !inputs.docs_only
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -344,3 +355,79 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.target.outputs.tag }}
         run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/compose.yaml dist/install.sh
+
+  # The documentation site, built from the release's tag. Runs after the
+  # images so the docs never describe a release whose images are not out
+  # yet (or right away on a docs-only run, which skips the images). The
+  # build job holds only read access; deploying is a separate job, so no
+  # build dependency ever runs with the right to publish.
+  docs-build:
+    needs: [target, images]
+    if: >-
+      !cancelled() && needs.target.outputs.tag != '' &&
+      github.event_name != 'schedule' &&
+      (needs.images.result == 'success' || needs.images.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      present: ${{ steps.present.outputs.present }}
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.target.outputs.tag }}
+          persist-credentials: false
+
+      # Releases older than the site have nothing to build; a run against
+      # one of them must not fail.
+      - id: present
+        working-directory: .
+        run: |
+          if [ -f website/zensical.toml ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
+      - if: steps.present.outputs.present == 'true'
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - if: steps.present.outputs.present == 'true'
+        run: uv sync --locked --all-groups
+
+      # The website's own tests, run against the release's tag. Once the
+      # upgrade pages exist they include a check that every CHANGELOG
+      # version has one, so a release without its page is never published.
+      - if: steps.present.outputs.present == 'true'
+        run: uv run pytest
+
+      - if: steps.present.outputs.present == 'true'
+        run: uv run zensical build --clean
+
+      - if: steps.present.outputs.present == 'true'
+        run: |
+          uv run python scripts/check_no_third_party.py site
+          uv run python scripts/check_local_links.py site
+
+      - if: steps.present.outputs.present == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: website/site
+
+  docs-deploy:
+    needs: docs-build
+    # The explicit result check (not the implicit success()) matters: on a
+    # manual or docs-only run release-please and images are skipped, and an
+    # implicit success() would skip this job along with them.
+    if: >-
+      !cancelled() && needs.docs-build.result == 'success' &&
+      needs.docs-build.outputs.present == 'true' && vars.DOCS_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

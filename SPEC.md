@@ -1,8 +1,14 @@
 # Cerebrum — Design Spec
 
-This document is the reference for cerebrum's design decisions. Code should
-conform to this spec; if the two disagree, update this file as part of the
-change, not after.
+This document is the reference for cerebrum's design decisions and the
+reasons behind them. Code should conform to this spec; if the two disagree,
+update this file as part of the change, not after.
+
+How to install, configure and use Cerebrum is in the documentation site
+(source in [`website/docs/`](website/docs/)): every environment variable is in
+the [configuration reference](website/docs/reference/configuration.md), and
+each feature's behaviour and limits are on its page under
+[`website/docs/features/`](website/docs/features/).
 
 ## 1. Product vision
 
@@ -209,8 +215,8 @@ files, including any note indexed before hidden folders were skipped) on backend
 hook, plus a periodic backstop rescan on the same logic while the app is
 running. Incremental single-file upsert on every `PUT`/`DELETE` note
 request, and on every filesystem change a background watcher observes
-directly (vim, sync tools, etc. -- see § Environment variables for
-`WATCHER_*` config). The `.md` file is always written first; the index is
+directly (vim, sync tools, etc. -- see the `WATCHER_*` settings in the
+[configuration reference](website/docs/reference/configuration.md)). The `.md` file is always written first; the index is
 best-effort and self-heals via the next rescan if it ever drifts.
 
 ## 5. API surface
@@ -279,7 +285,7 @@ API calls.
 - A link to a nonexistent note is a valid edge to a "ghost" node
   (Obsidian-style unresolved reference), carrying `exists: false` on
   `GraphNode` so the frontend can render and behave differently for it
-  (see [Feature roadmap](#9-feature-roadmap-user-stories)).
+  (see [Features](#9-features-design-notes)).
 
 ## 7. Tech stack
 
@@ -312,8 +318,8 @@ API calls.
   relative to the current note's directory with a JS port of the
   backend's `resolve_link_target` (same file) and rendered as in-app
   `react-router-dom` links, not full page loads — external links open
-  normally in a new tab. A link-autocomplete picker while typing is still
-  planned (see [Feature roadmap](#9-feature-roadmap-user-stories)).
+  normally in a new tab. The `[[` link picker is described under
+  [Features](#9-features-design-notes).
 - **mermaid** renders fenced ` ```mermaid ` blocks in the preview as SVG
   diagrams. Loaded lazily together with **DOMPurify** on the first
   diagram, so notes without diagrams pay nothing. `securityLevel:
@@ -369,13 +375,13 @@ API calls.
   workflow installs and launches the Windows build against a stand-in
   server on every desktop pull request. No installer signing or
   notarization, no auto-update (personal-use scope). See
-  [Feature roadmap](#9-feature-roadmap-user-stories).
+  [Features](#9-features-design-notes).
 
 ## 8. Deployment
 
 - `backend/Dockerfile`: `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`
   base, `uv sync --frozen --no-dev`, runs `uvicorn cerebrum.main:app`.
-- `frontend/Dockerfile`: multi-stage — `node:20-alpine` builds the static
+- `frontend/Dockerfile`: multi-stage — `node:22-alpine` builds the static
   bundle, `nginx:alpine` serves it and reverse-proxies `/api/` to the
   `backend` service on the compose network.
 - Root `docker-compose.yml` wires `backend` + `frontend` from the
@@ -414,67 +420,31 @@ API calls.
 
 ### Environment variables
 
-| Variable | Where | Default | Purpose |
-|---|---|---|---|
-| `APP_ENV` | backend | `development` | environment name |
-| `APP_NAME` | backend | `Cerebrum` | display name |
-| `LOG_LEVEL` | backend | `INFO` | logging level |
-| `CEREBRUM_VAULT_PATH` | backend | `./vault` | root dir of `.md` notes |
-| `CEREBRUM_INDEX_PATH` | backend | `<vault>/.cerebrum/index.sqlite3` | SQLite index location. A blank value means the default |
-| `CEREBRUM_VAULT_READ_ONLY` | backend | `false` | `true` serves the vault without writing to it: note and attachment writes get 403, MCP lists only its read tools, external renames are indexed without rewriting links, and the web app hides its write controls. Requires `CEREBRUM_INDEX_PATH` and `CEREBRUM_AUTH_DB_PATH` outside the vault, or startup fails |
-| `CEREBRUM_AUTH_DB_PATH` | backend | `<vault>/.cerebrum/auth.sqlite3` | accounts database location (accounts, sessions, API tokens). A blank value means the default. Move an existing file (with its `-wal`/`-shm` siblings) before setting it, or startup creates an empty accounts database and the setup token works again |
-| `CEREBRUM_DATA_HOST_PATH` | compose | `./data` | host folder for the opt-in `/data/cerebrum` mount that holds the two files above when they live outside the vault |
-| `CORS_ORIGINS` | backend | `["http://localhost:5173"]` | allowed frontend origins |
-| `AUTH_JWT_SECRET` | backend | *(required)* | signing secret for access-token JWTs |
-| `AUTH_SETUP_TOKEN` | backend | *(required)* | one-time invite token for the first (bootstrap admin) account |
-| `AUTH_ACCESS_TOKEN_TTL_MINUTES` | backend | `10` | access-token lifetime |
-| `AUTH_REFRESH_TOKEN_TTL_DAYS` | backend | `30` | refresh-token (session) lifetime |
-| `AUTH_COOKIE_SECURE` | backend | `false` | mark the refresh-token cookie `Secure`; enable once served over TLS |
-| `AUTH_PASSWORD_LOGIN` | backend | `true` | `false` turns off invite registration with a password, and password login for non-admins who have linked a provider identity. Admins keep password login (break-glass). Needs a provider configured |
-| `OIDC_ISSUER` | backend | *(unset)* | OpenID Connect issuer URL, copied exactly (Authentik's ends in `/`). With `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` it turns on sign-in with the provider; set all three or none. Must be `https://` except on `localhost`/`127.0.0.1`. Keep it stable: changing or removing it locks out accounts that have no password |
-| `OIDC_CLIENT_ID` | backend | *(unset)* | client id registered at the provider |
-| `OIDC_CLIENT_SECRET` | backend | *(unset)* | client secret (confidential client) |
-| `OIDC_PROVIDER_NAME` | backend | `SSO` | shown as "Sign in with <name>" |
-| `OIDC_SCOPES` | backend | `openid profile email` | scopes requested; `openid` is always added |
-| `OIDC_ADMIN_GROUP` | backend | *(unset)* | provider group whose members are admins, synced in both directions at each provider sign-in |
-| `OIDC_GROUPS_CLAIM` | backend | `groups` | ID-token claim holding the user's groups (a list or a space-separated string) |
-| `OIDC_ALLOW_INSECURE_ISSUER` | backend | `false` | accept an `http://` issuer on any host. Test stacks only; logs a warning |
-| `WATCHER_ENABLED` | backend | `true` | watch the vault for out-of-band `.md` changes and keep the index in sync |
-| `WATCHER_DEBOUNCE_MS` | backend | `400` | debounce window for batching filesystem change events |
-| `WATCHER_BACKSTOP_INTERVAL_SECONDS` | backend | `300` | interval for the periodic backstop rescan alongside real-time watching |
-| `WATCHER_RENAME_PAIRING_WINDOW_SECONDS` | backend | `30` | how long a deleted note's content hash is remembered for cross-batch external-rename pairing |
-| `WATCHFILES_FORCE_POLLING` | backend | *(unset)* | force polling instead of native filesystem events; opt in on bind-mount/network filesystems (Docker Desktop on macOS/Windows, NFS) |
-| `MAX_ATTACHMENT_SIZE_BYTES` | backend | `10000000` | max size (bytes) of a single pasted image upload |
-| `CEREBRUM_VAULT_HOST_PATH` | compose | `./vault` | host dir bind-mounted into backend |
-| `CEREBRUM_PORT` | compose | `7811` | host port for the frontend (HTTP) |
-| `CEREBRUM_HTTPS_PORT` | compose | `7812` | host port for the frontend's self-signed HTTPS listener; required for offline mode |
-| `CEREBRUM_BIND_ADDRESS` | compose | `127.0.0.1` | interface both ports listen on; `0.0.0.0` or a LAN address to use Cerebrum from a phone or other devices (set `CEREBRUM_TLS_SAN` too) |
-| `CEREBRUM_TLS_SAN` | compose | *(unset)* | extra Subject Alternative Names for the self-signed cert, comma-separated (e.g. `IP:192.168.1.14`) — set to your LAN IP/hostname to use offline mode from another device |
-| `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
-| `CEREBRUM_DAILY_NOTE_FOLDER` | backend | `daily` | vault-relative folder the "Today" button creates daily notes in. Served to clients by `GET /api/vault-settings`, so changing it needs only a backend restart. Leading/trailing slashes are trimmed, a blank value means the default, and `.`/`..` segments fail startup. Docker Compose falls back to the former build-time name `VITE_DAILY_NOTE_FOLDER` |
-| `CEREBRUM_LINK_FORMAT` | backend | `markdown` | `markdown` or `wikilink`: the link form the editor's `[[` picker inserts and MCP note-writing tools ask agents to write. Both forms are always read. Served by `GET /api/vault-settings`, so changing it needs only a restart; case is ignored, a blank value means the default, anything else fails startup |
-| `CEREBRUM_TEMPLATES_FOLDER` | backend | `templates` | vault-relative folder note templates live in (see the "+ New note" template picker). Same handling as `CEREBRUM_DAILY_NOTE_FOLDER`; Compose falls back to the former `VITE_TEMPLATES_FOLDER`. If a vault already has an unrelated folder with this name, set this to something else before enabling the feature -- every note under it becomes a selectable template |
-| `VITE_DEFAULT_SERVER_URL` | desktop | `http://localhost:7811` | server URL the desktop app auto-connects to on first launch (or after its store is cleared) -- most deployments have exactly one server, so this skips the first manual URL entry; the user can always view/change the configured URL afterward via "Change server URL", so this is not a hard-coded target |
+Every variable, its default, and whether a Docker install's `.env` can set
+it, is in the [configuration reference](website/docs/reference/configuration.md). A backend test keeps that
+table equal to the variables the code, the `.env.example` files, the Compose
+file and the install script use, and keeps the Compose file's defaults equal
+to the backend's.
 
-## 9. Feature roadmap (user stories)
+## 9. Features: design notes
 
-Format: "the user should be able to...". Status reflects the scaffold as
-of this writing — update statuses as features land, and add new stories
-here as they're agreed, rather than letting them live only in chat/PR
-history.
+The decisions behind each feature, grouped by area. What each feature does
+and how to use it is in the docs; whether a release has it is in
+`CHANGELOG.md`. Items marked **Not built** are deliberate gaps, with the
+reason.
 
 ### Note management
 
-- [x] view/read a note
-- [x] edit a note's content and save changes
-- [x] create a new note (pick a title/path, start writing) -- both note
+- view/read a note
+- edit a note's content and save changes
+- create a new note (pick a title/path, start writing) -- both note
       creation and rename/move use a shared folder-picker modal
       (`FolderPickerModal`) instead of a raw text path field: it lists
       the vault's existing folders, lets you descend into one, add a new
       one inline (just a path segment, no separate persisted "folder"
       entity -- see [Storage model](#2-storage-model)), and enter the
       file name, composing the final vault-relative path.
-- [x] delete a note -- `DELETE /api/notes/{path}` already existed but
+- delete a note -- `DELETE /api/notes/{path}` already existed but
       had no UI. Adds a "Delete" action next to Copy path/Rename with an
       inline confirm step (no modal needed, unlike rename/create --
       there's nothing to navigate or type), then routes back to `/`.
@@ -482,7 +452,7 @@ history.
       links (ghost nodes) rather than being rewritten or removed --
       consistent with [Link resolution rule](#3-note-format), same as a
       manually-deleted file would behave.
-- [x] rename or move a note to a different path/folder, **link-aware**:
+- rename or move a note to a different path/folder, **link-aware**:
       `POST /api/notes/{path}/move` physically relocates the file,
       preserves `created`, re-bases the moved note's own outgoing
       relative links so they still resolve to the same targets (they're
@@ -502,13 +472,13 @@ history.
       the new title is reflected immediately in the sidebar and the
       graph (both read `title` from the index, refreshed as part of the
       same move/rename request).
-- [x] see when a note was created/last updated, surfaced in the UI --
+- see when a note was created/last updated, surfaced in the UI --
       `Note.created`/`.updated` (already returned by the API, previously
       unused by the frontend) rendered as a muted line below the path
       header, formatted with the browser's locale/timezone via
       `Intl.DateTimeFormat` (`lib/formatDate.ts`). Updates live after a
       save or a rename, since both return the new `updated` timestamp.
-- [x] see the note's own vault-relative path, not just its title -- two
+- see the note's own vault-relative path, not just its title -- two
       notes can share a title (e.g. two different `CAD.md` notes in
       different folders), and the path is what you actually need to
       write a link to it. Shown read-only above the editor, with a copy
@@ -519,17 +489,17 @@ history.
 
 ### Organization & discovery
 
-- [x] browse all notes grouped in a collapsible folder tree mirroring
+- browse all notes grouped in a collapsible folder tree mirroring
       their vault paths (folders sort before notes, alphabetical within
       each level; expand/collapse state is per-session, not persisted)
-- [x] search notes by content (full-text, backed by the already-scaffolded
+- search notes by content (full-text, backed by the already-scaffolded
       `notes_fts` table — see [Index/cache architecture](#4-indexcache-architecture)).
       `notes_fts` was already kept in sync on every upsert/delete; this
       only needed `GET /api/search` (`index/db.py::search_notes`) plus a
       search box in the sidebar. Debounced (250ms) as-you-type, replacing
       the folder tree with a flat, relevance-ranked result list while a
       query has words; clearing the box restores the tree.
-- [x] filter notes by tag, in the sidebar search box. Typing `#` (or `-#`
+- filter notes by tag, in the sidebar search box. Typing `#` (or `-#`
       to leave a tag out) opens a list of matching tags with their note
       counts; picking one, or finishing a known tag with a space, turns it
       into a removable chip. The query syntax is the one `GET /api/search`
@@ -551,7 +521,7 @@ history.
 
       Replaces the first pass's wall of tag pills, which grew with the
       number of tags and pushed the filtered tree off-screen.
-- [x] browse by tag on the front page (`/`, `pages/HomePage.tsx`): every
+- browse by tag on the front page (`/`, `pages/HomePage.tsx`): every
       tag with its note count, nested tags on a line under their parent
       (a parent is listed even when only its children are used), and a
       field to filter the list. Tapping tags selects them and lists the
@@ -562,18 +532,18 @@ history.
       a "Show all tags" toggle; wider, tags and results sit side by side.
       Leaving a tag out (`-#`) is done in the search box only. No per-tag
       pages or tag URLs.
-- [x] see backlinks for the current note
-- [x] traverse the link graph visually
-- [x] click a graph node to jump to that note
-- [x] see broken/unresolved links distinctly in the graph (ghost nodes,
+- see backlinks for the current note
+- traverse the link graph visually
+- click a graph node to jump to that note
+- see broken/unresolved links distinctly in the graph (ghost nodes,
       via `GraphNode.exists`)
 
 ### Cross-referencing
 
-- [x] see a rendered markdown preview with clickable links to other
+- see a rendered markdown preview with clickable links to other
       notes, not just raw text in the editor -- `[[wikilinks]]` included,
       with unresolved ones visibly marked and not clickable
-- [x] insert a link to another note while writing, via an
+- insert a link to another note while writing, via an
       autocomplete/picker triggered while typing. The trigger UX is
       Obsidian-flavored (`[[`, refined by whatever's typed after). It
       inserts a standard markdown link (`[title](path.md)`) by default,
@@ -594,28 +564,28 @@ history.
 
 ### Access
 
-- [x] access their vault from any device via a browser (self-hosted,
+- access their vault from any device via a browser (self-hosted,
       single server)
-- [x] register/log in/log out; sessions persist across browser restarts
+- register/log in/log out; sessions persist across browser restarts
       via a rotating, hashed, `httpOnly` refresh-token cookie, with a
       short-lived JWT access token held in memory. Reuse of a rotated
       refresh token revokes the whole token family (theft detection).
       Registration requires an invite token (first account bootstraps
       via `AUTH_SETUP_TOKEN`; every account after that needs an
       admin-generated invite).
-- [x] generate and manage personal API tokens (for MCP/programmatic
+- generate and manage personal API tokens (for MCP/programmatic
       access), each independently revocable, from Settings.
-- [x] (admin) generate invite tokens and deactivate other accounts from
+- (admin) generate invite tokens and deactivate other accounts from
       Settings; deactivating a user immediately revokes their sessions
       and API tokens. Self-deactivation is rejected, and so is deactivating
       the last active admin who has a password (the break-glass sign-in
       when an OpenID Connect provider is down).
-- [x] serve a vault some other tool owns without writing to it
+- serve a vault some other tool owns without writing to it
       (`CEREBRUM_VAULT_READ_ONLY=true`, see
       [Storage model](#2-storage-model)): everyone can read, search and
       graph it, and the web app hides its write controls behind a "This
       vault is read-only" banner.
-- [x] sign in with one OpenID Connect provider (Keycloak, Authentik, Pocket
+- sign in with one OpenID Connect provider (Keycloak, Authentik, Pocket
       ID, Google, ...) configured by `OIDC_*` variables. The provider only
       proves identity: Cerebrum still issues its own sessions, and API
       tokens and MCP are unchanged. Identities are never matched to
@@ -630,27 +600,28 @@ history.
       `X-Forwarded-Proto` (nginx sends both for `/api/auth/oidc/`), so
       every origin people use must be registered at the provider as an
       exact URI.
-- [x] (optional) `OIDC_ADMIN_GROUP` makes members of a provider group admins
+- (optional) `OIDC_ADMIN_GROUP` makes members of a provider group admins
       and removes admin from non-members, at each provider sign-in. A
       demotion that would leave no active admin with a password is skipped
       and logged. A change at the provider takes effect only at that
       person's next provider sign-in: sessions, password sign-in and API
       tokens carry on, so deactivate the account to remove someone at once.
-- [x] (optional) `AUTH_PASSWORD_LOGIN=false` makes the provider the way in:
+- (optional) `AUTH_PASSWORD_LOGIN=false` makes the provider the way in:
       invites can only be redeemed through it, and a non-admin who has
       linked an identity can no longer sign in with a password. Admins
       keep their password as break-glass for a provider outage, and
       accounts not yet linked can still sign in with theirs, so they can
       link. Ask everyone to link before turning it off.
-- [ ] sign in with the provider from the installed iOS home-screen app:
+- **Not built:** sign in with the provider from the installed iOS home-screen app:
       the provider page opens in Safari, which keeps its own cookies, so
       the sign-in lands in Safari instead of the app. Use the site in
       Safari, or a password where password login is still open. (Android
-      and the desktop app: see the verification notes in the README.)
-- [x] lockout after repeated failed logins (atomic, race-safe counter),
+      and the desktop app: see the identity-provider page's known limits in
+      the docs.)
+- lockout after repeated failed logins (atomic, race-safe counter),
       with timing-attack-resistant rejection (dummy Argon2 hash paid
       even on the locked-out/unknown-user paths).
-- [x] a native desktop app (Linux, macOS and Windows, `desktop/`) as an alternative to a
+- a native desktop app (Linux, macOS and Windows, `desktop/`) as an alternative to a
       browser tab -- a Tauri v2 window pointed at a configured server URL,
       not a second deployment. Reuses the existing self-hosted server and
       cookie login unchanged; see [§7 Tech stack](#7-tech-stack) for the
@@ -660,11 +631,11 @@ history.
 
 ### Editing experience
 
-- [x] render ` ```mermaid ` fenced blocks as diagrams in the preview,
+- render ` ```mermaid ` fenced blocks as diagrams in the preview,
       following the light/dark theme; an invalid diagram shows mermaid's
       parse error with its source underneath, never a blank space.
-- [x] see whether they have unsaved changes
-- [x] save via a keyboard shortcut (e.g. Cmd/Ctrl+S) -- a window-level
+- see whether they have unsaved changes
+- save via a keyboard shortcut (e.g. Cmd/Ctrl+S) -- a window-level
       keydown listener on `NoteViewPage` (not a CodeMirror keymap, so it
       fires regardless of where focus is on the page), calling
       `preventDefault()` to suppress the browser's native save-page
@@ -672,12 +643,12 @@ history.
 
 ### Attachments
 
-- [x] embed an image in a note -- pasted images render inline in the
+- embed an image in a note -- pasted images render inline in the
       preview, scaled down to the reading column when wider than it,
       via an authenticated fetch + blob URL (`<img src>` can't
       carry an `Authorization` header, and a URL-embedded token would leak
       into browser history/logs)
-- [x] paste/upload an image into a note -- pasting an image from the
+- paste/upload an image into a note -- pasting an image from the
       clipboard while editing uploads it, saves it under the note's
       sibling `.attachments/` folder (content-addressed by SHA-256 hash,
       so identical pastes dedupe), and inserts `![](relative/path)` at the
@@ -693,20 +664,20 @@ feature set and product identity (self-hosted, plain markdown, note-level
 links -- not block-level, not a team database tool). Ordered by fit +
 how consistently each was cited as high-value across that research.
 
-- [x] one-click "today's note" -- a "Today" button in the sidebar (before
+- one-click "today's note" -- a "Today" button in the sidebar (before
       "+ New note") opens today's note, creating it with a
       `# <full date>` heading if it doesn't exist yet -- never overwrites
       an existing one. Path is `<folder>/<YYYY-MM-DD>.md`; `<folder>`
       defaults to `daily` and is configurable on the server via
       `CEREBRUM_DAILY_NOTE_FOLDER` (see
-      [Environment variables](#environment-variables)). The date is always the *browser's* local calendar
+      [configuration reference](website/docs/reference/configuration.md)). The date is always the *browser's* local calendar
       day, never the server's or UTC -- a self-hosted server can run in a
       different timezone than the browser opening it, so using the
       server's clock could silently pick the wrong day near midnight.
-- [x] note templates -- a template is an ordinary note under a
+- note templates -- a template is an ordinary note under a
       configurable vault folder (default `templates`,
       `CEREBRUM_TEMPLATES_FOLDER` -- see
-      [Environment variables](#environment-variables)). A template directly under
+      [configuration reference](website/docs/reference/configuration.md)). A template directly under
       that folder is *global* (offered for any new note); one in a
       subfolder is *scoped* to that subfolder's name and is prioritized
       for a matching target folder, but never hidden for others. The
@@ -721,7 +692,7 @@ how consistently each was cited as high-value across that research.
       search, tags, the sidebar tree, the Graph view, Backlinks, and MCP
       tools. Obsidian's Templater is consistently the top-cited
       "must-have" plugin in the research this item is sourced from.
-- [x] a cross-vault task view -- the `/tasks` page aggregates every open
+- a cross-vault task view -- the `/tasks` page aggregates every open
       markdown checkbox (`- [ ]`/`* [ ]`/`+ [ ]`) across the vault into
       one list, grouped by note, mirroring Obsidian's Tasks/Dataview-
       query pattern. Extraction skips checkbox-shaped text inside a
@@ -729,7 +700,7 @@ how consistently each was cited as high-value across that research.
       task). Read-only: clicking a task or its note's heading opens the
       note as a whole, not the exact line -- no toggle-from-the-list, no
       line-jump (see [Known gaps](#10-known-gaps--future-work)).
-- [ ] AI-assisted features -- auto-linking, semantic search, or Q&A over
+- **Not built:** AI-assisted features -- auto-linking, semantic search, or Q&A over
       the vault. The clearest 2026 industry differentiator (Tana, Mem,
       Reflect), but a materially bigger strategic bet than the three
       above: it introduces LLM/API-key integration and a new class of
@@ -758,8 +729,8 @@ how consistently each was cited as high-value across that research.
 
 ### Reliability
 
-- [x] notes stay valid plain markdown even if the app breaks (by design)
-- [x] see edits made outside the app (e.g. vim, a sync tool) reflected
+- notes stay valid plain markdown even if the app breaks (by design)
+- see edits made outside the app (e.g. vim, a sync tool) reflected
       without restarting the server -- a background watcher (`watchfiles`)
       keeps the index in sync in near real-time, backed by a periodic
       backstop rescan. An external rename/move is detected (by
@@ -771,7 +742,7 @@ how consistently each was cited as high-value across that research.
       constraints that remain. In read-only mode a rename is indexed as a
       delete plus a create instead: links in other notes stay exactly as
       the owning tool wrote them, and no attachment folder is moved.
-- [x] see notes created or changed while the window was in the
+- see notes created or changed while the window was in the
       background (another device, an MCP client, a file edited on disk)
       in the sidebar when the window comes back to the foreground -- the
       note list refetches on `focus` and on `visibilitychange` to
@@ -835,12 +806,6 @@ how consistently each was cited as high-value across that research.
   precached, so installing the PWA stays as light as before; a vault
   opened offline for the first time shows diagrams as their source with
   a load error.
-- **`npm audit` flags a low-severity KaTeX advisory**
-  ([GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7))
-  through mermaid, which pins `katex@^0.16`; the fix is in 0.18.2. It
-  needs an existing prototype-pollution bug to be exploitable. Mermaid
-  12.2.0 moves to a fixed KaTeX but was one day old when this landed;
-  revisit once it has aged (after 2026-10-27).
 - **`npm audit` flags a high-severity advisory in `react-router`** (RSC-mode
   CSRF bypass). Not applicable here — this app uses plain client-side
   routing, not React Router's RSC/framework mode. Revisit if that changes.
@@ -863,7 +828,7 @@ how consistently each was cited as high-value across that research.
   the macOS app is ad-hoc signed and not notarized, so Gatekeeper blocks
   its first launch until the user allows it in Privacy & Security, and
   the Windows installer is unsigned, so SmartScreen warns once (the
-  README has both steps); fixing either needs a paid identity. The
+  docs' desktop app page has both steps); fixing either needs a paid identity. The
   Windows build is verified only by the CI smoke test (install, launch,
   health check, page load), not by hand on Windows 10 or 11. No
   auto-update, no app store or package repository.

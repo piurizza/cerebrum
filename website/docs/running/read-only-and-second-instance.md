@@ -87,6 +87,14 @@ To give people read-only access to a vault that your main Cerebrum writes to,
 run a second instance over the same vault folder, in read-only mode, with its
 own folder for state, its own ports and its own accounts.
 
+Give it its **own `.env` with new secrets**: a different `AUTH_JWT_SECRET`
+and `AUTH_SETUP_TOKEN` (`openssl rand -hex 32` makes one). Don't copy the main
+instance's `.env`. With the same `AUTH_JWT_SECRET`, a sign-in on one instance
+is accepted by the other, as whichever account has the same number there.
+The simplest way is a second install with the install script and a different
+folder and ports, for example
+`CEREBRUM_INSTALL_DIR=~/cerebrum-readonly CEREBRUM_PORT=7821 CEREBRUM_HTTPS_PORT=7822`.
+
 If the main instance still keeps its accounts database in the vault, create
 the second instance's as an empty file first, for example
 `touch data/auth.sqlite3`. Otherwise it reads the database in the vault as one

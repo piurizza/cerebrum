@@ -75,15 +75,60 @@ def test_flags_unknown_urls_in_javascript_bundles(tmp_path: Path) -> None:
     ]
 
 
-def test_skips_url_text_only_in_vendored_libraries(tmp_path: Path) -> None:
-    # A licence link in a library the site serves itself is not a request;
-    # the same text in the theme's bundle still is.
+def _found_with_vendor_list(
+    tmp_path: Path,
+    files: dict[str, str],
+    bundle: tuple[str, ...],
+    vendor: tuple[str, ...],
+) -> list[str]:
+    site = _site(tmp_path, files)
+    return [f.url for f in find_external_requests(site, SITE_URL, bundle, vendor)]
+
+
+def test_vendored_libraries_use_their_own_allowlist(tmp_path: Path) -> None:
+    # A reviewed licence link in a library the site serves itself passes;
+    # the same text in the theme's bundle is not excused by that list.
     text = 'var x="https://example.org/license";'
     files = {
         "assets/javascripts/vendor/mermaid.min.js": text,
         "assets/javascripts/bundle.js": text,
     }
-    assert _found(tmp_path, files) == ["https://example.org/license"]
+    found = _found_with_vendor_list(tmp_path, files, (), ("https://example.org/",))
+    assert found == ["https://example.org/license"]
+
+
+def test_flags_a_new_url_in_a_vendored_library(tmp_path: Path) -> None:
+    # A library update that starts loading from a CDN fails the check, and
+    # the theme's dormant-loader allowlist doesn't excuse it.
+    files = {
+        "assets/javascripts/vendor/mermaid.min.js": (
+            'var a="https://example.org/license";'
+            'load("https://unpkg.com/mermaid@12/dist/x.js");'
+        ),
+    }
+    found = _found_with_vendor_list(
+        tmp_path, files, ("https://unpkg.com/mermaid",), ("https://example.org/",)
+    )
+    assert found == ["https://unpkg.com/mermaid@12/dist/x.js"]
+
+
+def test_reviewed_vendor_allowlist_covers_the_installed_mermaid() -> None:
+    # The real list must cover the library `make docs-assets` installs; run
+    # it first. Skipped when node_modules is absent.
+    library = Path(__file__).parents[1] / "node_modules/mermaid/dist/mermaid.min.js"
+    if not library.exists():
+        pytest.skip("run `make docs-assets` to install the vendored libraries")
+    allowed = check_no_third_party._load_allowlist(
+        check_no_third_party._VENDOR_ALLOWLIST
+    )
+    text = library.read_text(encoding="utf-8", errors="replace")
+    urls = [
+        url
+        for url in check_no_third_party._JS_URL.findall(text)
+        if not url.startswith(check_no_third_party._JS_NAMESPACES)
+        and not url.startswith(allowed)
+    ]
+    assert urls == []
 
 
 def test_still_flags_html_loading_from_another_host(tmp_path: Path) -> None:

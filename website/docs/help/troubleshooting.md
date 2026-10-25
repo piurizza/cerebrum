@@ -75,6 +75,11 @@ rm -f vault/.cerebrum/auth.sqlite3-wal vault/.cerebrum/auth.sqlite3-shm
 docker compose up -d
 ```
 
+If you moved Cerebrum's state out of the vault, the file is
+`data/auth.sqlite3` instead: move that one aside, and create an empty
+`data/auth.sqlite3` in its place (`touch data/auth.sqlite3`) before starting,
+since Cerebrum refuses to start when that setting points at a missing file.
+
 Then register again with the setup token from `.env`, and invite everyone
 again.
 

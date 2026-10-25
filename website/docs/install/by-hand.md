@@ -59,11 +59,13 @@ sudo chown -R "$(id -u):$(id -g)" vault
 ## Updating
 
 ```sh
+git pull
 docker compose pull
 docker compose up -d
 ```
 
-That moves to the latest release. To stay on one release, set
+`git pull` brings the new release's `docker-compose.yml`, which new settings
+may depend on; then the images move to the latest release. To stay on one release, set
 `CEREBRUM_VERSION=0.4.0` (for example) in `.env`. Read the
 [upgrade notes](../upgrade/index.md) first.
 

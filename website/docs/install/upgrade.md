@@ -11,15 +11,13 @@ restart on a large vault.
 
 ## Find your version
 
-The images carry their release number:
+The images carry their release number. In the install folder, ask the running
+backend:
 
 ```sh
-docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
-  ghcr.io/piurizza/cerebrum-backend:latest
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+  "$(docker compose ps -q backend)"
 ```
-
-If you pinned a release with `CEREBRUM_VERSION` in `.env`, that is your
-version, and the image tag to use instead of `latest`.
 
 ## Upgrade an install-script install
 
@@ -50,6 +48,14 @@ docker compose up -d
 Set `CEREBRUM_VERSION` in `.env` to the older version and run
 `docker compose up -d`. Check that release's upgrade notes: a release that
 moved where Cerebrum keeps its state needs that step undone too.
+
+!!! warning "Going back to 0.4.0 or older"
+    Releases before 0.5.0 don't know `CEREBRUM_AUTH_DB_PATH` or
+    `CEREBRUM_VAULT_READ_ONLY`. If you moved Cerebrum's state out of the
+    vault, move `data/auth.sqlite3` (with its `-wal` and `-shm` files) back to
+    `vault/.cerebrum/` before going back, or the older release starts with no
+    accounts. Don't go back on a read-only instance: an older release would
+    write to the vault.
 
 ## Upgrade the apps
 

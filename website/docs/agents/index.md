@@ -5,8 +5,8 @@ assistants that speak MCP, such as Claude, can read, search and write your
 notes. It lives at `/api/mcp/` on the same address as the web app; there is no
 separate port.
 
-Every request needs a personal API token, which you create and revoke in
-**Settings**. An assistant sees exactly what your account sees.
+An assistant connects with a personal API token, which you create and revoke
+in **Settings**. It sees exactly what your account sees.
 
 - [Connect an assistant](mcp-setup.md): create a token and add Cerebrum to
   Claude Code, Claude Desktop, VS Code and others.

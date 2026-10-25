@@ -4,7 +4,10 @@
 # A Zensical upgrade that adds a URL not listed here fails `make docs-check`:
 # review what feature uses it before adding it.
 #
-# Mermaid diagrams (not used: we never write ```mermaid blocks).
+# Mermaid diagrams: the theme loads Mermaid from here only when no `mermaid`
+# is defined yet. The site serves its own copy (assets/javascripts/vendor/,
+# copied in by `make docs-assets`), so this never fires; the local-link check
+# fails a build where that copy is missing.
 https://unpkg.com/mermaid
 # Image lightbox (not enabled).
 https://unpkg.com/glightbox

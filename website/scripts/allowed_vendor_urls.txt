@@ -1,0 +1,28 @@
+# URL prefixes the libraries in assets/javascripts/vendor/ may contain,
+# reviewed by hand. Each is text inside the library -- a licence notice, a
+# link in an error message, an XML namespace -- not something it fetches.
+# A library update that adds a URL not listed here fails `make docs-check`:
+# check what the code does with it (`make docs-check-runtime` shows whether
+# any page requests it) before adding it.
+#
+# Mermaid 12 (website/package.json).
+# Licence notices of bundled code.
+http://en.wikipedia.org/wiki/MIT_License
+http://engelschall.com
+http://opensource.org/licenses/MIT
+http://underscorejs.org/LICENSE
+https://jquery.org/license/
+https://lodash.com/
+https://openjsf.org/
+https://tldrlegal.com/license/mit-license
+# XML namespaces of the ELK layout engine's model.
+http://www.eclipse.org/elk/ElkGraph
+http://www.eclipse.org/emf/
+# Links in parser error messages and source comments.
+https://chevrotain.io/docs/
+https://en.wikipedia.org/wiki/LL_parser
+https://github.com/chevrotain/chevrotain/issues
+https://github.com/jquery/jquery/blob/master/src/event.js
+https://github.com/markedjs/marked
+https://github.com/mermaid-js/mermaid/
+https://langium.org/docs/

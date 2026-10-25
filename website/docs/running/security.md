@@ -36,8 +36,9 @@ whenever Cerebrum is reached over a network; see [HTTPS](https.md).
 - Personal API tokens give full access to the account's notes, like a
   password. Create one per assistant or script, so you can revoke them one at
   a time. Cerebrum stores only a hash of each.
-- The MCP endpoint, `/api/mcp`, accepts API tokens only. `MCP_ENABLED=false`
-  turns it off.
+- The MCP endpoint, `/api/mcp`, needs a bearer token: a personal API token,
+  which is what assistants use, or a signed-in browser's short-lived access
+  token. `MCP_ENABLED=false` turns it off.
 - Anything that can write notes, an account or an AI assistant, can put any
   text in them. Cerebrum treats note content as untrusted when it shows it:
   diagrams are drawn in a restricted mode and cleaned before display.

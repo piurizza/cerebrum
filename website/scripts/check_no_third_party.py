@@ -13,11 +13,11 @@ a Zensical upgrade that adds a new outbound request is caught here.
 `check_runtime_requests.mjs` then proves the listed loaders stay dormant.
 
 Libraries the site serves itself (Mermaid) live under
-`assets/javascripts/vendor/`. They come from npm, pinned in
-`website/package-lock.json` and covered by the dependency scans; their
-minified code is full of URLs in licence comments and error messages, so
-their text is not scanned for URLs here. The runtime check covers what they
-actually load.
+`assets/javascripts/vendor/`, pinned in `website/package-lock.json`. Their
+minified code is full of URLs in licence notices and error messages, which
+are listed in `allowed_vendor_urls.txt` after review. A library update that
+adds any other URL fails here, so a new outbound request can't arrive
+through a dependency bump unnoticed.
 
 Usage: check_no_third_party.py <site-dir> [<site-url>]
 (the site URL defaults to `site_url` in zensical.toml)
@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 from site_config import site_url
 
 _ALLOWLIST = Path(__file__).with_name("allowed_bundle_urls.txt")
+_VENDOR_ALLOWLIST = Path(__file__).with_name("allowed_vendor_urls.txt")
 VENDOR = "assets/javascripts/vendor/"
 _CSS_URL = re.compile(r"""url\(\s*['"]?([^'")\s]+)""")
 _CSS_IMPORT = re.compile(r"""@import\s+['"]([^'"]+)""")
@@ -106,17 +107,21 @@ def _css_urls(css: str) -> list[str]:
     return _CSS_URL.findall(css) + _CSS_IMPORT.findall(css)
 
 
-def _load_allowlist() -> tuple[str, ...]:
-    if not _ALLOWLIST.exists():
+def _load_allowlist(path: Path | None = None) -> tuple[str, ...]:
+    path = path or _ALLOWLIST
+    if not path.exists():
         return ()
-    lines = _ALLOWLIST.read_text(encoding="utf-8").splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     return tuple(
         line.strip() for line in lines if line.strip() and not line.startswith("#")
     )
 
 
 def find_external_requests(
-    site: Path, site_url: str, allowed_bundle_urls: tuple[str, ...]
+    site: Path,
+    site_url: str,
+    allowed_bundle_urls: tuple[str, ...],
+    allowed_vendor_urls: tuple[str, ...] = (),
 ) -> list[Finding]:
     host = urlsplit(site_url).netloc
     findings: list[Finding] = []
@@ -139,13 +144,16 @@ def find_external_requests(
         elif path.suffix == ".css":
             urls = _css_urls(text)
         elif path.suffix in {".js", ".mjs"}:
-            if name.startswith(VENDOR):
-                continue
+            # Each allowlist covers only its own files: the theme's dormant
+            # loaders never excuse a library, and a library's notices never
+            # excuse the theme.
+            allowed = (
+                allowed_vendor_urls if name.startswith(VENDOR) else allowed_bundle_urls
+            )
             urls = [
                 url
                 for url in _JS_URL.findall(text)
-                if not url.startswith(_JS_NAMESPACES)
-                and not url.startswith(allowed_bundle_urls)
+                if not url.startswith(_JS_NAMESPACES) and not url.startswith(allowed)
             ]
         else:
             continue
@@ -158,7 +166,9 @@ def main(argv: list[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     url = argv[2] if len(argv) == 3 else site_url()
-    findings = find_external_requests(Path(argv[1]), url, _load_allowlist())
+    findings = find_external_requests(
+        Path(argv[1]), url, _load_allowlist(), _load_allowlist(_VENDOR_ALLOWLIST)
+    )
     for finding in findings:
         print(f"{finding.file}: loads {finding.url}", file=sys.stderr)
     if findings:

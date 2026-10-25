@@ -45,6 +45,19 @@ SCHEMA: dict[str, Any] = {
                 },
                 "responses": {"200": {"description": "OK"}},
             },
+            "post": {
+                "summary": "Create Token",
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/NoteMeta"}
+                            }
+                        },
+                    }
+                },
+            },
             "get": {
                 "summary": "Get Note Endpoint",
                 "responses": {"200": {"description": "OK"}},
@@ -105,3 +118,9 @@ def test_lists_schemas_with_required_fields() -> None:
 
 def test_output_is_stable() -> None:
     assert render(SCHEMA) == render(SCHEMA)
+
+
+def test_shows_the_body_of_201_responses() -> None:
+    page = render(SCHEMA)
+    section = page.split("### `POST /api/notes/{path}`")[1].split("###")[0]
+    assert "Returns: [`NoteMeta`](#notemeta)" in section

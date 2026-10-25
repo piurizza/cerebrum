@@ -30,8 +30,6 @@ request needs an `Authorization: Bearer <token>` header. The token is either
 the access token returned by `POST /api/auth/login`, or a personal API token
 created in **Settings** (it starts with `cbm_pat_`). Agents usually connect
 through [MCP](../agents/index.md) instead.
-
-Schema version {version}.
 """
 
 
@@ -97,7 +95,14 @@ def _operation(method: str, path: str, op: dict[str, Any]) -> list[str]:
     for media, content in body.items():
         kind = _type(content.get("schema", {}), True)
         lines += [f"Request body: `{media}` ({kind})", ""]
-    ok = op.get("responses", {}).get("200", {}).get("content", {})
+    # The first success response that returns a body: 200, or 201 for
+    # routes that create something.
+    successes = sorted(
+        (code, response)
+        for code, response in op.get("responses", {}).items()
+        if code.startswith("2") and response.get("content")
+    )
+    ok = successes[0][1]["content"] if successes else {}
     for content in ok.values():
         lines += [f"Returns: {_type(content.get('schema', {}), True)}", ""]
     return lines
@@ -123,7 +128,7 @@ def render(schema: dict[str, Any]) -> str:
             order = _METHOD_ORDER.index(method) if method in _METHOD_ORDER else 99
             areas.setdefault(_area(path), []).append((order, path, method, op))
 
-    lines = [_HEADER.format(version=schema["info"]["version"])]
+    lines = [_HEADER]
     for area in sorted(areas):
         lines += [f"## {area}", ""]
         if area in _AREA_INTROS:

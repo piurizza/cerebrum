@@ -5,7 +5,9 @@
 #
 #   - its own Compose project name, ports and volumes;
 #   - an explicit --env-file it writes itself, so the repo's .env is never
-#     read (Compose only reads .env when no --env-file is given);
+#     read (Compose only reads .env when no --env-file is given), and a
+#     minimal environment, so variables exported in your shell (which would
+#     override the env file) never reach Compose;
 #   - images built from this checkout and tagged :docs-demo, so the
 #     :latest images a real install runs are never retagged;
 #   - check_demo_compose.py vets the resolved config before anything starts
@@ -35,7 +37,12 @@ work="$(realpath -m "$2")"
 compose() {
   # Relative paths in the Compose files (the build contexts) resolve
   # against the repo; variables come only from the generated env file.
-  docker compose -p "$PROJECT" --project-directory "$REPO" \
+  env -i PATH="$PATH" HOME="$HOME" \
+    ${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} \
+    ${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} \
+    ${DOCKER_CONFIG:+DOCKER_CONFIG="$DOCKER_CONFIG"} \
+    ${XDG_RUNTIME_DIR:+XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"} \
+    docker compose -p "$PROJECT" --project-directory "$REPO" \
     --env-file "$work/demo.env" \
     -f "$REPO/docker-compose.yml" -f "$REPO/docker-compose.build.yml" "$@"
 }
@@ -73,8 +80,18 @@ EOF
 
   compose up -d --build --wait
 
-  local base="http://127.0.0.1:$PORT"
-  curl -fsS -o /dev/null -H 'content-type: application/json' \
+  # `--wait` covers the backend's health check; the frontend has none and
+  # may still be generating its certificate, so wait until the proxy answers.
+  local base="http://127.0.0.1:$PORT" tries=0
+  until curl -fsS -o /dev/null --max-time 2 "$base/api/health"; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 60 ]; then
+      echo "the demo stack did not become reachable at $base" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  curl -fsS -o /dev/null --max-time 10 -H 'content-type: application/json' \
     -d "{\"username\":\"demo\",\"password\":\"$password\",\"token\":\"$setup_token\"}" \
     "$base/api/auth/register"
   (
@@ -86,12 +103,14 @@ EOF
 }
 
 down() {
-  if [ ! -f "$work/demo.env" ]; then
-    echo "nothing to stop: $work/demo.env not found" >&2
-    exit 1
+  # Always removes the work folder; stops containers only when `up` got far
+  # enough to write the env file Compose needs.
+  local status=0
+  if [ -f "$work/demo.env" ]; then
+    compose down --volumes --remove-orphans || status=$?
   fi
-  compose down --volumes --remove-orphans
   rm -rf "$work"
+  return "$status"
 }
 
 case "$command" in

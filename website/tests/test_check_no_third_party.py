@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import check_no_third_party
 from check_no_third_party import find_external_requests
 
 SITE_URL = "https://example.github.io/cerebrum/"
@@ -90,3 +93,45 @@ def test_ignores_hyperlinks_and_the_sites_own_host(tmp_path: Path) -> None:
         '<img src="./assets/shot.webp">'
     )
     assert _found(tmp_path, {"index.html": page}) == []
+
+
+def test_flags_urls_in_inline_scripts_without_the_bundle_allowlist(
+    tmp_path: Path,
+) -> None:
+    page = (
+        "<script>var s=document.createElement('script');"
+        "s.src='https://www.googletagmanager.com/gtag/js';</script>"
+        '<script type="application/ld+json">{"url": "https://schema.example/x"}</script>'
+    )
+    allowed = ("https://www.googletagmanager.com",)
+    assert _found(tmp_path, {"index.html": page}, allowed) == [
+        "https://www.googletagmanager.com/gtag/js"
+    ]
+
+
+def test_flags_svg_images_and_uses(tmp_path: Path) -> None:
+    page = (
+        '<svg><image href="https://img.example/a.png"/>'
+        '<use xlink:href="https://img.example/sprite.svg#i"/>'
+        '<a href="https://example.com/link">link</a></svg>'
+    )
+    assert sorted(_found(tmp_path, {"index.html": page})) == [
+        "https://img.example/a.png",
+        "https://img.example/sprite.svg#i",
+    ]
+
+
+def test_loads_the_allowlist_without_comments_or_blanks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowlist = tmp_path / "allowed.txt"
+    allowlist.write_text("# a comment\n\nhttps://unpkg.com/mermaid\n", "utf-8")
+    monkeypatch.setattr(check_no_third_party, "_ALLOWLIST", allowlist)
+    assert check_no_third_party._load_allowlist() == ("https://unpkg.com/mermaid",)
+
+
+def test_main_exits_nonzero_on_a_finding(tmp_path: Path) -> None:
+    _site(tmp_path, {"index.html": '<script src="https://cdn.example/x.js"></script>'})
+    assert check_no_third_party.main(["prog", str(tmp_path), SITE_URL]) == 1
+    (tmp_path / "index.html").write_text("<p>clean</p>", encoding="utf-8")
+    assert check_no_third_party.main(["prog", str(tmp_path), SITE_URL]) == 0

@@ -79,11 +79,8 @@ test-website:
 
 check: lint type-check test
 
-# The documentation site (website/, Zensical). The URL must match
-# `site_url` in website/zensical.toml; the checks use it to tell the site's
-# own links from other hosts.
-DOCS_URL := https://piurizza.github.io/cerebrum/
-DOCS_PREFIX := /cerebrum/
+# The documentation site (website/, Zensical). Its URL lives only in
+# website/zensical.toml; the checks read it from there.
 
 docs-serve:
 	cd website && $(UV) run zensical serve
@@ -94,14 +91,14 @@ docs-build:
 # Static checks on the built site: nothing loads from another host (R19),
 # and every local link, image and nav entry resolves.
 docs-check: docs-build
-	cd website && $(UV) run python scripts/check_no_third_party.py site $(DOCS_URL)
-	cd website && $(UV) run python scripts/check_local_links.py site $(DOCS_URL)
+	cd website && $(UV) run python scripts/check_no_third_party.py site
+	cd website && $(UV) run python scripts/check_local_links.py site
 
 # Runtime check: loads every page in Chromium and fails on any request to
 # another origin. Needs the frontend's Playwright (npm ci; npx playwright
 # install chromium in frontend/) and Node 22, so it is local, not CI.
 docs-check-runtime: docs-build
-	cd website && node scripts/check_runtime_requests.mjs site $(DOCS_PREFIX)
+	cd website && node scripts/check_runtime_requests.mjs site "$$($(UV) run python scripts/site_config.py prefix)"
 
 # Not part of `check` -- a Tauri build needs platform deps and produces real
 # installers, not just a compile check. Linux builds the .deb and .rpm
@@ -136,7 +133,7 @@ check-api-types: generate-api-types
 # Run it after a UI change and commit the images.
 docs-screenshots:
 	cd frontend && $(NPM) ci && npx playwright install chromium
-	@work=$$(mktemp -d) && rmdir "$$work" && \
+	@work=$$(mktemp -d) && \
 		trap 'website/scripts/demo_stack.sh down "$$work"' EXIT && \
 		website/scripts/demo_stack.sh up "$$work" && \
 		node website/scripts/screenshots.mjs "$$work/credentials.json" website/docs/assets/screenshots

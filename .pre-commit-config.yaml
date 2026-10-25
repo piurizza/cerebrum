@@ -25,6 +25,7 @@ repos:
         name: ruff (website)
         entry: bash -c 'cd website && uv run ruff check --fix && uv run ruff format'
         language: system
+        pass_filenames: false
         files: ^website/
         types_or: [python, pyi]
       - id: biome

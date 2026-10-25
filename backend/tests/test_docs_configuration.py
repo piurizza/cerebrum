@@ -1,7 +1,9 @@
 """The configuration docs page lists every user-facing environment variable
 exactly once, and nothing else. Variables come from the backend `Settings`,
-every `.env.example` (commented examples included), the Compose file, and
-the options the install script documents."""
+every `.env.example` (commented examples included), the Compose file, the
+options the install script documents, and the `import.meta.env.VITE_*`
+values the web and desktop apps read. Its "Docker `.env`" column must match
+what `docker-compose.yml` actually passes through."""
 
 from __future__ import annotations
 
@@ -25,7 +27,17 @@ _ENV_KEY = re.compile(r"^#?\s*([A-Z][A-Z0-9_]*)=", re.MULTILINE)
 _COMPOSE_VAR = re.compile(r"\$\{([A-Z][A-Z0-9_]*)")
 # The install script's header lists its options as `#   NAME  description`.
 _INSTALL_OPTION = re.compile(r"^#\s{2,}(CEREBRUM_[A-Z_]+)\b", re.MULTILINE)
-_TABLE_ROW = re.compile(r"^\| `([A-Z][A-Z0-9_]*)` \|", re.MULTILINE)
+# `| `NAME` | default | yes/no | description |`
+_TABLE_ROW = re.compile(
+    r"^\| `([A-Z][A-Z0-9_]*)` \| [^|]* \| (yes|no) \|", re.MULTILINE
+)
+_VITE_READ = re.compile(r"import\.meta\.env\.(VITE_[A-Z0-9_]+)")
+_APP_SOURCES = [_ROOT / "frontend" / "src", _ROOT / "desktop" / "src"]
+
+
+def _compose_variables() -> set[str]:
+    compose = (_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    return set(_COMPOSE_VAR.findall(compose))
 
 
 def _sources() -> set[str]:
@@ -33,15 +45,21 @@ def _sources() -> set[str]:
     names = {f.upper() for f in Settings.model_fields}  # pylint: disable=not-an-iterable
     for example in _ENV_EXAMPLES:
         names |= set(_ENV_KEY.findall(example.read_text(encoding="utf-8")))
-    compose = (_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    names |= set(_COMPOSE_VAR.findall(compose))
+    names |= _compose_variables()
     install = (_ROOT / "deploy" / "install.sh").read_text(encoding="utf-8")
     names |= set(_INSTALL_OPTION.findall(install))
+    for source_dir in _APP_SOURCES:
+        for source in source_dir.rglob("*.ts*"):
+            names |= set(_VITE_READ.findall(source.read_text(encoding="utf-8")))
     return names - _TEST_HOOKS
 
 
-def _documented() -> list[str]:
+def _rows() -> list[tuple[str, str]]:
     return _TABLE_ROW.findall(_PAGE.read_text(encoding="utf-8"))
+
+
+def _documented() -> list[str]:
+    return [name for name, _ in _rows()]
 
 
 def test_every_variable_has_a_row() -> None:
@@ -69,3 +87,11 @@ def test_sources_include_variables_outside_settings() -> None:
         "CEREBRUM_INSTALL_DIR",
     } <= sources
     assert not _TEST_HOOKS & sources
+
+
+def test_docker_column_matches_the_compose_file() -> None:
+    compose = _compose_variables()
+    wrong = sorted(
+        name for name, docker in _rows() if (docker == "yes") != (name in compose)
+    )
+    assert not wrong, f"fix the Docker `.env` column for: {wrong}"

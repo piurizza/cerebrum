@@ -185,10 +185,10 @@ jobs:
         run: uv run zensical build --clean
 
       - name: No third-party requests
-        run: uv run python scripts/check_no_third_party.py site https://piurizza.github.io/cerebrum/
+        run: uv run python scripts/check_no_third_party.py site
 
       - name: Local links resolve
-        run: uv run python scripts/check_local_links.py site https://piurizza.github.io/cerebrum/
+        run: uv run python scripts/check_local_links.py site
 
   installer:
     # Runs deploy/install.sh the way a user would, against images built from

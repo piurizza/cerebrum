@@ -66,3 +66,10 @@ def test_resolves_root_absolute_links_under_the_site_prefix(tmp_path: Path) -> N
         "quick-start/index.html": "",
     }
     assert _broken(tmp_path, files) == ["/cerebrum/gone/"]
+
+
+def test_flags_root_absolute_links_missing_the_site_prefix(tmp_path: Path) -> None:
+    # Resolves locally but 404s on GitHub Pages, where the site lives under
+    # /cerebrum/.
+    files = {"index.html": '<img src="/assets/shot.png">', "assets/shot.png": ""}
+    assert _broken(tmp_path, files) == ["/assets/shot.png"]

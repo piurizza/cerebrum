@@ -2,7 +2,8 @@
 was not built: images, nav entries, and links in raw HTML blocks, which
 Zensical's own validation (markdown links only) does not see.
 
-Usage: check_local_links.py <site-dir> <site-url>
+Usage: check_local_links.py <site-dir> [<site-url>]
+(the site URL defaults to `site_url` in zensical.toml)
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+
+from site_config import site_url
 
 _SKIP_SCHEMES = ("mailto:", "tel:", "data:", "javascript:")
 _LINK_ATTRIBUTES = {"href", "src"}
@@ -44,9 +47,9 @@ def _resolve(site: Path, page: Path, target: str, site_url: str) -> Path | None:
     ):
         return None
     elif target.startswith("/"):
-        # Root-absolute, as on the 404 page: drop the site's path prefix
-        # (`/cerebrum/` when served from a project page).
-        path = target.removeprefix(urlsplit(site_url).path).lstrip("/")
+        # Root-absolute, as on the 404 page: under the site's path prefix
+        # (`/cerebrum/` on a project page; find_broken_links rejects others).
+        path = target.removeprefix(urlsplit(site_url).path)
         base = site
     else:
         path = target
@@ -56,12 +59,23 @@ def _resolve(site: Path, page: Path, target: str, site_url: str) -> Path | None:
     return resolved / "index.html" if path == "" or path.endswith("/") else resolved
 
 
+def _outside_prefix(target: str, prefix: str) -> bool:
+    """A root-absolute link without the site's path prefix resolves locally
+    but 404s once published under that prefix."""
+    is_root_absolute = target.startswith("/") and not target.startswith("//")
+    return is_root_absolute and not target.startswith(prefix)
+
+
 def find_broken_links(site: Path, site_url: str) -> list[BrokenLink]:
+    prefix = urlsplit(site_url).path or "/"
     broken: list[BrokenLink] = []
     for page in sorted(site.rglob("*.html")):
         parser = _LinkParser()
         parser.feed(page.read_text(encoding="utf-8", errors="replace"))
         for target in parser.targets:
+            if _outside_prefix(target, prefix):
+                broken.append(BrokenLink(str(page.relative_to(site)), target))
+                continue
             resolved = _resolve(site, page, target, site_url)
             if resolved is None:
                 continue
@@ -71,10 +85,10 @@ def find_broken_links(site: Path, site_url: str) -> list[BrokenLink]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
+    if len(argv) not in {2, 3}:
         print(__doc__, file=sys.stderr)
         return 2
-    broken = find_broken_links(Path(argv[1]), argv[2])
+    broken = find_broken_links(Path(argv[1]), argv[2] if len(argv) == 3 else site_url())
     for link in broken:
         print(f"{link.file}: broken link {link.target}", file=sys.stderr)
     if broken:

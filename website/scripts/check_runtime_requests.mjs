@@ -72,27 +72,46 @@ const server = createServer((request, response) => {
 await new Promise((done) => server.listen(0, "127.0.0.1", done));
 const origin = `http://127.0.0.1:${server.address().port}`;
 
+const problems = [];
 const browser = await chromium.launch();
-const page = await browser.newPage();
-const outside = [];
-page.on("request", (request) => {
-  const url = request.url();
-  if (url.startsWith("data:") || url.startsWith("blob:")) return;
-  if (new URL(url).origin !== origin) outside.push({ page: page.url(), url });
-});
-
-const pages = htmlPages(site);
-for (const file of pages) {
-  const path = relative(site, file).split("\\").join("/");
-  const target = `${origin}${prefix}${path.replace(/index\.html$/, "")}`;
-  await page.goto(target, { waitUntil: "networkidle" });
+try {
+  // Listening on the context, not the page, also catches requests made by
+  // workers (the search index runs in one).
+  const context = await browser.newContext();
+  let current = "";
+  context.on("request", (request) => {
+    const url = request.url();
+    if (url.startsWith("data:") || url.startsWith("blob:")) return;
+    if (new URL(url).origin !== origin) problems.push(`${current}: requested ${url}`);
+  });
+  // A same-site load that fails would 404 once published too.
+  context.on("response", (response) => {
+    if (response.url().startsWith(origin) && response.status() >= 400) {
+      problems.push(`${current}: ${response.status()} for ${response.url()}`);
+    }
+  });
+  const page = await context.newPage();
+  for (const file of htmlPages(site)) {
+    const path = relative(site, file).split("\\").join("/");
+    if (path === "404.html") continue; // served only for missing pages
+    current = `${prefix}${path.replace(/index\.html$/, "")}`;
+    try {
+      await page.goto(`${origin}${current}`, {
+        waitUntil: "networkidle",
+        timeout: 30_000,
+      });
+    } catch (error) {
+      problems.push(`${current}: ${error.message.split("\n")[0]}`);
+    }
+  }
+} finally {
+  await browser.close();
+  server.close();
 }
-await browser.close();
-server.close();
 
-for (const { page: from, url } of outside) console.error(`${from}: requested ${url}`);
-if (outside.length > 0) {
-  console.error(`${outside.length} request(s) to another origin.`);
+for (const problem of problems) console.error(problem);
+if (problems.length > 0) {
+  console.error(`${problems.length} problem(s) loading the site.`);
   process.exit(1);
 }
-console.log(`Loaded ${pages.length} pages; no request left ${origin}.`);
+console.log(`Loaded every page; no request left ${origin}.`);

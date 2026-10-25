@@ -13,8 +13,6 @@ the access token returned by `POST /api/auth/login`, or a personal API token
 created in **Settings** (it starts with `cbm_pat_`). Agents usually connect
 through [MCP](../agents/index.md) instead.
 
-Schema version 0.1.0.
-
 ## Account
 
 The signed-in account: its password and its sign-in provider link.
@@ -138,6 +136,8 @@ Register
 
 Request body: `application/json` ([`RegisterRequest`](#registerrequest))
 
+Returns: [`User`](#user)
+
 ## Graph
 
 The link graph between notes.
@@ -165,6 +165,8 @@ Invite tokens for new accounts. Admins only.
 ### `POST /api/invites`
 
 Create invite
+
+Returns: [`CreateInviteResponse`](#createinviteresponse)
 
 ## Notes
 
@@ -265,6 +267,8 @@ Returns: array of [`ApiTokenMeta`](#apitokenmeta)
 Create token
 
 Request body: `application/json` ([`CreateApiTokenRequest`](#createapitokenrequest))
+
+Returns: [`CreateApiTokenResponse`](#createapitokenresponse)
 
 ### `DELETE /api/tokens/{token_id}`
 

@@ -12,7 +12,8 @@ CDN or GitHub's API if switched on. Those URLs are listed in
 a Zensical upgrade that adds a new outbound request is caught here.
 `check_runtime_requests.mjs` then proves the listed loaders stay dormant.
 
-Usage: check_no_third_party.py <site-dir> <site-url>
+Usage: check_no_third_party.py <site-dir> [<site-url>]
+(the site URL defaults to `site_url` in zensical.toml)
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from site_config import site_url
+
 _ALLOWLIST = Path(__file__).with_name("allowed_bundle_urls.txt")
 _CSS_URL = re.compile(r"""url\(\s*['"]?([^'")\s]+)""")
 _CSS_IMPORT = re.compile(r"""@import\s+['"]([^'"]+)""")
@@ -32,6 +35,10 @@ _JS_URL = re.compile(r"""https?://[A-Za-z0-9.-]+[A-Za-z0-9/._@%~+-]*""")
 _JS_NAMESPACES = ("http://www.w3.org/",)
 # Attributes that make the browser fetch something on page load.
 _FETCH_ATTRIBUTES = {"src", "poster", "data"}
+# SVG elements whose `href` loads a resource rather than being a link.
+_SVG_FETCHING = {"image", "use", "feimage"}
+# Inline script types that hold data, not code the browser runs.
+_DATA_SCRIPT_TYPES = {"application/json", "application/ld+json", "importmap"}
 
 
 @dataclass(frozen=True)
@@ -51,7 +58,9 @@ class _PageParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.urls: list[str] = []
         self.styles: list[str] = []
+        self.scripts: list[str] = []
         self._in_style = False
+        self._in_script = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name: value or "" for name, value in attrs}
@@ -63,17 +72,26 @@ class _PageParser(HTMLParser):
             )
         if tag == "link" and "href" in values:
             self.urls.append(values["href"])
+        if tag in _SVG_FETCHING:
+            self.urls.extend(values[k] for k in ("href", "xlink:href") if k in values)
         if "style" in values:
             self.styles.append(values["style"])
         self._in_style = tag == "style"
+        self._in_script = (
+            tag == "script"
+            and "src" not in values
+            and values.get("type", "").lower() not in _DATA_SCRIPT_TYPES
+        )
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "style":
-            self._in_style = False
+        if tag in {"style", "script"}:
+            self._in_style = self._in_script = False
 
     def handle_data(self, data: str) -> None:
         if self._in_style:
             self.styles.append(data)
+        if self._in_script:
+            self.scripts.append(data)
 
 
 def _css_urls(css: str) -> list[str]:
@@ -103,6 +121,13 @@ def find_external_requests(
             parser = _PageParser()
             parser.feed(text)
             urls = parser.urls + [u for css in parser.styles for u in _css_urls(css)]
+            # Inline code is the site's own: no dormant-loader allowlist here.
+            urls += [
+                url
+                for script in parser.scripts
+                for url in _JS_URL.findall(script)
+                if not url.startswith(_JS_NAMESPACES)
+            ]
         elif path.suffix == ".css":
             urls = _css_urls(text)
         elif path.suffix in {".js", ".mjs"}:
@@ -119,10 +144,11 @@ def find_external_requests(
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
+    if len(argv) not in {2, 3}:
         print(__doc__, file=sys.stderr)
         return 2
-    findings = find_external_requests(Path(argv[1]), argv[2], _load_allowlist())
+    url = argv[2] if len(argv) == 3 else site_url()
+    findings = find_external_requests(Path(argv[1]), url, _load_allowlist())
     for finding in findings:
         print(f"{finding.file}: loads {finding.url}", file=sys.stderr)
     if findings:

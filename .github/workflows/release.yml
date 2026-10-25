@@ -394,8 +394,9 @@ jobs:
       - if: steps.present.outputs.present == 'true'
         run: uv sync --locked --all-groups
 
-      # Includes the check that every CHANGELOG version has an upgrade page,
-      # so a release without one is never published.
+      # The website's own tests, run against the release's tag. Once the
+      # upgrade pages exist they include a check that every CHANGELOG
+      # version has one, so a release without its page is never published.
       - if: steps.present.outputs.present == 'true'
         run: uv run pytest
 
@@ -404,8 +405,8 @@ jobs:
 
       - if: steps.present.outputs.present == 'true'
         run: |
-          uv run python scripts/check_no_third_party.py site https://piurizza.github.io/cerebrum/
-          uv run python scripts/check_local_links.py site https://piurizza.github.io/cerebrum/
+          uv run python scripts/check_no_third_party.py site
+          uv run python scripts/check_local_links.py site
 
       - if: steps.present.outputs.present == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
@@ -414,7 +415,12 @@ jobs:
 
   docs-deploy:
     needs: docs-build
-    if: needs.docs-build.outputs.present == 'true' && vars.DOCS_PUBLISH == 'true'
+    # The explicit result check (not the implicit success()) matters: on a
+    # manual or docs-only run release-please and images are skipped, and an
+    # implicit success() would skip this job along with them.
+    if: >-
+      !cancelled() && needs.docs-build.result == 'success' &&
+      needs.docs-build.outputs.present == 'true' && vars.DOCS_PUBLISH == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

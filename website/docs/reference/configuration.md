@@ -27,7 +27,7 @@ behind.
 | `CEREBRUM_LINK_FORMAT` | `markdown` | yes | `markdown` or `wikilink`: the link form the editor inserts and agents are asked to write. Both forms are always read. |
 | `VITE_DAILY_NOTE_FOLDER` | *(unset)* | yes | Older name for `CEREBRUM_DAILY_NOTE_FOLDER`, still read as a fallback. |
 | `VITE_TEMPLATES_FOLDER` | *(unset)* | yes | Older name for `CEREBRUM_TEMPLATES_FOLDER`, still read as a fallback. |
-| `MAX_ATTACHMENT_SIZE_BYTES` | `10000000` | no | Largest image, in bytes, that can be pasted into a note. |
+| `MAX_ATTACHMENT_SIZE_BYTES` | `10000000` | yes | Largest image, in bytes, that can be pasted into a note. |
 
 ## State outside the vault
 
@@ -43,9 +43,9 @@ behind.
 |---|---|---|---|
 | `AUTH_JWT_SECRET` | *(required)* | yes | Secret that signs session tokens. At least 32 characters; the install script generates one. |
 | `AUTH_SETUP_TOKEN` | *(required)* | yes | One-time invite token for the first account, which becomes the admin. |
-| `AUTH_ACCESS_TOKEN_TTL_MINUTES` | `10` | no | How long an access token lasts, in minutes. |
-| `AUTH_REFRESH_TOKEN_TTL_DAYS` | `30` | no | How long a session lasts without signing in again, in days. |
-| `AUTH_COOKIE_SECURE` | `false` | no | Marks the session cookie as HTTPS-only. Turn on once Cerebrum is served only over HTTPS. |
+| `AUTH_ACCESS_TOKEN_TTL_MINUTES` | `10` | yes | How long an access token lasts, in minutes. |
+| `AUTH_REFRESH_TOKEN_TTL_DAYS` | `30` | yes | How long a session lasts without signing in again, in days. |
+| `AUTH_COOKIE_SECURE` | `false` | yes | Marks the session cookie as HTTPS-only. Turn on once Cerebrum is served only over HTTPS. |
 | `AUTH_PASSWORD_LOGIN` | `true` | yes | `false` turns off password registration, and password sign-in for non-admins who have linked a provider. Admins always keep their password. Needs a provider configured. |
 | `OIDC_ISSUER` | *(unset)* | yes | Issuer URL of an OpenID Connect provider. Set it with `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` to turn on sign-in with the provider. |
 | `OIDC_CLIENT_ID` | *(unset)* | yes | Client ID registered at the provider. |
@@ -65,16 +65,16 @@ behind.
 | `CEREBRUM_BIND_ADDRESS` | `127.0.0.1` | yes | Network interface both ports listen on. The default is this machine only; `0.0.0.0` makes Cerebrum reachable by every device on your network, over plain HTTP too. |
 | `CEREBRUM_TLS_SAN` | *(unset)* | yes | Extra names for the self-signed certificate, comma-separated, for example `IP:192.0.2.10,DNS:notes.example.lan`. |
 | `CORS_ORIGINS` | `["http://localhost:5173"]` | no | Web origins allowed to call the API from a browser. Only needed for development. |
-| `MCP_ENABLED` | `true` | no | Serves the MCP endpoint for agents at `/api/mcp`. |
+| `MCP_ENABLED` | `true` | yes | Serves the MCP endpoint for agents at `/api/mcp`. |
 
 ## Index and file watching
 
 | Variable | Default | Docker `.env` | What it does |
 |---|---|---|---|
-| `WATCHER_ENABLED` | `true` | no | Watches the vault for changes made outside Cerebrum and keeps the index current. |
-| `WATCHER_DEBOUNCE_MS` | `400` | no | How long, in milliseconds, to collect file changes before indexing them. |
-| `WATCHER_BACKSTOP_INTERVAL_SECONDS` | `300` | no | How often, in seconds, a full rescan catches anything the watcher missed. |
-| `WATCHER_RENAME_PAIRING_WINDOW_SECONDS` | `30` | no | How long, in seconds, a deleted note is remembered so a later re-creation counts as a rename. |
+| `WATCHER_ENABLED` | `true` | yes | Watches the vault for changes made outside Cerebrum and keeps the index current. |
+| `WATCHER_DEBOUNCE_MS` | `400` | yes | How long, in milliseconds, to collect file changes before indexing them. |
+| `WATCHER_BACKSTOP_INTERVAL_SECONDS` | `300` | yes | How often, in seconds, a full rescan catches anything the watcher missed. |
+| `WATCHER_RENAME_PAIRING_WINDOW_SECONDS` | `30` | yes | How long, in seconds, a deleted note is remembered so a later re-creation counts as a rename. |
 | `WATCHFILES_FORCE_POLLING` | *(unset)* | yes | Polls the vault instead of using file system events. Turn on for Docker Desktop on macOS or Windows, and for network file systems. |
 
 ## Install and containers
@@ -90,9 +90,9 @@ behind.
 
 | Variable | Default | Docker `.env` | What it does |
 |---|---|---|---|
-| `APP_ENV` | `development` (`production` in Docker) | no | Environment name, shown in logs. |
-| `APP_NAME` | `Cerebrum` | no | Application name. |
-| `LOG_LEVEL` | `INFO` | no | How much the backend logs: `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+| `APP_ENV` | `development` (`production` in Docker) | no | Not used yet: the backend does not read it. |
+| `APP_NAME` | `Cerebrum` | no | The name the server reports in its health check and to MCP clients. |
+| `LOG_LEVEL` | `INFO` | no | Not used yet: the backend does not read it. |
 
 ## Build-time (developers)
 

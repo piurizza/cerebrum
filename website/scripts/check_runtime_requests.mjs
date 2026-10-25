@@ -53,6 +53,10 @@ const server = createServer((request, response) => {
     return;
   }
   let file = join(site, decodeURIComponent(url.pathname.slice(prefix.length)));
+  if (file !== site && !file.startsWith(`${site}/`)) {
+    response.writeHead(404).end();
+    return;
+  }
   try {
     if (statSync(file).isDirectory()) file = join(file, "index.html");
     statSync(file);
@@ -60,7 +64,9 @@ const server = createServer((request, response) => {
     response.writeHead(404).end();
     return;
   }
-  response.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
+  response.writeHead(200, {
+    "content-type": TYPES[extname(file)] ?? "application/octet-stream",
+  });
   createReadStream(file).pipe(response);
 });
 await new Promise((done) => server.listen(0, "127.0.0.1", done));

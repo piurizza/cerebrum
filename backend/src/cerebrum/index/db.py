@@ -7,6 +7,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from cerebrum.index.search_query import parse_query
 from cerebrum.notes.models import NoteMeta
 
 _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
@@ -65,26 +66,35 @@ def list_notes(conn: sqlite3.Connection) -> list[NoteMeta]:
 
 def search_notes(conn: sqlite3.Connection, query: str) -> list[NoteMeta]:
     """Full-text search over title + body, backed by `notes_fts` (kept in
-    sync with `notes` on every upsert/delete -- see index/indexer.py).
+    sync with `notes` on every upsert/delete -- see index/indexer.py),
+    narrowed by the `#tag` / `-#tag` syntax in `index/search_query.py`.
 
     Each word in `query` becomes an FTS5 prefix term; all terms must
     match (across title or body, in any order) for a note to qualify.
-    Results are ranked by relevance (`bm25`), most relevant first.
+    Results are ranked by relevance (`bm25`), most relevant first. A
+    query of only tags lists every note carrying them, by path.
     """
-    terms = re.findall(r"\w+", query)
-    if not terms:
+    parsed = parse_query(query)
+    terms = re.findall(r"\w+", parsed.text)
+    if not terms and not parsed.has_tags:
         return []
 
-    match_query = " AND ".join(f"{term}*" for term in terms)
     with write_lock:
-        rows = conn.execute(
-            """
-            SELECT n.path, n.title, n.tags, n.created, n.updated
-            FROM notes_fts
-            JOIN notes n ON n.path = notes_fts.path
-            WHERE notes_fts MATCH ?
-            ORDER BY bm25(notes_fts)
-            """,
-            (match_query,),
-        ).fetchall()
-    return [row_to_note_meta(row) for row in rows]
+        if terms:
+            match_query = " AND ".join(f"{term}*" for term in terms)
+            rows = conn.execute(
+                """
+                SELECT n.path, n.title, n.tags, n.created, n.updated
+                FROM notes_fts
+                JOIN notes n ON n.path = notes_fts.path
+                WHERE notes_fts MATCH ?
+                ORDER BY bm25(notes_fts)
+                """,
+                (match_query,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT path, title, tags, created, updated FROM notes ORDER BY path"
+            ).fetchall()
+    notes = [row_to_note_meta(row) for row in rows]
+    return [note for note in notes if parsed.matches(note.tags)]

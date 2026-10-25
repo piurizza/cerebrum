@@ -29,6 +29,7 @@ vi.mock("react-router-dom", async () => {
 const mockPutNote = vi.fn<(path: string, content: string) => Promise<unknown>>();
 const mockGetNote = vi.fn<(path: string) => Promise<{ content: string }>>();
 const mockGetVaultSettings = vi.fn<() => Promise<unknown>>();
+const mockSearchNotes = vi.fn<(query: string) => Promise<NoteMeta[]>>();
 vi.mock("../../api/client", async () => {
   const actual =
     await vi.importActual<typeof import("../../api/client")>("../../api/client");
@@ -36,6 +37,7 @@ vi.mock("../../api/client", async () => {
     ...actual,
     putNote: (path: string, content: string) => mockPutNote(path, content),
     getNote: (path: string) => mockGetNote(path),
+    searchNotes: (query: string) => mockSearchNotes(query),
     getVaultSettings: () => mockGetVaultSettings(),
   };
 });
@@ -59,6 +61,7 @@ vi.mock("../../context/OfflineContext", () => ({
   useOffline: () => mockUseOffline(),
 }));
 
+import { TagSelectionProvider } from "../../context/TagSelectionContext";
 import { NoteBrowser } from "./NoteBrowser";
 
 const refreshNotes = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
@@ -77,7 +80,9 @@ function setNotesState(notes: NoteMeta[], overrides: { loading?: boolean } = {})
 function renderBrowser() {
   return render(
     <MemoryRouter>
-      <NoteBrowser />
+      <TagSelectionProvider>
+        <NoteBrowser />
+      </TagSelectionProvider>
     </MemoryRouter>,
   );
 }
@@ -355,7 +360,7 @@ describe("NoteBrowser + New note / templates", () => {
     expect(screen.getByRole("button", { name: "Create note" })).toBeEnabled();
     // Still the picker, not a full-sidebar replacement: the sidebar's
     // other chrome (search input) is still present alongside the alert.
-    expect(screen.getByPlaceholderText("Search notes...")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search notes" })).toBeInTheDocument();
     expect(
       screen.getByRole("dialog", { name: "Choose a template" }),
     ).toBeInTheDocument();
@@ -451,7 +456,9 @@ describe("NoteBrowser offline gating (R3)", () => {
     mockUseOffline.mockReturnValue({ isOffline: true, lastSyncedAt: null });
     rerender(
       <MemoryRouter>
-        <NoteBrowser />
+        <TagSelectionProvider>
+          <NoteBrowser />
+        </TagSelectionProvider>
       </MemoryRouter>,
     );
 
@@ -477,7 +484,7 @@ describe("NoteBrowser read-only vault", () => {
     expect(screen.queryByRole("button", { name: "Today" })).toBeNull();
     expect(screen.queryByRole("button", { name: "+ New note" })).toBeNull();
     // Browsing still works.
-    expect(screen.getByPlaceholderText("Search notes...")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search notes" })).toBeInTheDocument();
   });
 
   it("hides them, not just disables them, when read-only and offline at once", () => {
@@ -525,5 +532,268 @@ describe("NoteBrowser read-only vault", () => {
     expect(screen.queryByRole("dialog", { name: "Choose a template" })).toBeNull();
     expect(screen.queryByRole("button", { name: "+ New note" })).toBeNull();
     expect(mockPutNote).not.toHaveBeenCalled();
+  });
+});
+
+// Tags live in the search box: typing `#` suggests them, a pick becomes a
+// chip, and tags alone filter the cached notes (keeping the tree) while a
+// word sends the whole query to the server.
+describe("NoteBrowser tag search", () => {
+  function tagged(path: string, ...tags: string[]): NoteMeta {
+    return { ...makeNoteMeta(path), tags };
+  }
+
+  function visiblePaths(): string[] {
+    return screen
+      .queryAllByRole("link")
+      .map((link) => link.getAttribute("href") ?? "")
+      .map((href) => decodeURIComponent(href.replace("/notes/", "")));
+  }
+
+  beforeEach(() => {
+    mockSearchNotes.mockReset();
+    mockSearchNotes.mockResolvedValue([]);
+    setNotesState([
+      tagged("work/plan.md", "work"),
+      tagged("work/acme.md", "work/acme", "draft"),
+      tagged("home/garden.md", "home"),
+      tagged("home/both.md", "home", "work"),
+    ]);
+  });
+
+  it("renders no tag pills, however many tags there are", () => {
+    setNotesState(Array.from({ length: 60 }, (_, i) => tagged(`${i}.md`, `tag${i}`)));
+    const { container } = renderBrowser();
+    expect(container.querySelector(".tag-pill")).toBeNull();
+    expect(screen.queryByRole("button", { name: "tag1" })).toBeNull();
+  });
+
+  it("suggests tags with counts on #, and Enter picks the first", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    const box = screen.getByRole("combobox", { name: "Search notes" });
+
+    await user.type(box, "#wo");
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "work3",
+      "work/acme1",
+    ]);
+    expect(box).toHaveAttribute("aria-expanded", "true");
+    expect(box).toHaveAttribute("aria-activedescendant", options[0].id);
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Remove tag work" })).toBeInTheDocument();
+    expect(box).toHaveValue("");
+    expect(box).toHaveFocus();
+    expect(visiblePaths().sort()).toEqual([
+      "home/both.md",
+      "work/acme.md",
+      "work/plan.md",
+    ]);
+  });
+
+  it("keeps the folder tree when filtering by tags alone, without a request", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#home ");
+
+    expect(screen.getByRole("button", { name: "Remove tag home" })).toBeInTheDocument();
+    expect(visiblePaths().sort()).toEqual(["home/both.md", "home/garden.md"]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(mockSearchNotes).not.toHaveBeenCalled();
+  });
+
+  it("needs every chip to match", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#home #work ");
+    expect(visiblePaths()).toEqual(["home/both.md"]);
+  });
+
+  it("picks with the arrow keys", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#wo");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(
+      screen.getByRole("button", { name: "Remove tag work/acme" }),
+    ).toBeInTheDocument();
+  });
+
+  it("picks by click", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#ho");
+    await user.click(screen.getByRole("option", { name: /home/ }));
+    expect(screen.getByRole("button", { name: "Remove tag home" })).toBeInTheDocument();
+  });
+
+  it("only suggests tags that would still give results", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    const box = screen.getByRole("combobox");
+    await user.type(box, "#home ");
+    await user.type(box, "#");
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "work1",
+    ]);
+  });
+
+  it("matches nested tags under a chip", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#work ");
+    expect(visiblePaths()).toContain("work/acme.md");
+  });
+
+  it("makes an exclusion chip from a typed -#tag", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "-#draft ");
+
+    expect(
+      screen.getByRole("button", { name: "Remove excluded tag draft" }),
+    ).toBeInTheDocument();
+    expect(visiblePaths()).not.toContain("work/acme.md");
+  });
+
+  it("makes an exclusion chip when picking after -#", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "-#ho");
+    await user.keyboard("{Enter}");
+
+    expect(
+      screen.getByRole("button", { name: "Remove excluded tag home" }),
+    ).toBeInTheDocument();
+    expect(visiblePaths().sort()).toEqual(["work/acme.md", "work/plan.md"]);
+  });
+
+  it("does not filter on the tag still being typed", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#wo");
+    expect(visiblePaths()).toHaveLength(4);
+  });
+
+  it("does not apply a half-typed tag when the box loses focus", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#wo");
+    // Blur by clicking elsewhere (Tab would pick the active suggestion).
+    await user.click(document.body);
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(visiblePaths()).toHaveLength(4);
+  });
+
+  it("keeps a space inside a quoted tag instead of making a chip", async () => {
+    setNotesState([
+      tagged("a.md", "work"),
+      tagged("b.md", "work log"),
+      tagged("c.md", "home"),
+    ]);
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), '#"work log" ');
+
+    expect(screen.queryByRole("button", { name: "Remove tag work" })).toBeNull();
+    expect(visiblePaths()).toEqual(["b.md"]);
+  });
+
+  it("filters on an unknown typed tag, down to nothing", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#nope ");
+    expect(screen.getByText("No notes match #nope.")).toBeInTheDocument();
+  });
+
+  it("says when no tag matches what is typed", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#zzz");
+    expect(screen.getByText("No matching tags")).toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("sends a word and the chips to the server and lists the results", async () => {
+    mockSearchNotes.mockResolvedValue([tagged("home/garden.md", "home")]);
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "#home bread");
+
+    await waitFor(() => expect(mockSearchNotes).toHaveBeenCalledWith("#home bread"));
+    expect(mockSearchNotes).toHaveBeenCalledTimes(1);
+    expect(
+      await screen.findByRole("link", { name: "home/garden.md" }),
+    ).toBeInTheDocument();
+  });
+
+  it("sends accented words unchanged", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    await user.type(screen.getByRole("combobox"), "città");
+    await waitFor(() => expect(mockSearchNotes).toHaveBeenCalledWith("città"));
+  });
+
+  it("drops a slow response that arrives after a newer one", async () => {
+    let resolveFirst!: (notes: NoteMeta[]) => void;
+    mockSearchNotes
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce([tagged("home/garden.md", "home")]);
+    const user = userEvent.setup();
+    renderBrowser();
+    const box = screen.getByRole("combobox");
+
+    await user.type(box, "bread");
+    await waitFor(() => expect(mockSearchNotes).toHaveBeenCalledTimes(1));
+    await user.type(box, "s");
+    await waitFor(() => expect(mockSearchNotes).toHaveBeenCalledTimes(2));
+    expect(
+      await screen.findByRole("link", { name: "home/garden.md" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      resolveFirst([tagged("work/plan.md", "work")]);
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("link", { name: "work/plan.md" })).toBeNull();
+  });
+
+  it("removes the last chip on Backspace and a chip with its button", async () => {
+    const user = userEvent.setup();
+    renderBrowser();
+    const box = screen.getByRole("combobox");
+    await user.type(box, "#home #work ");
+
+    await user.keyboard("{Backspace}");
+    expect(screen.queryByRole("button", { name: "Remove tag work" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Remove tag home" }));
+    expect(visiblePaths()).toHaveLength(4);
+  });
+
+  it("closes the list on Escape without clearing the text or reaching the document", async () => {
+    const onDocumentKeyDown = vi.fn();
+    document.addEventListener("keydown", onDocumentKeyDown);
+    const user = userEvent.setup();
+    renderBrowser();
+    const box = screen.getByRole("combobox");
+
+    await user.type(box, "#wo");
+    onDocumentKeyDown.mockClear();
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(box).toHaveValue("#wo");
+    expect(box).toHaveAttribute("aria-expanded", "false");
+    expect(onDocumentKeyDown).not.toHaveBeenCalled();
+    document.removeEventListener("keydown", onDocumentKeyDown);
   });
 });

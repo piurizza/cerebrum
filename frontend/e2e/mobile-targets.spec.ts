@@ -38,7 +38,7 @@ test("the folder-picker modal is a full-screen sheet", async ({ page }) => {
 test("primary drawer controls meet the 44px target", async ({ page }) => {
   for (const locator of [
     page.locator(".app-nav a").first(),
-    page.locator(".tag-pill").first(),
+    page.locator(".search-box"),
     page.locator(".note-folder").first(),
     page.getByRole("button", { name: "Log out" }),
   ]) {
@@ -54,4 +54,33 @@ test("note links in the tree meet the 44px target", async ({ page }) => {
   await expect(link).toBeVisible();
   const box = await link.boundingBox();
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+});
+
+test("tag suggestions and chip remove buttons meet the 44px target", async ({
+  page,
+}) => {
+  // Runs against a real vault, so it never seeds notes: a vault without
+  // tags has no suggestions to measure, and the test is skipped there.
+  const box = page.getByRole("combobox", { name: "Search notes" });
+  await box.tap();
+  await box.fill("#");
+  const option = page.getByRole("option").first();
+  test.skip(
+    !(await option.isVisible().catch(() => false)),
+    "the vault has no tags to suggest",
+  );
+  await expect(option).toBeVisible();
+  expect((await option.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+  await box.press("Enter");
+  const remove = page.getByRole("button", { name: /^Remove tag / }).first();
+  await expect(remove).toBeVisible();
+  expect((await remove.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+  // Escape with the list open closes only the list, never the drawer.
+  await box.fill("#");
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await box.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(page.locator(".app-sidebar")).toHaveClass(/is-open/);
 });

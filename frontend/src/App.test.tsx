@@ -35,6 +35,9 @@ vi.mock("./pages/SettingsPage", () => ({
 vi.mock("./pages/NoteViewPage", () => ({
   NoteViewPage: () => <div>note page</div>,
 }));
+// The real front page reads useNotes(), and these tests mount no
+// NotesProvider.
+vi.mock("./pages/HomePage", () => ({ HomePage: () => <div>home page</div> }));
 
 import { AppShell } from "./App";
 

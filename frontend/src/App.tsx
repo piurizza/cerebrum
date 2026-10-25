@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createBrowserRouter,
   Navigate,
@@ -16,9 +16,12 @@ import { ReadOnlyBanner } from "./components/ReadOnlyBanner";
 import { ReloadPrompt } from "./components/ReloadPrompt";
 import { useAuth } from "./context/AuthContext";
 import { NotesProvider } from "./context/NotesContext";
+import { TagSelectionProvider } from "./context/TagSelectionContext";
 import { useZenMode, ZenModeProvider } from "./context/ZenModeContext";
 import { useFocusTrap } from "./hooks/useFocusTrap";
+import { MOBILE_QUERY, useMediaQuery } from "./hooks/useMediaQuery";
 import { GraphViewPage } from "./pages/GraphViewPage";
+import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { NoteViewPage } from "./pages/NoteViewPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -39,26 +42,10 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** Subscribes to a media query and re-renders on match changes. Local to
- * this file -- the only consumer is the mobile drawer gate below. Reads
- * `window.matchMedia` once (captured on first render) so a test can swap
- * the implementation per-case before mounting. */
-function useMediaQuery(query: string): boolean {
-  const [mql] = useState(() => window.matchMedia(query));
-  return useSyncExternalStore(
-    (onChange) => {
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    },
-    () => mql.matches,
-    () => false,
-  );
-}
-
 export function AppShell() {
   const { logout } = useAuth();
   const { isZen } = useZenMode();
-  const isMobile = useMediaQuery("(max-width: 768px)");
+  const isMobile = useMediaQuery(MOBILE_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
@@ -102,41 +89,44 @@ export function AppShell() {
     .join(" ");
 
   return (
-    <div className="app-layout">
-      {/* Mobile-only chrome (index.css hides it at desktop widths). The
+    // Above both the sidebar and <Routes>, so the tags picked in the search
+    // box and on the front page are one selection that survives navigation.
+    <TagSelectionProvider>
+      <div className="app-layout">
+        {/* Mobile-only chrome (index.css hides it at desktop widths). The
           wordmark lives here on mobile; the drawer keeps nav + browser +
           Log out only. */}
-      <header className="app-topbar">
-        <button
-          type="button"
-          ref={hamburgerRef}
-          className="app-hamburger"
-          aria-label="Menu"
-          aria-expanded={drawerOpen}
-          aria-controls="app-sidebar"
-          onClick={() => {
-            // Focus first so the trap captures the hamburger as its
-            // restore target on open, and so a pointer toggle-to-close
-            // still lands focus somewhere sane.
-            hamburgerRef.current?.focus();
-            setDrawerOpen((open) => !open);
-          }}
-        >
-          <span aria-hidden="true">☰</span>
-        </button>
-        <span className="app-topbar-brand">Cerebrum</span>
-      </header>
+        <header className="app-topbar">
+          <button
+            type="button"
+            ref={hamburgerRef}
+            className="app-hamburger"
+            aria-label="Menu"
+            aria-expanded={drawerOpen}
+            aria-controls="app-sidebar"
+            onClick={() => {
+              // Focus first so the trap captures the hamburger as its
+              // restore target on open, and so a pointer toggle-to-close
+              // still lands focus somewhere sane.
+              hamburgerRef.current?.focus();
+              setDrawerOpen((open) => !open);
+            }}
+          >
+            <span aria-hidden="true">☰</span>
+          </button>
+          <span className="app-topbar-brand">Cerebrum</span>
+        </header>
 
-      {drawerOpen && (
-        <button
-          type="button"
-          className="drawer-backdrop"
-          aria-label="Close menu"
-          onClick={() => setDrawerOpen(false)}
-        />
-      )}
+        {drawerOpen && (
+          <button
+            type="button"
+            className="drawer-backdrop"
+            aria-label="Close menu"
+            onClick={() => setDrawerOpen(false)}
+          />
+        )}
 
-      {/* Zen mode only collapses the sidebar visually (width/opacity in
+        {/* Zen mode only collapses the sidebar visually (width/opacity in
           index.css) -- without `inert`/`aria-hidden`, every nav link,
           search box, tag filter, note, and Logout stays keyboard- and
           screen-reader-reachable while invisible. `inert` (React 19) drops
@@ -144,59 +134,53 @@ export function AppShell() {
           hidden` covers browsers where `inert` isn't yet respected by
           assistive tech. The same treatment applies to the closed drawer
           on mobile. */}
-      <aside
-        id="app-sidebar"
-        ref={drawerRef}
-        className={sidebarClass}
-        inert={sidebarHidden}
-        aria-hidden={sidebarHidden}
-      >
-        <h1 className="app-title">Cerebrum</h1>
-        <nav className="app-nav">
-          <NavLink
-            to="/graph"
-            className={({ isActive }) => (isActive ? "is-active" : undefined)}
-          >
-            Graph
-          </NavLink>
-          <NavLink
-            to="/tasks"
-            className={({ isActive }) => (isActive ? "is-active" : undefined)}
-          >
-            Tasks
-          </NavLink>
-          <NavLink
-            to="/settings"
-            className={({ isActive }) => (isActive ? "is-active" : undefined)}
-          >
-            Settings
-          </NavLink>
-        </nav>
-        <NoteBrowser />
-        <button type="button" className="btn btn-block" onClick={logout}>
-          Log out
-        </button>
-      </aside>
-      <main className="app-main" inert={isMobile && drawerOpen}>
-        <OfflineBanner />
-        <ReadOnlyBanner />
-        <IosInstallHint />
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <p className="empty-hint">
-                Select a note from the sidebar, or create a new one.
-              </p>
-            }
-          />
-          <Route path="/notes/*" element={<NoteViewPage />} />
-          <Route path="/graph" element={<GraphViewPage />} />
-          <Route path="/tasks" element={<TasksPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-        </Routes>
-      </main>
-    </div>
+        <aside
+          id="app-sidebar"
+          ref={drawerRef}
+          className={sidebarClass}
+          inert={sidebarHidden}
+          aria-hidden={sidebarHidden}
+        >
+          <h1 className="app-title">Cerebrum</h1>
+          <nav className="app-nav">
+            <NavLink
+              to="/graph"
+              className={({ isActive }) => (isActive ? "is-active" : undefined)}
+            >
+              Graph
+            </NavLink>
+            <NavLink
+              to="/tasks"
+              className={({ isActive }) => (isActive ? "is-active" : undefined)}
+            >
+              Tasks
+            </NavLink>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) => (isActive ? "is-active" : undefined)}
+            >
+              Settings
+            </NavLink>
+          </nav>
+          <NoteBrowser />
+          <button type="button" className="btn btn-block" onClick={logout}>
+            Log out
+          </button>
+        </aside>
+        <main className="app-main" inert={isMobile && drawerOpen}>
+          <OfflineBanner />
+          <ReadOnlyBanner />
+          <IosInstallHint />
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/notes/*" element={<NoteViewPage />} />
+            <Route path="/graph" element={<GraphViewPage />} />
+            <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Routes>
+        </main>
+      </div>
+    </TagSelectionProvider>
   );
 }
 

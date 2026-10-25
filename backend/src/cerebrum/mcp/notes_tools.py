@@ -130,8 +130,14 @@ def _register_notes_read_tools(mcp: FastMCP, app: FastAPI) -> None:
         description=(
             "Call this to find notes whose title or content matches a query, "
             "before reading the full one with get-note. Returns matching "
-            "notes' metadata, ranked by relevance -- not their content. An "
-            "empty query or no matches returns an empty list, not an error. "
+            "notes' metadata, ranked by relevance -- not their content. "
+            "'#tag' keeps only notes with that tag or a tag nested under it "
+            "('#work' also matches 'work/clientA'), '-#tag' drops them, "
+            "'#\"two words\"' quotes a tag with a space, and several tags "
+            "must all match. Tags ignore case; digits alone ('#42') stay a "
+            "word. A query of only tags lists "
+            "every note carrying them, by path. An empty query or no "
+            "matches returns an empty list, not an error. "
             f"{INDEX_LAG_WARNING}"
         ),
         annotations=_READ_ONLY_ANNOTATIONS,

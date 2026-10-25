@@ -1,0 +1,3 @@
+# Every change to main needs the owner's review (enforced by the "Protect main"
+# ruleset, which requires a code-owner approval on pull requests).
+* @piurizza

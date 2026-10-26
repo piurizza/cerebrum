@@ -95,3 +95,29 @@ def test_docker_column_matches_the_compose_file() -> None:
         name for name, docker in _rows() if (docker == "yes") != (name in compose)
     )
     assert not wrong, f"fix the Docker `.env` column for: {wrong}"
+
+
+# `${NAME:-default}` with a plain default (no nested `${...}` fallback).
+_COMPOSE_DEFAULT = re.compile(r"\$\{([A-Z][A-Z0-9_]*):-([^}$]*)\}")
+
+
+def _as_env_text(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def test_compose_defaults_match_the_backend() -> None:
+    # Compose hands the container its default when `.env` leaves a variable
+    # out, so a default that differs from the backend's own would quietly
+    # change behaviour for Docker installs only.
+    compose = (_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    fields = Settings.model_fields
+    wrong = [
+        f"{name}: compose {default!r}, backend {_as_env_text(field.default)!r}"
+        for name, default in _COMPOSE_DEFAULT.findall(compose)
+        if default
+        and (field := fields.get(name.lower())) is not None
+        and default != _as_env_text(field.default)
+    ]
+    assert not wrong, wrong

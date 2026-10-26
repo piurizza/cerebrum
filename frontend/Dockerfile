@@ -21,7 +21,8 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY nginx-locations.conf /etc/nginx/nginx-locations.conf
 COPY docker-entrypoint.sh /docker-entrypoint.d/../cerebrum-entrypoint.sh
-RUN chmod +x /cerebrum-entrypoint.sh
+RUN chmod +x /cerebrum-entrypoint.sh \
+    && echo "client_max_body_size 11m;" > /etc/nginx/cerebrum-upload.conf
 
 EXPOSE 80 443
 ENTRYPOINT ["/cerebrum-entrypoint.sh"]

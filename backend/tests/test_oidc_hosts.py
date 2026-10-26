@@ -43,7 +43,7 @@ def test_start_refuses_a_malformed_host(
     [
         ("[::1]:7812", "http://[::1]:7812/api/auth/oidc/callback"),
         ("[fd7a:115c::1]", "http://[fd7a:115c::1]/api/auth/oidc/callback"),
-        ("192.168.1.14:7811", "http://192.168.1.14:7811/api/auth/oidc/callback"),
+        ("192.0.2.10:7811", "http://192.0.2.10:7811/api/auth/oidc/callback"),
     ],
 )
 @pytest.mark.usefixtures("fake_provider")

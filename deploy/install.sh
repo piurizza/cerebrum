@@ -15,7 +15,7 @@
 #   CEREBRUM_HTTPS_PORT    HTTPS port (default: 7812)
 #   CEREBRUM_BIND_ADDRESS  127.0.0.1 = this machine only (default);
 #                          0.0.0.0 or a LAN address = phone and other devices
-#   CEREBRUM_TLS_SAN       extra HTTPS certificate names, e.g. IP:192.168.1.14
+#   CEREBRUM_TLS_SAN       extra HTTPS certificate names, e.g. IP:192.0.2.10
 #
 # Testing hooks (CI runs the installer against locally built images):
 #   CEREBRUM_COMPOSE_SOURCE  copy this local compose file instead of downloading

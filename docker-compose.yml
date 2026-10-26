@@ -57,6 +57,23 @@ services:
       OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
       OIDC_ALLOW_INSECURE_ISSUER: ${OIDC_ALLOW_INSECURE_ISSUER:-false}
       AUTH_PASSWORD_LOGIN: ${AUTH_PASSWORD_LOGIN:-true}
+      # Sessions and the cookie. Turn AUTH_COOKIE_SECURE on once every
+      # sign-in goes over HTTPS; plain-HTTP sign-in stops working with it.
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      AUTH_ACCESS_TOKEN_TTL_MINUTES: ${AUTH_ACCESS_TOKEN_TTL_MINUTES:-10}
+      AUTH_REFRESH_TOKEN_TTL_DAYS: ${AUTH_REFRESH_TOKEN_TTL_DAYS:-30}
+      # The MCP server at /api/mcp, for AI assistants.
+      MCP_ENABLED: ${MCP_ENABLED:-true}
+      # Largest pasted image, in bytes.
+      MAX_ATTACHMENT_SIZE_BYTES: ${MAX_ATTACHMENT_SIZE_BYTES:-10000000}
+      # How the server notices notes changed outside it (an editor, a sync
+      # tool). The defaults suit most vaults.
+      WATCHER_ENABLED: ${WATCHER_ENABLED:-true}
+      WATCHER_DEBOUNCE_MS: ${WATCHER_DEBOUNCE_MS:-400}
+      WATCHER_BACKSTOP_INTERVAL_SECONDS: ${WATCHER_BACKSTOP_INTERVAL_SECONDS:-300}
+      WATCHER_RENAME_PAIRING_WINDOW_SECONDS: ${WATCHER_RENAME_PAIRING_WINDOW_SECONDS:-30}
+      # DEBUG, INFO, WARNING, ERROR or CRITICAL: how much Cerebrum logs.
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ${CEREBRUM_VAULT_HOST_PATH:-./vault}:/data/vault
       # Opt-in: create the folder as yourself first (`mkdir -p data`), or
@@ -80,10 +97,13 @@ services:
     restart: unless-stopped
     environment:
       # Extra Subject Alternative Names for the self-signed HTTPS cert
-      # (KD4/U1) -- e.g. "IP:192.168.1.14" for LAN/phone access. Left for
+      # (KD4/U1) -- e.g. "IP:192.0.2.10" for LAN/phone access. Left for
       # the operator to set explicitly, matching WATCHFILES_FORCE_POLLING
       # above: not something to auto-detect and guess at.
       CEREBRUM_TLS_SAN: ${CEREBRUM_TLS_SAN:-}
+      # nginx accepts request bodies up to this (plus headroom), so the
+      # backend's own limit on pasted images is the one that applies.
+      MAX_ATTACHMENT_SIZE_BYTES: ${MAX_ATTACHMENT_SIZE_BYTES:-10000000}
     # Reachable only from this machine unless CEREBRUM_BIND_ADDRESS opens it
     # (0.0.0.0 for every network, or one interface's address). Plain HTTP on
     # every network would expose the login page and the MCP endpoint to

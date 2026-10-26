@@ -18,7 +18,7 @@ KEY_FILE="$CERT_DIR/cerebrum.key"
 if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
   mkdir -p "$CERT_DIR"
   # CEREBRUM_TLS_SAN: extra Subject Alternative Names for LAN/phone access
-  # (e.g. "IP:192.168.1.14" or "DNS:cerebrum.local"), comma-separated.
+  # (e.g. "IP:192.0.2.10" or "DNS:cerebrum.local"), comma-separated.
   # Left for the operator to set -- like WATCHFILES_FORCE_POLLING elsewhere
   # in this repo, this isn't something to auto-detect and guess at.
   SAN="DNS:localhost,IP:127.0.0.1"
@@ -32,5 +32,17 @@ if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
     -addext "subjectAltName=$SAN"
   chmod 600 "$KEY_FILE"
 fi
+
+# The largest request body nginx accepts: the backend's limit on a pasted
+# image (MAX_ATTACHMENT_SIZE_BYTES, default 10 MB) plus 1 MiB, so an image
+# just over the limit gets the backend's own error instead of nginx's.
+MAX_BYTES="${MAX_ATTACHMENT_SIZE_BYTES:-10000000}"
+case "$MAX_BYTES" in
+  '' | *[!0-9]*)
+    echo "MAX_ATTACHMENT_SIZE_BYTES must be a whole number of bytes, got '$MAX_BYTES'" >&2
+    exit 1
+    ;;
+esac
+echo "client_max_body_size $((MAX_BYTES + 1048576));" > /etc/nginx/cerebrum-upload.conf
 
 exec /docker-entrypoint.sh "$@"

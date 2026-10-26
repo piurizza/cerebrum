@@ -195,6 +195,8 @@ Put note
 | Parameter | In | Required | Type |
 |---|---|---|---|
 | `path` | path | yes | string |
+| `X-Base-Version` | header | no | string or null |
+| `X-Create-Only` | header | no | string or null |
 
 Returns: [`Note`](#note)
 
@@ -427,6 +429,7 @@ Returns: [`VaultSettings`](#vaultsettings)
 | `created` | string or null | yes |
 | `updated` | string or null | yes |
 | `content` | string | yes |
+| `version` | string | yes |
 
 ### NoteMeta
 

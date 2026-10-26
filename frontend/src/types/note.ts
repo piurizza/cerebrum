@@ -18,7 +18,10 @@ export type _PinNoteMeta = Expect<
 
 export type Note = components["schemas"]["Note"];
 export type _PinNote = Expect<
-  EqualKeys<Note, "path" | "title" | "tags" | "created" | "updated" | "content">
+  EqualKeys<
+    Note,
+    "path" | "title" | "tags" | "created" | "updated" | "content" | "version"
+  >
 >;
 
 export type GraphNode = components["schemas"]["GraphNode"];

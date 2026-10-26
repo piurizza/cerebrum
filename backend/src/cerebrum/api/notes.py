@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from cerebrum.api.deps import get_db, require_writable_vault
@@ -16,6 +16,7 @@ from cerebrum.notes.service import (
     InvalidNotePathError,
     NoteAlreadyExistsError,
     NoteNotFoundError,
+    NoteVersionConflictError,
     delete_note,
     move_note,
     read_note,
@@ -57,12 +58,46 @@ def get_note(path: str) -> Note:
     dependencies=[Depends(require_writable_vault)],
 )
 async def put_note(
-    path: str, request: Request, db: sqlite3.Connection = Depends(get_db)
+    path: str,
+    request: Request,
+    db: sqlite3.Connection = Depends(get_db),
+    x_base_version: str | None = Header(
+        default=None,
+        alias="X-Base-Version",
+        description=(
+            "The `version` the note had when it was loaded. The save is "
+            "refused with 412 if the note changed or was deleted since."
+        ),
+    ),
+    x_create_only: str | None = Header(
+        default=None,
+        alias="X-Create-Only",
+        description="`1` to refuse the save with 412 if a note already exists.",
+    ),
 ) -> Note:
+    # Custom headers rather than If-Match/If-None-Match: nginx's
+    # not-modified filter evaluates those itself, and on a proxied 200
+    # without an ETag it can turn a save that already happened into a 412.
+    if x_create_only not in (None, "1"):
+        raise HTTPException(status_code=400, detail="X-Create-Only must be 1")
     settings = get_settings()
     raw_content = (await request.body()).decode("utf-8")
     try:
-        note = write_note(settings.cerebrum_vault_path, path, raw_content)
+        note = write_note(
+            settings.cerebrum_vault_path,
+            path,
+            raw_content,
+            must_not_exist=x_create_only == "1",
+            expected_version=x_base_version,
+        )
+    except NoteAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=412, detail=f"A note already exists at {exc}"
+        ) from exc
+    except NoteVersionConflictError as exc:
+        raise HTTPException(
+            status_code=412, detail="The note changed since it was loaded"
+        ) from exc
     except InvalidNotePathError as exc:
         raise HTTPException(status_code=400, detail="Invalid note path") from exc
     except InvalidNoteContentError as exc:

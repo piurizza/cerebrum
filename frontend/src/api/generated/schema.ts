@@ -668,6 +668,8 @@ export interface components {
             updated: string | null;
             /** Content */
             content: string;
+            /** Version */
+            version: string;
         };
         /** NoteMeta */
         NoteMeta: {
@@ -911,7 +913,12 @@ export interface operations {
     put_note_api_notes__path__put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The `version` the note had when it was loaded. The save is refused with 412 if the note changed or was deleted since. */
+                "X-Base-Version"?: string | null;
+                /** @description `1` to refuse the save with 412 if a note already exists. */
+                "X-Create-Only"?: string | null;
+            };
             path: {
                 path: string;
             };

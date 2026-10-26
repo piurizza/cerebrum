@@ -15,6 +15,10 @@ class NoteMeta(BaseModel):
 
 class Note(NoteMeta):
     content: str
+    # The sha256 of the file's raw bytes as they are on disk. A client
+    # sends it back with a save so a file that changed since it loaded
+    # the note is refused rather than overwritten.
+    version: str
 
 
 class ParsedLink(BaseModel):

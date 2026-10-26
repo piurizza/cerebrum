@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -594,6 +595,23 @@ def test_append_to_note_adds_text_at_the_end_and_keeps_frontmatter(
     assert result.data.tags == ["kept"]
     assert result.data.content.endswith("first\n\n## Log\nsecond\n")
     assert (vault / "a.md").read_text(encoding="utf-8") == result.data.content
+
+
+def test_note_tools_return_the_version_of_the_file_they_leave(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    def disk_version() -> str:
+        return hashlib.sha256((vault / "a.md").read_bytes()).hexdigest()
+
+    calls: list[tuple[str, dict[str, str]]] = [
+        ("create-note", {"path": "a.md", "content": "first"}),
+        ("get-note", {"path": "a.md"}),
+        ("update-note", {"path": "a.md", "content": "second"}),
+        ("append-to-note", {"path": "a.md", "content": "third"}),
+        ("edit-note", {"path": "a.md", "old_text": "third", "new_text": "fourth"}),
+    ]
+    for tool, args in calls:
+        assert _call(mcp_with_vault, tool, args).data.version == disk_version(), tool
 
 
 def test_append_to_note_on_missing_note_fails_without_creating_it(

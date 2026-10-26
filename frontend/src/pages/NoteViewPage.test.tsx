@@ -15,6 +15,7 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     created: "2026-08-01T00:00:00.000Z",
     updated: "2026-08-01T00:00:00.000Z",
     content: "Hello world",
+    version: "version-1",
     ...overrides,
   };
 }

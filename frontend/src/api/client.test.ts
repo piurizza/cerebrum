@@ -500,3 +500,95 @@ describe("OIDC sign-in helpers", () => {
     );
   });
 });
+
+describe("putNote() conditional saves", () => {
+  const savedNote = {
+    path: "note.md",
+    title: "note",
+    tags: [],
+    created: null,
+    updated: null,
+    content: "body",
+    version: "new-version",
+  };
+
+  function sentHeaders(fetchMock: ReturnType<typeof vi.fn>): Headers {
+    const call = fetchMock.mock.calls.at(-1);
+    if (!call) throw new Error("fetch was not called");
+    return new Headers((call[1] as RequestInit).headers);
+  }
+
+  it("sends no precondition headers by default, so the save stays unconditional", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(savedNote));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.putNote("note.md", "body")).resolves.toEqual(savedNote);
+
+    const headers = sentHeaders(fetchMock);
+    expect(headers.get("Content-Type")).toBe("text/markdown");
+    expect(headers.has("X-Base-Version")).toBe(false);
+    expect(headers.has("X-Create-Only")).toBe(false);
+  });
+
+  it("sends the loaded version as X-Base-Version", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(savedNote));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client.putNote("note.md", "body", { baseVersion: "loaded-version" });
+
+    expect(sentHeaders(fetchMock).get("X-Base-Version")).toBe("loaded-version");
+  });
+
+  it("sends X-Create-Only: 1 for a create-only save", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(savedNote));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client.putNote("note.md", "body", { createOnly: true });
+
+    expect(sentHeaders(fetchMock).get("X-Create-Only")).toBe("1");
+  });
+
+  it("rejects a 412 with a NoteConflictError that is still an ApiError", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(
+            { detail: "The note changed since it was loaded" },
+            { status: 412 },
+          ),
+        ),
+    );
+
+    const failure = client.putNote("note.md", "body", { baseVersion: "stale" });
+
+    await expect(failure).rejects.toBeInstanceOf(client.NoteConflictError);
+    await expect(failure).rejects.toBeInstanceOf(client.ApiError);
+    await expect(failure).rejects.toMatchObject({
+      status: 412,
+      message: "The note changed since it was loaded",
+    });
+  });
+
+  it("leaves other failures as a plain ApiError", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ detail: "Invalid note path" }, { status: 400 }),
+        ),
+    );
+
+    const failure = client.putNote("note.txt", "body", { baseVersion: "v" });
+
+    await expect(failure).rejects.toBeInstanceOf(client.ApiError);
+    await expect(failure).rejects.not.toBeInstanceOf(client.NoteConflictError);
+  });
+});

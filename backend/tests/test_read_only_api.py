@@ -80,6 +80,25 @@ def test_note_and_attachment_writes_are_refused(ro_client: TestClient) -> None:
         assert response.json() == _READ_ONLY
 
 
+def test_conditional_note_saves_are_refused_before_the_precondition(
+    ro_client: TestClient,
+) -> None:
+    # A stale version or an existing note would be a 412 from the handler;
+    # a 403 proves the read-only refusal runs first.
+    responses = [
+        ro_client.put(
+            "/api/notes/a.md", content="mine", headers={"X-Base-Version": "stale"}
+        ),
+        ro_client.put(
+            "/api/notes/a.md", content="mine", headers={"X-Create-Only": "1"}
+        ),
+    ]
+
+    for response in responses:
+        assert response.status_code == 403
+        assert response.json() == _READ_ONLY
+
+
 def test_upload_is_refused_before_its_size_is_checked(ro_client: TestClient) -> None:
     # A declared size over the cap would be a 413 from the handler; a 403
     # proves the refusal runs first, so the body is never read.

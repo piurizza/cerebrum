@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -41,6 +42,11 @@ class NoteAlreadyExistsError(Exception):
     pass
 
 
+class NoteVersionConflictError(Exception):
+    """The note on disk is no longer the version the caller loaded:
+    it was changed or deleted since."""
+
+
 def resolve_note_path(vault_root: Path, path: str) -> Path:
     """Resolve a vault-relative note path to an absolute filesystem path.
 
@@ -54,6 +60,31 @@ def resolve_note_path(vault_root: Path, path: str) -> Path:
     if candidate.suffix != ".md":
         raise InvalidNotePathError(path)
     return candidate
+
+
+def note_version(raw_bytes: bytes) -> str:
+    """A note's version: the sha256 of its file's bytes as they are on
+    disk. Not the indexer's content hash, which hashes the text after
+    newline translation, so a file differing only in line endings has the
+    same content hash but a different version."""
+    return hashlib.sha256(raw_bytes).hexdigest()
+
+
+def _read_raw(file_path: Path) -> tuple[str, str]:
+    """A note file's text and version. The text is decoded the way
+    `read_text` does, universal newlines included, so CRLF and a lone CR
+    still read as LF; the version hashes the bytes untouched."""
+    raw_bytes = file_path.read_bytes()
+    text = raw_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return text, note_version(raw_bytes)
+
+
+def _write_raw(file_path: Path, raw_content: str) -> str:
+    """Write a note file and return its version. Written as bytes so the
+    version is exactly what is on disk, with no newline translation."""
+    raw_bytes = raw_content.encode("utf-8")
+    file_path.write_bytes(raw_bytes)
+    return note_version(raw_bytes)
 
 
 def iter_note_paths(vault_root: Path) -> Iterator[str]:
@@ -87,7 +118,7 @@ def iter_note_paths(vault_root: Path) -> Iterator[str]:
 def read_note(vault_root: Path, path: str) -> Note:
     file_path = resolve_note_path(vault_root, path)
     try:
-        raw_content = file_path.read_text(encoding="utf-8")
+        raw_content, version = _read_raw(file_path)
     except FileNotFoundError as exc:
         raise NoteNotFoundError(path) from exc
     parsed = parse_note(path, raw_content)
@@ -98,17 +129,27 @@ def read_note(vault_root: Path, path: str) -> Note:
         created=parsed.created,
         updated=parsed.updated,
         content=raw_content,
+        version=version,
     )
 
 
-def write_note(
+# The keyword-only conditions are what push this past pylint's argument
+# limit; each is optional and named at every call site.
+def write_note(  # pylint: disable=too-many-arguments
     vault_root: Path,
     path: str,
     raw_content: str,
     *,
     must_not_exist: bool = False,
     must_exist: bool = False,
+    expected_version: str | None = None,
 ) -> Note:
+    """Save a note. Each condition is checked under the same `file_lock`
+    as the write, so no other write can land between check and save:
+    `must_not_exist` and `must_exist` on whether the file is there, and
+    `expected_version` on the file still being the version the caller
+    loaded. A note deleted since it was loaded fails `expected_version`
+    too, as a conflict rather than a missing note."""
     file_path = resolve_note_path(vault_root, path)
 
     with file_lock(file_path):
@@ -116,6 +157,13 @@ def write_note(
             raise NoteAlreadyExistsError(path)
         if must_exist and not file_path.exists():
             raise NoteNotFoundError(path)
+        if expected_version is not None:
+            try:
+                current_version = note_version(file_path.read_bytes())
+            except FileNotFoundError as exc:
+                raise NoteVersionConflictError(path) from exc
+            if current_version != expected_version:
+                raise NoteVersionConflictError(path)
         return _render_and_write(file_path, path, raw_content)
 
 
@@ -150,7 +198,7 @@ def _render_and_write(file_path: Path, path: str, raw_content: str) -> Note:
 
     rendered = render_note(parsed)
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text(rendered, encoding="utf-8")
+    version = _write_raw(file_path, rendered)
 
     return Note(
         path=path,
@@ -159,6 +207,7 @@ def _render_and_write(file_path: Path, path: str, raw_content: str) -> Note:
         created=parsed.created,
         updated=parsed.updated,
         content=rendered,
+        version=version,
     )
 
 
@@ -380,7 +429,7 @@ def move_note(
             had_attachment_dir = attachment_dir_for_note(vault_root, path).exists()
             move_attachment_dir(vault_root, path, new_path)
 
-        raw_content = destination.read_text(encoding="utf-8")
+        raw_content, version = _read_raw(destination)
         parsed = parse_note(new_path, raw_content)
 
         changed = False
@@ -404,7 +453,7 @@ def move_note(
         if changed:
             parsed.updated = datetime.now(UTC)
             raw_content = render_note(parsed)
-            destination.write_text(raw_content, encoding="utf-8")
+            version = _write_raw(destination, raw_content)
 
     # Locks released above -- `_retarget_other_notes` discovers and locks
     # its OWN set of paths (one at a time, per note), which must never
@@ -422,6 +471,7 @@ def move_note(
             created=parsed.created,
             updated=parsed.updated,
             content=raw_content,
+            version=version,
         ),
         retargeted,
     )
@@ -483,7 +533,7 @@ def retarget_note_links(
                     new_path,
                 )
 
-        raw_content = destination.read_text(encoding="utf-8")
+        raw_content, version = _read_raw(destination)
         parsed = parse_note(new_path, raw_content)
 
         changed = False
@@ -503,7 +553,7 @@ def retarget_note_links(
         if changed:
             parsed.updated = datetime.now(UTC)
             raw_content = render_note(parsed)
-            destination.write_text(raw_content, encoding="utf-8")
+            version = _write_raw(destination, raw_content)
 
     # Lock released above -- must not be held across `_retarget_other_notes`,
     # which acquires its own per-note locks, for the same cross-move AB-BA
@@ -519,6 +569,7 @@ def retarget_note_links(
             created=parsed.created,
             updated=parsed.updated,
             content=raw_content,
+            version=version,
         ),
         retargeted,
     )

@@ -173,6 +173,17 @@ export class ApiError extends Error {
   }
 }
 
+// A conditional `putNote()` refused with 412: the note changed or was
+// deleted since it was loaded (`baseVersion`), or already exists
+// (`createOnly`). Still an `ApiError` with `status` 412, so callers that
+// only show the message need no change.
+export class NoteConflictError extends ApiError {
+  constructor(message: string) {
+    super(message, 412);
+    this.name = "NoteConflictError";
+  }
+}
+
 // Every backend error response is FastAPI's default `{"detail": "..."}`
 // shape (confirmed across every route in this codebase) -- and that
 // `detail` text is already the right, specific, user-facing message
@@ -423,12 +434,35 @@ export function getNote(path: string): Promise<Note> {
   return request<Note>(`/notes/${encodeNotePath(path)}`);
 }
 
-export function putNote(path: string, content: string): Promise<Note> {
-  return request<Note>(`/notes/${encodeNotePath(path)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "text/markdown" },
-    body: content,
-  });
+// Without options the save is unconditional. `baseVersion` is the `version`
+// the note had when it was loaded, so a note changed elsewhere since is
+// refused instead of overwritten; `createOnly` refuses the save if a note
+// already exists. Either refusal rejects with a `NoteConflictError`. Custom
+// headers rather than If-Match/If-None-Match, which nginx evaluates itself.
+export async function putNote(
+  path: string,
+  content: string,
+  options: { baseVersion?: string; createOnly?: boolean } = {},
+): Promise<Note> {
+  const headers: Record<string, string> = { "Content-Type": "text/markdown" };
+  if (options.baseVersion !== undefined) {
+    headers["X-Base-Version"] = options.baseVersion;
+  }
+  if (options.createOnly) {
+    headers["X-Create-Only"] = "1";
+  }
+  try {
+    return await request<Note>(`/notes/${encodeNotePath(path)}`, {
+      method: "PUT",
+      headers,
+      body: content,
+    });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 412) {
+      throw new NoteConflictError(err.message);
+    }
+    throw err;
+  }
 }
 
 export function deleteNote(path: string): Promise<void> {

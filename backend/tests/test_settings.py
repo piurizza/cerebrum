@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from cerebrum.main import create_app
 from cerebrum.settings import Settings, get_settings
 from tests.oidc_fake import pin_oidc_env_off
 
@@ -471,3 +472,47 @@ def test_read_only_vault_accepts_a_sibling_folder_sharing_a_name_prefix(
         )
         is True
     )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("debug", "DEBUG"), (" Warning ", "WARNING"), ("", "INFO"), ("ERROR", "ERROR")],
+)
+def test_log_level_ignores_case_and_blank_means_info(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: str
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", raw)
+    _set_valid_auth_env(monkeypatch)
+    get_settings.cache_clear()
+    try:
+        assert get_settings().log_level == expected
+    finally:
+        get_settings.cache_clear()
+
+
+def test_unknown_log_level_fails_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "verbose")
+    _set_valid_auth_env(monkeypatch)
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(ValidationError):
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_create_app_sets_cerebrum_logging_to_log_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    _set_valid_auth_env(monkeypatch)
+    get_settings.cache_clear()
+    package_logger = logging.getLogger("cerebrum")
+    previous = package_logger.level
+    try:
+        create_app()
+        assert package_logger.level == logging.DEBUG
+        assert package_logger.handlers
+    finally:
+        package_logger.setLevel(previous)
+        get_settings.cache_clear()

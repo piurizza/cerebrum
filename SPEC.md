@@ -449,7 +449,7 @@ API calls.
 | `CEREBRUM_PORT` | compose | `7811` | host port for the frontend (HTTP) |
 | `CEREBRUM_HTTPS_PORT` | compose | `7812` | host port for the frontend's self-signed HTTPS listener; required for offline mode |
 | `CEREBRUM_BIND_ADDRESS` | compose | `127.0.0.1` | interface both ports listen on; `0.0.0.0` or a LAN address to use Cerebrum from a phone or other devices (set `CEREBRUM_TLS_SAN` too) |
-| `CEREBRUM_TLS_SAN` | compose | *(unset)* | extra Subject Alternative Names for the self-signed cert, comma-separated (e.g. `IP:192.168.1.14`) — set to your LAN IP/hostname to use offline mode from another device |
+| `CEREBRUM_TLS_SAN` | compose | *(unset)* | extra Subject Alternative Names for the self-signed cert, comma-separated (e.g. `IP:192.0.2.10`) — set to your LAN IP/hostname to use offline mode from another device |
 | `VITE_API_BASE_URL` | frontend | (proxied) | override API origin if not proxying |
 | `CEREBRUM_DAILY_NOTE_FOLDER` | backend | `daily` | vault-relative folder the "Today" button creates daily notes in. Served to clients by `GET /api/vault-settings`, so changing it needs only a backend restart. Leading/trailing slashes are trimmed, a blank value means the default, and `.`/`..` segments fail startup. Docker Compose falls back to the former build-time name `VITE_DAILY_NOTE_FOLDER` |
 | `CEREBRUM_LINK_FORMAT` | backend | `markdown` | `markdown` or `wikilink`: the link form the editor's `[[` picker inserts and MCP note-writing tools ask agents to write. Both forms are always read. Served by `GET /api/vault-settings`, so changing it needs only a restart; case is ignored, a blank value means the default, anything else fails startup |

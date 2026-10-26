@@ -27,7 +27,7 @@ behind.
 | `CEREBRUM_LINK_FORMAT` | `markdown` | yes | `markdown` or `wikilink`: the link form the editor inserts and agents are asked to write. Both forms are always read. |
 | `VITE_DAILY_NOTE_FOLDER` | *(unset)* | yes | Older name for `CEREBRUM_DAILY_NOTE_FOLDER`, still read as a fallback. |
 | `VITE_TEMPLATES_FOLDER` | *(unset)* | yes | Older name for `CEREBRUM_TEMPLATES_FOLDER`, still read as a fallback. |
-| `MAX_ATTACHMENT_SIZE_BYTES` | `10000000` | yes | Largest image, in bytes, that can be pasted into a note. |
+| `MAX_ATTACHMENT_SIZE_BYTES` | `10000000` | yes | Largest image, in bytes, that can be pasted into a note. In Docker, the bundled web server follows it. |
 
 ## State outside the vault
 
@@ -92,7 +92,7 @@ behind.
 |---|---|---|---|
 | `APP_ENV` | `development` (`production` in Docker) | no | Not used yet: the backend does not read it. |
 | `APP_NAME` | `Cerebrum` | no | The name the server reports in its health check and to MCP clients. |
-| `LOG_LEVEL` | `INFO` | no | Not used yet: the backend does not read it. |
+| `LOG_LEVEL` | `INFO` | yes | How much the backend logs: `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL` (case is ignored). Anything else fails startup. |
 
 ## Build-time (developers)
 

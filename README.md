@@ -118,7 +118,7 @@ never touched.
 | `CEREBRUM_INSTALL_DIR` | `~/cerebrum-server` | where to install |
 | `CEREBRUM_PORT` / `CEREBRUM_HTTPS_PORT` | `7811` / `7812` | HTTP and HTTPS ports |
 | `CEREBRUM_BIND_ADDRESS` | `127.0.0.1` | `127.0.0.1` means this machine only; `0.0.0.0` or a LAN address lets your phone and other computers reach it |
-| `CEREBRUM_TLS_SAN` | *(empty)* | extra HTTPS certificate names, e.g. `IP:192.168.1.14`, needed for offline mode on another device |
+| `CEREBRUM_TLS_SAN` | *(empty)* | extra HTTPS certificate names, e.g. `IP:192.0.2.10`, needed for offline mode on another device |
 
 **From your phone or other computers:** by default Cerebrum answers only
 on the machine it runs on. Pass `CEREBRUM_BIND_ADDRESS=0.0.0.0` and
@@ -247,7 +247,7 @@ a service worker only registers in a secure context, which plain HTTP
 only satisfies for `localhost`, not a LAN IP. To use offline mode from a
 phone or another device on your network: set `CEREBRUM_BIND_ADDRESS=0.0.0.0`
 and set `CEREBRUM_TLS_SAN` in your `.env` to your LAN IP
-(e.g. `IP:192.168.1.14`) before first start, then
+(e.g. `IP:192.0.2.10`) before first start, then
 visit the `https://` URL on that device once and accept the one-time
 "not trusted" browser warning -- expected for a self-signed cert,
 click through it ("Advanced" / "Proceed anyway", wording varies by
@@ -396,7 +396,7 @@ tokens, so MCP clients and the apps work as before.
    for Cerebrum. Register one redirect URI for every address you open
    Cerebrum on, exactly, with no wildcards:
    `https://<host>:<port>/api/auth/oidc/callback` (for example both
-   `https://192.168.1.14:7812/...` and
+   `https://192.0.2.10:7812/...` and
    `https://cerebrum.tail1234.ts.net:8443/...`).
 2. In `.env`, set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and
    optionally `OIDC_PROVIDER_NAME` (the button says "Sign in with

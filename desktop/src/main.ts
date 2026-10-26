@@ -62,7 +62,15 @@ export const navigation = {
   },
 };
 
-export function initApp(container: HTMLElement): void {
+// The native "Change server…" menu item (src-tauri/src/lib.rs) opens this
+// page with `?change-server=1`: show the address form, pre-filled with the
+// current server, instead of reconnecting to it.
+const CHANGE_SERVER_PARAM = "change-server";
+
+export function initApp(
+  container: HTMLElement,
+  search: string = window.location.search,
+): void {
   let state: ScreenState = { kind: "form", prefill: "", error: null };
 
   function render(): void {
@@ -232,6 +240,16 @@ export function initApp(container: HTMLElement): void {
         };
         render();
       });
+  }
+
+  if (new URLSearchParams(search).has(CHANGE_SERVER_PARAM)) {
+    getStoredServerUrl()
+      .catch(() => null)
+      .then((stored) => {
+        state = { kind: "form", prefill: stored ?? "", error: null };
+        render();
+      });
+    return;
   }
 
   getStoredServerUrl()

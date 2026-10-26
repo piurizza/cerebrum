@@ -638,3 +638,41 @@ describe("offline snapshot navigation on failed health-check (R4/KTD5)", () => {
     );
   });
 });
+
+describe("change server from the menu", () => {
+  it("shows the form with the current server instead of reconnecting", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://notes.example:7811/");
+
+    initApp(container, "?change-server=1");
+    await flush();
+
+    const input = container.querySelector<HTMLInputElement>("#url-input");
+    expect(input?.value).toBe("http://notes.example:7811/");
+    expect(mockCheckHealth).not.toHaveBeenCalled();
+    expect(navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("connects to the new address once submitted", async () => {
+    mockGetStoredServerUrl.mockResolvedValue("http://old.example:7811/");
+    mockSetStoredServerUrl.mockResolvedValue(undefined);
+    mockCheckHealth.mockResolvedValue({ ok: true });
+
+    initApp(container, "?change-server=1");
+    await flush();
+    fillAndSubmit(container, "http://new.example:7811");
+    await flush();
+    await flush();
+
+    expect(mockSetStoredServerUrl).toHaveBeenCalledWith("http://new.example:7811/");
+    expect(mockCheckHealth).toHaveBeenCalledWith("http://new.example:7811/");
+  });
+
+  it("still shows an empty form when the stored address can't be read", async () => {
+    mockGetStoredServerUrl.mockRejectedValue(new Error("store unavailable"));
+
+    initApp(container, "?change-server=1");
+    await flush();
+
+    expect(container.querySelector<HTMLInputElement>("#url-input")?.value).toBe("");
+  });
+});

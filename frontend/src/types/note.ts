@@ -54,5 +54,10 @@ export type _PinSetTaskDoneRequest = Expect<
   EqualKeys<SetTaskDoneRequest, "path" | "line" | "text" | "done" | "date">
 >;
 
+export type AddTaskRequest = components["schemas"]["AddTaskRequest"];
+export type _PinAddTaskRequest = Expect<
+  EqualKeys<AddTaskRequest, "text" | "date" | "heading">
+>;
+
 export type TaskWriteResult = components["schemas"]["TaskWriteResponse"];
 export type _PinTaskWriteResult = Expect<EqualKeys<TaskWriteResult, "note" | "task">>;

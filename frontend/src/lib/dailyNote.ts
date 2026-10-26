@@ -35,5 +35,12 @@ export function localIsoDate(date: Date = new Date()): string {
  * which daily notes deliberately don't go through (see that plan's
  * Scope Boundaries). */
 export function getDailyNoteDefaultBody(date: Date = new Date()): string {
-  return `# ${headingFormatter.format(date)}\n\n`;
+  return `# ${getDailyNoteHeading(date)}\n\n`;
+}
+
+/** The text of a new daily note's heading, without the `# `: the long
+ * local date. A task added from the Tasks page sends it, so a daily note
+ * the server creates for the task reads like one the Today button made. */
+export function getDailyNoteHeading(date: Date = new Date()): string {
+  return headingFormatter.format(date);
 }

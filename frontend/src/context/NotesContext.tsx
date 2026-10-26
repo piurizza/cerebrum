@@ -116,6 +116,15 @@ export function useNotesIfLoaded(): NoteMeta[] {
   return useContext(NotesContext)?.notes ?? [];
 }
 
+/** Refetches the vault's notes, or does nothing outside a
+ * `NotesProvider` -- for a write that may create a note (adding a task to
+ * a daily note not made yet), so the sidebar lists it. */
+export function useRefreshNotesIfLoaded(): () => Promise<void> {
+  return useContext(NotesContext)?.refreshNotes ?? refreshNothing;
+}
+
+async function refreshNothing(): Promise<void> {}
+
 export function useNotes(): NotesContextValue {
   const context = useContext(NotesContext);
   if (!context) {

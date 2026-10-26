@@ -689,3 +689,38 @@ describe("setTaskDone()", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 });
+
+describe("getDoneTasks()", () => {
+  it("asks for the tasks done since the given day", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.getDoneTasks("2026-10-13")).resolves.toEqual([]);
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/tasks\/done\?since=2026-10-13$/);
+  });
+});
+
+describe("addTask()", () => {
+  it("posts the text, the local day and the daily note heading as JSON", async () => {
+    const client = await freshClient();
+    const written = { note: { path: "daily/2026-10-26.md" }, task: { line: 3 } };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(written, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = {
+      text: "Order timber for the shed",
+      date: "2026-10-26",
+      heading: "Monday, October 26, 2026",
+    };
+
+    await expect(client.addTask(body)).resolves.toEqual(written);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/tasks$/);
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+});

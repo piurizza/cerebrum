@@ -1,7 +1,12 @@
 // @vitest-environment node
 // Pure functions, no DOM -- skip jsdom's window/document bootstrap cost.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDailyNoteDefaultBody, getTodayNotePath, localIsoDate } from "./dailyNote";
+import {
+  getDailyNoteDefaultBody,
+  getDailyNoteHeading,
+  getTodayNotePath,
+  localIsoDate,
+} from "./dailyNote";
 
 // The folder comes from the server via `vaultSettings.ts` (its own tests
 // cover loading, storage and normalization); here it's just a value.
@@ -60,5 +65,13 @@ describe("getDailyNoteDefaultBody", () => {
     const body = getDailyNoteDefaultBody(new Date(2026, 7, 11));
     expect(body.startsWith("# ")).toBe(true);
     expect(body.endsWith("\n\n")).toBe(true);
+  });
+});
+
+describe("getDailyNoteHeading", () => {
+  it("is the default body's heading text, without the `# `", () => {
+    const date = new Date(2026, 9, 26);
+    expect(getDailyNoteDefaultBody(date)).toBe(`# ${getDailyNoteHeading(date)}\n\n`);
+    expect(getDailyNoteHeading(date)).toMatch(/2026/);
   });
 });

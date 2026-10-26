@@ -10,6 +10,7 @@ import type {
   OidcStartResult,
 } from "../types/auth";
 import type {
+  AddTaskRequest,
   AttachmentLocation,
   AttachmentUploadResult,
   GraphResponse,
@@ -506,6 +507,23 @@ export function getGraph(): Promise<GraphResponse> {
 
 export function getTasks(): Promise<TaskItem[]> {
   return request<TaskItem[]>("/tasks");
+}
+
+// Tasks ticked with a done date on or after `since` (YYYY-MM-DD), newest
+// first. A task ticked without a date isn't listed.
+export function getDoneTasks(since: string): Promise<TaskItem[]> {
+  return request<TaskItem[]>(`/tasks/done?since=${encodeURIComponent(since)}`);
+}
+
+// Appends `- [ ] <text>` to the daily note for `date`, which the server
+// creates first, headed `heading`, when it doesn't exist. Rejects with an
+// ApiError: 422 for text that is empty once trimmed.
+export function addTask(body: AddTaskRequest): Promise<TaskWriteResult> {
+  return request<TaskWriteResult>("/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 // Ticks (`done` with the local `date`) or unticks the task on `line` of

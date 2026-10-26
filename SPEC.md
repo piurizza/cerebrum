@@ -351,6 +351,12 @@ API calls.
   nothing, so remote-server users never see a localhost error. One
   candidate only, no network scanning; existing installs still on 8080
   get the form.
+- Switching servers starts from a native menu item (**Cerebrum › Change
+  server…**, `src-tauri/src/lib.rs`), because the server's own page has no
+  access to the app. It navigates the window back to the bundled page with
+  `?change-server=1`, which shows the address form pre-filled with the
+  current server instead of reconnecting. The menu keeps the standard Edit
+  items, so copy and paste shortcuts still work on macOS.
 - The health-check (`GET /api/health`) goes through **Tauri's HTTP
   plugin** (`@tauri-apps/plugin-http`), not browser `fetch()` — the
   plugin's request runs from the Rust side and isn't subject to the

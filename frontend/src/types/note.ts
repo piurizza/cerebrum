@@ -43,5 +43,8 @@ export type _PinAttachmentLocation = Expect<EqualKeys<AttachmentLocation, "path"
 
 export type TaskItem = components["schemas"]["TaskItem"];
 export type _PinTaskItem = Expect<
-  EqualKeys<TaskItem, "path" | "title" | "line" | "text">
+  EqualKeys<
+    TaskItem,
+    "path" | "title" | "line" | "text" | "tags" | "done" | "done_date"
+  >
 >;

@@ -728,7 +728,7 @@ def test_upsert_note_on_a_hidden_path_removes_it_from_the_index(
 
     assert list_notes(db) == []
     assert search_notes(db, "stale") == []
-    assert list_open_tasks(db) == []
+    assert list_open_tasks(db, "templates") == []
 
 
 def _symlinks_out_of_the_vault(vault: Path, tmp_path: Path) -> list[str]:
@@ -753,7 +753,7 @@ def _symlinks_out_of_the_vault(vault: Path, tmp_path: Path) -> list[str]:
 def _assert_nothing_from_outside_is_indexed(db: sqlite3.Connection) -> None:
     assert search_notes(db, "SECRETTOKEN") == []
     assert search_notes(db, "SIBLINGTOKEN") == []
-    assert {task.text for task in list_open_tasks(db)} <= {"real task"}
+    assert {task.text for task in list_open_tasks(db, "templates")} <= {"real task"}
 
 
 def test_rebuild_index_skips_symlinks_out_of_the_vault(
@@ -767,7 +767,10 @@ def test_rebuild_index_skips_symlinks_out_of_the_vault(
 
     assert [note.path for note in list_notes(db)] == ["alias.md", "real.md"]
     _assert_nothing_from_outside_is_indexed(db)
-    assert {task.path for task in list_open_tasks(db)} == {"alias.md", "real.md"}
+    assert {task.path for task in list_open_tasks(db, "templates")} == {
+        "alias.md",
+        "real.md",
+    }
 
 
 def test_upsert_note_refuses_symlinks_out_of_the_vault(

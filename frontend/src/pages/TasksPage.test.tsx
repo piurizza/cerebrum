@@ -47,8 +47,24 @@ describe("TasksPage", () => {
 
   it("renders tasks grouped under their note's title heading, as plain text", async () => {
     mockGetTasks.mockResolvedValue([
-      { path: "a.md", title: "Groceries", line: 1, text: "**Buy** milk" },
-      { path: "a.md", title: "Groceries", line: 3, text: "Buy eggs" },
+      {
+        path: "a.md",
+        title: "Groceries",
+        line: 1,
+        text: "**Buy** milk",
+        tags: [],
+        done: false,
+        done_date: null,
+      },
+      {
+        path: "a.md",
+        title: "Groceries",
+        line: 3,
+        text: "Buy eggs",
+        tags: [],
+        done: false,
+        done_date: null,
+      },
     ]);
 
     renderPage();
@@ -64,7 +80,15 @@ describe("TasksPage", () => {
 
   it("links a task and its note heading to the note", async () => {
     mockGetTasks.mockResolvedValue([
-      { path: "folder/a.md", title: "Groceries", line: 1, text: "Buy milk" },
+      {
+        path: "folder/a.md",
+        title: "Groceries",
+        line: 1,
+        text: "Buy milk",
+        tags: [],
+        done: false,
+        done_date: null,
+      },
     ]);
 
     renderPage();
@@ -94,8 +118,24 @@ describe("TasksPage", () => {
 
   it("groups tasks with identical text under their own separate note headings", async () => {
     mockGetTasks.mockResolvedValue([
-      { path: "a.md", title: "Note A", line: 1, text: "Same task" },
-      { path: "b.md", title: "Note B", line: 1, text: "Same task" },
+      {
+        path: "a.md",
+        title: "Note A",
+        line: 1,
+        text: "Same task",
+        tags: [],
+        done: false,
+        done_date: null,
+      },
+      {
+        path: "b.md",
+        title: "Note B",
+        line: 1,
+        text: "Same task",
+        tags: [],
+        done: false,
+        done_date: null,
+      },
     ]);
 
     renderPage();
@@ -107,8 +147,24 @@ describe("TasksPage", () => {
 
   it("disambiguates two notes that share the same title by showing their path", async () => {
     mockGetTasks.mockResolvedValue([
-      { path: "work/plan.md", title: "Plan", line: 1, text: "Task one" },
-      { path: "personal/plan.md", title: "Plan", line: 1, text: "Task two" },
+      {
+        path: "work/plan.md",
+        title: "Plan",
+        line: 1,
+        text: "Task one",
+        tags: [],
+        done: false,
+        done_date: null,
+      },
+      {
+        path: "personal/plan.md",
+        title: "Plan",
+        line: 1,
+        text: "Task two",
+        tags: [],
+        done: false,
+        done_date: null,
+      },
     ]);
 
     renderPage();

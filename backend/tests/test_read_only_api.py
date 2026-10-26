@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import AsyncIterator, Callable
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from cerebrum.notes.service import (
 )
 from cerebrum.read_only import VaultReadOnlyError
 from cerebrum.settings import get_settings
+from cerebrum.tasks.service import add_task, set_task_done
 
 _PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"rest-of-file-does-not-matter-for-this-test"
 _READ_ONLY = {"detail": "This vault is read-only"}
@@ -72,6 +74,19 @@ def test_note_and_attachment_writes_are_refused(ro_client: TestClient) -> None:
             params={"note_path": "a.md"},
             content=_PNG_BYTES,
             headers={"Content-Type": "image/png"},
+        ),
+        ro_client.post(
+            "/api/tasks", json={"text": "New", "date": "2026-10-26", "heading": "x"}
+        ),
+        ro_client.post(
+            "/api/tasks/done",
+            json={
+                "path": "a.md",
+                "line": 6,
+                "text": "buy milk",
+                "done": True,
+                "date": "2026-10-26",
+            },
         ),
     ]
 
@@ -132,6 +147,9 @@ def test_reads_still_work(ro_client: TestClient) -> None:
     assert tasks.status_code == 200
     assert [task["text"] for task in tasks.json()] == ["buy milk"]
 
+    done_tasks = ro_client.get("/api/tasks/done", params={"since": "2026-10-01"})
+    assert done_tasks.status_code == 200
+
     backlinks = ro_client.get("/api/notes/b.md/backlinks")
     assert backlinks.status_code == 200
     assert [hit["path"] for hit in backlinks.json()] == ["a.md"]
@@ -161,6 +179,17 @@ def test_the_vault_is_byte_for_byte_unchanged(
         content=_PNG_BYTES,
         headers={"Content-Type": "image/png"},
     )
+    ro_client.post("/api/tasks", json={"text": "New", "date": "2026-10-26"})
+    ro_client.post(
+        "/api/tasks/done",
+        json={
+            "path": "a.md",
+            "line": 6,
+            "text": "buy milk",
+            "done": True,
+            "date": "2026-10-26",
+        },
+    )
     ro_client.post("/api/tokens", json={"name": "reader"})
     ro_client.get("/api/notes")
 
@@ -182,6 +211,10 @@ _SERVICE_WRITES: dict[str, Callable[[Path], object]] = {
     ),
     "move_attachment_dir": lambda vault: move_attachment_dir(vault, "a.md", "c.md"),
     "delete_attachment_dir": lambda vault: delete_attachment_dir(vault, "a.md"),
+    "add_task": lambda vault: add_task(vault, "daily", date(2026, 10, 26), "New", None),
+    "set_task_done": lambda vault: set_task_done(
+        vault, "a.md", 6, "buy milk", done=True, day=date(2026, 10, 26)
+    ),
 }
 
 

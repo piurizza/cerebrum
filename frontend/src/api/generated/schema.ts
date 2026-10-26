@@ -272,7 +272,26 @@ export interface paths {
         /** Tasks Endpoint */
         get: operations["tasks_endpoint_api_tasks_get"];
         put?: never;
-        post?: never;
+        /** Add Task Endpoint */
+        post: operations["add_task_endpoint_api_tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Done Tasks Endpoint */
+        get: operations["done_tasks_endpoint_api_tasks_done_get"];
+        put?: never;
+        /** Set Task Done Endpoint */
+        post: operations["set_task_done_endpoint_api_tasks_done_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -521,6 +540,18 @@ export interface components {
             /** Is Active */
             is_active: boolean;
         };
+        /** AddTaskRequest */
+        AddTaskRequest: {
+            /** Text */
+            text: string;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Heading */
+            heading?: string | null;
+        };
         /**
          * ApiTokenMeta
          * @description Token metadata safe to hand back to a caller -- deliberately never
@@ -717,6 +748,19 @@ export interface components {
             /** Token */
             token: string;
         };
+        /** SetTaskDoneRequest */
+        SetTaskDoneRequest: {
+            /** Path */
+            path: string;
+            /** Line */
+            line: number;
+            /** Text */
+            text: string;
+            /** Done */
+            done: boolean;
+            /** Date */
+            date?: string | null;
+        };
         /** TaskItem */
         TaskItem: {
             /** Path */
@@ -727,6 +771,20 @@ export interface components {
             line: number;
             /** Text */
             text: string;
+            /** Tags */
+            tags: string[];
+            /** Done */
+            done: boolean;
+            /** Done Date */
+            done_date: string | null;
+        };
+        /**
+         * TaskWriteResponse
+         * @description The note as it is after the write, and the task it wrote.
+         */
+        TaskWriteResponse: {
+            note: components["schemas"]["Note"];
+            task: components["schemas"]["TaskItem"];
         };
         /** User */
         User: {
@@ -1271,6 +1329,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskItem"][];
+                };
+            };
+        };
+    };
+    add_task_endpoint_api_tasks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskWriteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    done_tasks_endpoint_api_tasks_done_get: {
+        parameters: {
+            query: {
+                /** @description The earliest done date to list, as YYYY-MM-DD. */
+                since: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_task_done_endpoint_api_tasks_done_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetTaskDoneRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskWriteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

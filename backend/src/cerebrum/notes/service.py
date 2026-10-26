@@ -75,8 +75,11 @@ def _read_raw(file_path: Path) -> tuple[str, str]:
     `read_text` does, universal newlines included, so CRLF and a lone CR
     still read as LF; the version hashes the bytes untouched."""
     raw_bytes = file_path.read_bytes()
-    text = raw_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
-    return text, note_version(raw_bytes)
+    return _decode(raw_bytes), note_version(raw_bytes)
+
+
+def _decode(raw_bytes: bytes) -> str:
+    return raw_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _write_raw(file_path: Path, raw_content: str) -> str:
@@ -118,9 +121,15 @@ def iter_note_paths(vault_root: Path) -> Iterator[str]:
 def read_note(vault_root: Path, path: str) -> Note:
     file_path = resolve_note_path(vault_root, path)
     try:
-        raw_content, version = _read_raw(file_path)
+        raw_bytes = file_path.read_bytes()
     except FileNotFoundError as exc:
         raise NoteNotFoundError(path) from exc
+    return note_from_bytes(path, raw_bytes)
+
+
+def note_from_bytes(path: str, raw_bytes: bytes) -> Note:
+    """The note `read_note` returns for a file holding `raw_bytes`."""
+    raw_content = _decode(raw_bytes)
     parsed = parse_note(path, raw_content)
     return Note(
         path=path,
@@ -129,7 +138,7 @@ def read_note(vault_root: Path, path: str) -> Note:
         created=parsed.created,
         updated=parsed.updated,
         content=raw_content,
-        version=version,
+        version=note_version(raw_bytes),
     )
 
 
@@ -184,6 +193,45 @@ def modify_note(vault_root: Path, path: str, change: Callable[[str], str]) -> No
         except FileNotFoundError as exc:
             raise NoteNotFoundError(path) from exc
         return _render_and_write(file_path, path, change(raw_content))
+
+
+def edit_note_text(
+    vault_root: Path,
+    path: str,
+    change: Callable[[str], str | None],
+    *,
+    create_with: str | None = None,
+) -> Note:
+    """Apply `change` to a note's text exactly as it is on disk, line
+    endings included, and write the result back unrendered: no
+    frontmatter is added and `updated` isn't stamped, so everything
+    `change` leaves alone stays byte for byte. `change` returns None to
+    leave the file as it is. Exceptions it raises propagate unchanged and
+    leave the file untouched.
+
+    A missing note is created first from `create_with`, rendered the way
+    every other save is, when given; otherwise it raises
+    NoteNotFoundError. The create, the read and the write all happen
+    under one `file_lock` critical section, like `modify_note`'s."""
+    ensure_vault_writable()
+    file_path = resolve_note_path(vault_root, path)
+    with file_lock(file_path):
+        try:
+            raw_bytes = file_path.read_bytes()
+        except FileNotFoundError as exc:
+            if create_with is None:
+                raise NoteNotFoundError(path) from exc
+            _render_and_write(file_path, path, create_with)
+            raw_bytes = file_path.read_bytes()
+        new_text = change(raw_bytes.decode("utf-8"))
+        if new_text is None:
+            return note_from_bytes(path, raw_bytes)
+        new_bytes = new_text.encode("utf-8")
+        # Parsed before the write, so a note whose frontmatter can't be
+        # read fails without being changed.
+        note = note_from_bytes(path, new_bytes)
+        file_path.write_bytes(new_bytes)
+        return note
 
 
 def _render_and_write(file_path: Path, path: str, raw_content: str) -> Note:

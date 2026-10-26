@@ -6,20 +6,27 @@ import { makeNoteMeta } from "../test/factories";
 
 const mockListNotes = vi.fn();
 const mockGetNote = vi.fn();
+const mockGetTasks = vi.fn();
+const mockGetDoneTasks = vi.fn();
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
   return {
     ...actual,
     listNotes: () => mockListNotes(),
     getNote: (path: string) => mockGetNote(path),
+    getTasks: () => mockGetTasks(),
+    getDoneTasks: (since: string) => mockGetDoneTasks(since),
   };
 });
 
+import { doneListSince } from "../lib/taskList";
 import { LAST_SYNCED_AT_KEY, syncVault } from "./sync";
 
 beforeEach(() => {
   mockListNotes.mockReset();
   mockGetNote.mockReset();
+  mockGetTasks.mockReset().mockResolvedValue([]);
+  mockGetDoneTasks.mockReset().mockResolvedValue([]);
   window.localStorage.clear();
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -113,6 +120,29 @@ describe("syncVault", () => {
 
     await syncVault();
 
+    expect(window.localStorage.getItem(LAST_SYNCED_AT_KEY)).not.toBeNull();
+  });
+
+  it("fetches the open and done task lists once so Tasks opens offline", async () => {
+    mockListNotes.mockResolvedValue([makeNoteMeta("a.md")]);
+    mockGetNote.mockResolvedValue({});
+
+    await syncVault();
+
+    expect(mockGetTasks).toHaveBeenCalledTimes(1);
+    expect(mockGetDoneTasks).toHaveBeenCalledTimes(1);
+    expect(mockGetDoneTasks).toHaveBeenCalledWith(doneListSince());
+  });
+
+  it("still persists lastSyncedAt when the task lists fail to fetch", async () => {
+    mockListNotes.mockResolvedValue([makeNoteMeta("a.md")]);
+    mockGetNote.mockResolvedValue({});
+    mockGetTasks.mockRejectedValue(new Error("connection dropped"));
+    mockGetDoneTasks.mockRejectedValue(new Error("connection dropped"));
+
+    await expect(syncVault()).resolves.toBeUndefined();
+
+    expect(mockGetNote).toHaveBeenCalledWith("a.md");
     expect(window.localStorage.getItem(LAST_SYNCED_AT_KEY)).not.toBeNull();
   });
 });

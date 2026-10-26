@@ -205,6 +205,21 @@ export default defineConfig({
               plugins: apiOfflineFallbackPlugins,
             },
           },
+          {
+            // The open list (`GET /api/tasks`) and the done list
+            // (`GET /api/tasks/done?since=...`). `since` moves every day,
+            // so the done list ignores the query string: offline, the
+            // last done list loaded is better than none.
+            urlPattern: ({ url, request }) =>
+              request.method === "GET" && /^\/api\/tasks(\/done)?$/.test(url.pathname),
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "api-tasks",
+              networkTimeoutSeconds: 4,
+              matchOptions: { ignoreSearch: true },
+              plugins: apiOfflineFallbackPlugins,
+            },
+          },
         ],
       },
     }),

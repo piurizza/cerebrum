@@ -196,7 +196,10 @@ def test_access_token_is_valid_jwt_with_expected_ttl_and_no_is_admin_claim(
 
     settings = get_settings()
     payload = jwt.decode(
-        access_token, settings.auth_jwt_secret.get_secret_value(), algorithms=["HS256"]
+        access_token,
+        settings.auth_jwt_secret.get_secret_value(),
+        algorithms=["HS256"],
+        options={"verify_aud": False},
     )
 
     assert "is_admin" not in payload
@@ -357,6 +360,7 @@ def test_refresh_rotated_access_token_is_a_valid_jwt_for_the_same_user(
         response.json()["access_token"],
         settings.auth_jwt_secret.get_secret_value(),
         algorithms=["HS256"],
+        options={"verify_aud": False},
     )
     assert "sub" in payload
 

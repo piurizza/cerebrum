@@ -7,11 +7,11 @@ from datetime import UTC, datetime, timedelta
 import jwt
 
 from cerebrum.accounts.service import InvalidTokenError, TokenReuseDetectedError, User
-from cerebrum.auth_db import auth_write_lock, hash_token
+from cerebrum.auth_db import auth_write_lock, hash_token, token_audience
 from cerebrum.settings import get_settings
 
 
-def _mint_access_token(user_id: int, now: datetime) -> str:
+def _mint_access_token(auth_db: sqlite3.Connection, user_id: int, now: datetime) -> str:
     """Shared by `issue_session()` and `refresh_session()` -- both need
     the exact same "JWT for this user id, expiring at the configured TTL"
     logic, and only the caller's notion of `user_id`/`now` differs.
@@ -20,11 +20,17 @@ def _mint_access_token(user_id: int, now: datetime) -> str:
     `require_admin` does its own fresh DB lookup for authorization,
     deliberately not trusting a JWT claim that can't be invalidated
     before its own expiry.
+
+    The audience is this instance's own (`token_audience`), so another
+    Cerebrum's tokens are refused even if it shares `AUTH_JWT_SECRET`.
+    Callers hold `auth_write_lock`.
     """
     settings = get_settings()
     return jwt.encode(
         {
             "sub": str(user_id),
+            "aud": token_audience(auth_db),
+            "iat": now,
             "exp": now + timedelta(minutes=settings.auth_access_token_ttl_minutes),
         },
         settings.auth_jwt_secret.get_secret_value(),
@@ -66,7 +72,7 @@ def insert_session(auth_db: sqlite3.Connection, user_id: int) -> tuple[str, str]
     Returns `(access_token, refresh_token)`, like `issue_session()`."""
     now = datetime.now(UTC)
     refresh_token = _insert_refresh_token(auth_db, user_id, secrets.token_hex(16), now)
-    return _mint_access_token(user_id, now), refresh_token
+    return _mint_access_token(auth_db, user_id, now), refresh_token
 
 
 def _insert_refresh_token(
@@ -147,7 +153,10 @@ def refresh_session(refresh_token: str, auth_db: sqlite3.Connection) -> tuple[st
             new_refresh_token = _insert_refresh_token(
                 auth_db, owner_row["user_id"], owner_row["family_id"], now
             )
-            return _mint_access_token(owner_row["user_id"], now), new_refresh_token
+            return (
+                _mint_access_token(auth_db, owner_row["user_id"], now),
+                new_refresh_token,
+            )
 
         # The atomic UPDATE didn't touch a row -- either this token_hash
         # doesn't exist, is expired, or was already rotated away. One more

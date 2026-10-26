@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import cast
 
 import jwt
@@ -11,6 +12,7 @@ from fastapi import FastAPI
 
 from cerebrum.accounts.tokens import create_api_token
 from cerebrum.auth import AuthenticationError, verify_credential
+from cerebrum.auth_db import connect, token_audience
 from cerebrum.mcp.auth import SharedFunctionTokenVerifier
 from cerebrum.settings import get_settings
 
@@ -37,9 +39,23 @@ def _insert_user(auth_db: sqlite3.Connection, *, is_active: bool = True) -> int:
     return cast(int, cursor.lastrowid)
 
 
-def _mint_jwt(user_id: int, *, expires_delta: timedelta = timedelta(minutes=10)) -> str:
+def _mint_jwt(
+    auth_db: sqlite3.Connection,
+    user_id: int,
+    *,
+    expires_delta: timedelta = timedelta(minutes=10),
+    **claims: object,
+) -> str:
+    now = datetime.now(UTC)
+    payload: dict[str, object] = {
+        "sub": str(user_id),
+        "aud": token_audience(auth_db),
+        "iat": now,
+        "exp": now + expires_delta,
+    }
+    payload.update(claims)
     return jwt.encode(
-        {"sub": str(user_id), "exp": datetime.now(UTC) + expires_delta},
+        {key: value for key, value in payload.items() if value is not None},
         get_settings().auth_jwt_secret.get_secret_value(),
         algorithm="HS256",
     )
@@ -70,7 +86,7 @@ def test_verify_credential_accepts_valid_token_for_active_user(
     auth_db: sqlite3.Connection,
 ) -> None:
     user_id = _insert_user(auth_db)
-    token = _mint_jwt(user_id)
+    token = _mint_jwt(auth_db, user_id)
 
     subject = asyncio.run(verify_credential(token, auth_db))
 
@@ -81,7 +97,7 @@ def test_verify_credential_rejects_token_for_deactivated_user(
     auth_db: sqlite3.Connection,
 ) -> None:
     user_id = _insert_user(auth_db, is_active=False)
-    token = _mint_jwt(user_id)
+    token = _mint_jwt(auth_db, user_id)
 
     with pytest.raises(AuthenticationError):
         asyncio.run(verify_credential(token, auth_db))
@@ -90,7 +106,7 @@ def test_verify_credential_rejects_token_for_deactivated_user(
 def test_verify_credential_rejects_token_for_unknown_user(
     auth_db: sqlite3.Connection,
 ) -> None:
-    token = _mint_jwt(999999)
+    token = _mint_jwt(auth_db, 999999)
 
     with pytest.raises(AuthenticationError):
         asyncio.run(verify_credential(token, auth_db))
@@ -98,7 +114,7 @@ def test_verify_credential_rejects_token_for_unknown_user(
 
 def test_verify_credential_rejects_expired_token(auth_db: sqlite3.Connection) -> None:
     user_id = _insert_user(auth_db)
-    token = _mint_jwt(user_id, expires_delta=timedelta(minutes=-1))
+    token = _mint_jwt(auth_db, user_id, expires_delta=timedelta(minutes=-1))
 
     with pytest.raises(AuthenticationError):
         asyncio.run(verify_credential(token, auth_db))
@@ -196,7 +212,7 @@ def test_token_verifier_accepts_valid_credential(
     app: FastAPI, auth_db: sqlite3.Connection
 ) -> None:
     user_id = _insert_user(auth_db)
-    token = _mint_jwt(user_id)
+    token = _mint_jwt(auth_db, user_id)
     verifier = SharedFunctionTokenVerifier(app=app)
 
     result = asyncio.run(verifier.verify_token(token))
@@ -213,3 +229,40 @@ def test_token_verifier_rejects_wrong_credential(
     result = asyncio.run(verifier.verify_token("wrong"))
 
     assert result is None
+
+
+def test_verify_credential_rejects_a_token_from_another_instance(
+    auth_db: sqlite3.Connection,
+) -> None:
+    # Same AUTH_JWT_SECRET, different accounts database: another Cerebrum.
+    user_id = _insert_user(auth_db)
+    token = _mint_jwt(auth_db, user_id, aud="cerebrum:another-instance")
+
+    with pytest.raises(AuthenticationError):
+        asyncio.run(verify_credential(token, auth_db))
+
+
+@pytest.mark.parametrize("claim", ["exp", "aud", "iat"])
+def test_verify_credential_rejects_a_token_missing_a_required_claim(
+    auth_db: sqlite3.Connection, claim: str
+) -> None:
+    user_id = _insert_user(auth_db)
+    token = _mint_jwt(auth_db, user_id, **{claim: None})
+
+    with pytest.raises(AuthenticationError):
+        asyncio.run(verify_credential(token, auth_db))
+
+
+def test_each_accounts_database_has_its_own_stable_audience(
+    tmp_path: Path,
+) -> None:
+    first = connect(tmp_path / "a.sqlite3")
+    reopened = connect(tmp_path / "a.sqlite3")
+    other = connect(tmp_path / "b.sqlite3")
+    try:
+        assert token_audience(first) == token_audience(reopened)
+        assert token_audience(first) != token_audience(other)
+        assert token_audience(first).startswith("cerebrum:")
+    finally:
+        for conn in (first, reopened, other):
+            conn.close()

@@ -42,7 +42,10 @@ def test_issue_session_returns_a_decodable_access_token_with_no_is_admin_claim(
 
     settings = get_settings()
     payload = jwt.decode(
-        access_token, settings.auth_jwt_secret.get_secret_value(), algorithms=["HS256"]
+        access_token,
+        settings.auth_jwt_secret.get_secret_value(),
+        algorithms=["HS256"],
+        options={"verify_aud": False},
     )
     assert payload["sub"] == str(user.id)
     assert "is_admin" not in payload
@@ -59,7 +62,10 @@ def test_issue_session_access_token_expires_at_configured_ttl(
 
     settings = get_settings()
     payload = jwt.decode(
-        access_token, settings.auth_jwt_secret.get_secret_value(), algorithms=["HS256"]
+        access_token,
+        settings.auth_jwt_secret.get_secret_value(),
+        algorithms=["HS256"],
+        options={"verify_aud": False},
     )
     expected_exp = datetime.now(UTC) + timedelta(
         minutes=settings.auth_access_token_ttl_minutes
@@ -145,6 +151,7 @@ def test_refresh_session_with_valid_token_returns_new_access_and_refresh_tokens(
         new_access_token,
         settings.auth_jwt_secret.get_secret_value(),
         algorithms=["HS256"],
+        options={"verify_aud": False},
     )
     assert payload["sub"] == str(user.id)
     assert new_refresh_token != refresh_token

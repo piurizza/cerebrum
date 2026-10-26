@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import secrets
 import sqlite3
 import threading
 from pathlib import Path
@@ -72,4 +73,16 @@ def connect(db_path: Path) -> sqlite3.Connection:
     # and so never needed this.
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO instance (id, audience) VALUES (1, ?)",
+            (f"cerebrum:{secrets.token_hex(16)}",),
+        )
     return conn
+
+
+def token_audience(auth_db: sqlite3.Connection) -> str:
+    """This instance's access-token audience (see `instance` in
+    auth_schema.sql). The caller holds `auth_write_lock`."""
+    row = auth_db.execute("SELECT audience FROM instance WHERE id = 1").fetchone()
+    return str(row["audience"])

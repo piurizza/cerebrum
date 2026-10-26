@@ -72,3 +72,12 @@ CREATE TABLE IF NOT EXISTS oidc_identities (
 -- At most one linked identity per account per provider.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_oidc_identities_user_issuer
     ON oidc_identities(user_id, issuer);
+
+-- One row: this accounts database's own identity, generated the first time
+-- it is opened. Access tokens carry it as their audience, so a token another
+-- Cerebrum issued -- even one sharing AUTH_JWT_SECRET -- is not accepted
+-- here.
+CREATE TABLE IF NOT EXISTS instance (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    audience TEXT NOT NULL
+);

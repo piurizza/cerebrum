@@ -600,6 +600,14 @@ history.
       via a rotating, hashed, `httpOnly` refresh-token cookie, with a
       short-lived JWT access token held in memory. Reuse of a rotated
       refresh token revokes the whole token family (theft detection).
+      An access token must carry an expiry, an issue time and this
+      instance's audience: a random id each accounts database generates
+      the first time it is opened (`instance` table). So a token another
+      Cerebrum issued is refused even if the two share `AUTH_JWT_SECRET`
+      (for example a read-only second instance set up from a copied
+      `.env`), and a token without an expiry is never accepted. Tokens
+      issued before this rule are refused once; the web app's refresh
+      gets a new one, so nobody is signed out.
       Registration requires an invite token (first account bootstraps
       via `AUTH_SETUP_TOKEN`; every account after that needs an
       admin-generated invite).

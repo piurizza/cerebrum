@@ -112,9 +112,12 @@ percent-encoded (`[x](My%20Note.md)`) or wrapped in angle brackets
 bare space ends the destination, so `[x](My Note.md)` is not a link, in any
 renderer. When Cerebrum writes a target -- the `[[` picker, a pasted image,
 a link rewritten after a rename -- it percent-encodes only the characters
-that would break the link (space, `%`, parentheses, angle brackets, square
-brackets, `\`, `"`) and keeps accented letters readable; a rewritten link
-keeps its own style (angle brackets stay angle brackets) and any title. The
+that would break the link (space, `#`, `%`, parentheses, angle brackets,
+square brackets, `\`, `"`) and keeps accented letters readable; a rewritten
+link keeps its own style (angle brackets stay angle brackets, unless the new
+path holds `#` or `%`) and any title. Link syntax inside code blocks and
+inline code is an example, not a link: it is neither indexed nor rewritten,
+as with wikilinks. The
 backend (`notes/parser.py`) and the preview (`frontend/src/lib/noteContent.ts`)
 both run the cases in `fixtures/markdown-link-targets.json`.
 

@@ -243,7 +243,8 @@ def set_task_done(  # pylint: disable=too-many-arguments
     untick it, changing that one line and nothing else in the file.
 
     The task is found only where the caller says it is: `line` must hold
-    a task whose text, without its done marker, is `text`. Anything else
+    a task whose text, without its done marker, is `text`, which may carry
+    the marker too (the note preview sends the line as it is). Anything else
     raises TaskConflictError and writes nothing; the task is never looked
     for elsewhere. A task already in the state asked for is left as it is.
     """
@@ -251,6 +252,7 @@ def set_task_done(  # pylint: disable=too-many-arguments
         raise ValueError("A tick needs the day it was done")
     if not done:
         day = None
+    expected = split_done_marker(text)[0]
     written = ""
 
     def change(content: str) -> str | None:
@@ -268,7 +270,7 @@ def set_task_done(  # pylint: disable=too-many-arguments
         # extract_tasks skips frontmatter and fenced code, as the index does.
         listed = {task.line: task for task in extract_tasks(content)}
         current = listed.get(line)
-        if current is None or split_done_marker(current.text)[0] != text:
+        if current is None or split_done_marker(current.text)[0] != expected:
             raise TaskConflictError(_CHANGED)
         written = lines[line - 1]
         if current.checked == done:

@@ -15,7 +15,9 @@ import type {
   GraphResponse,
   Note,
   NoteMeta,
+  SetTaskDoneRequest,
   TaskItem,
+  TaskWriteResult,
 } from "../types/note";
 import type { VaultSettings } from "../types/vault";
 
@@ -504,6 +506,19 @@ export function getGraph(): Promise<GraphResponse> {
 
 export function getTasks(): Promise<TaskItem[]> {
   return request<TaskItem[]>("/tasks");
+}
+
+// Ticks (`done` with the local `date`) or unticks the task on `line` of
+// `path`, a 1-based line of the raw file. Rejects with an ApiError: 409 when
+// that line no longer holds a task with this text, 404 when the note is
+// gone. Resolves with the note as written, whose content and version
+// replace any copy the caller holds.
+export function setTaskDone(body: SetTaskDoneRequest): Promise<TaskWriteResult> {
+  return request<TaskWriteResult>("/tasks/done", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export function getBacklinks(path: string): Promise<NoteMeta[]> {

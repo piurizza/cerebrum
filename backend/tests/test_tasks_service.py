@@ -116,6 +116,19 @@ def test_untick_removes_the_done_marker(vault: Path) -> None:
     assert (task.done, task.done_date, task.text) == (False, None, "Water the herbs")
 
 
+def test_the_text_may_be_sent_with_its_done_marker(vault: Path) -> None:
+    # The note preview sends the text as the line holds it, marker and all,
+    # rather than parsing the marker itself.
+    file_path = _write(vault, "a.md", "- [x] Water ✅ 2026-10-20 ^w\n".encode())
+
+    _, task = set_task_done(
+        vault, "a.md", 1, "Water ✅ 2026-10-20 ^w", done=False, day=None
+    )
+
+    assert file_path.read_bytes() == b"- [ ] Water ^w\n"
+    assert task.text == "Water ^w"
+
+
 def test_ticking_an_already_ticked_task_writes_nothing(vault: Path) -> None:
     content = "- [x] Water ✅ 2026-10-20\n".encode()
     file_path = _write(vault, "a.md", content)

@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { useBlocker, useNavigate, useParams } from "react-router-dom";
 import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+  ApiError,
   CachedNoteError,
   encodeNotePath,
   errorMessage,
@@ -8,11 +16,12 @@ import {
   getNote,
   NoteConflictError,
   putNote,
+  setTaskDone,
 } from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
 import { UnsavedChangesDialog } from "../components/ConfirmDialog/UnsavedChangesDialog";
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
-import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
+import { MarkdownPreview, type TaskToggle } from "../components/Editor/MarkdownPreview";
 import { NotePathHeader } from "../components/Editor/NotePathHeader";
 import {
   SaveConflictDialog,
@@ -22,9 +31,11 @@ import { useOffline } from "../context/OfflineContext";
 import { useTheme } from "../context/ThemeContext";
 import { useZenMode } from "../context/ZenModeContext";
 import { useCanWrite, useVaultReadOnly } from "../hooks/useCanWrite";
+import { localIsoDate } from "../lib/dailyNote";
 import { setEditorDirty } from "../lib/editorDirty";
 import { mergeNote } from "../lib/mergeNote";
-import { stripFrontmatter } from "../lib/noteContent";
+import { frontmatterLineCount, stripFrontmatter } from "../lib/noteContent";
+import { isTaskChangedError, TASK_CHANGED_MESSAGE, taskOnLine } from "../lib/tasks";
 import type { Note } from "../types/note";
 
 type ViewMode = "edit" | "preview";
@@ -39,6 +50,21 @@ function saveErrorMessage(err: unknown): string {
   return err instanceof CachedNoteError ? OFFLINE_SAVE_MESSAGE : errorMessage(err);
 }
 
+// A tick writes the file, so it would be refused against unsaved edits or,
+// worse, leave them out of date: the buffer must be saved first.
+const SAVE_FIRST_HINT = "Save first to tick tasks here.";
+
+const TASK_MOVED_MESSAGE =
+  "This task has moved since the list was loaded, so the note opens at the top.";
+
+// How long a task opened from the list stays highlighted.
+const HIGHLIGHT_MS = 2000;
+
+/** The `?line=N` a task opens its note at, or null. */
+function openLine(value: string | null): number | null {
+  return value !== null && /^[1-9]\d*$/.test(value) ? Number(value) : null;
+}
+
 // Best-effort platform detection for the shortcut hint (R6) --
 // `navigator.platform` is deprecated but still universally supported;
 // worst case a non-Mac user briefly sees "⌘" instead of "Ctrl", which is
@@ -50,6 +76,8 @@ export function NoteViewPage() {
   const params = useParams();
   const path = params["*"] ?? "";
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const lineToOpen = openLine(searchParams.get("line"));
   const [content, setContent] = useState("");
   // The note as last loaded or saved, and its version: the base of the
   // three-way merge when a save is refused because the file changed
@@ -81,6 +109,19 @@ export function NoteViewPage() {
   // The edits a Reload took out of the editor, kept on screen to copy
   // until dismissed.
   const [unsavedText, setUnsavedText] = useState<string | null>(null);
+  // A preview tick's outcome: the shared "this task changed" message (or
+  // the open-at-line "moved" one), and any other failure.
+  const [taskNotice, setTaskNotice] = useState<string | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
+  const [highlightLine, setHighlightLine] = useState<number | null>(null);
+  // A ref, not state: a second click before the first tick re-renders must
+  // already see it. The checkboxes aren't disabled meanwhile, which would
+  // take the keyboard focus off the one just ticked.
+  const ticking = useRef(false);
+  // The note and line a `?line=` was last acted on, so later renders (an
+  // edit, a tick) don't scroll back to it.
+  const openedAt = useRef<string | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const { isZen, toggleZen } = useZenMode();
   const { theme, toggleTheme } = useTheme();
   const { isOffline } = useOffline();
@@ -107,6 +148,9 @@ export function NoteViewPage() {
     setSaveError(null);
     setConflictOpen(false);
     setConflictError(null);
+    setTaskNotice(null);
+    setTaskError(null);
+    setHighlightLine(null);
     setMode("preview");
     getNote(path)
       .then((note) => {
@@ -144,6 +188,99 @@ export function NoteViewPage() {
     setUpdated(note.updated);
     setBaseVersion(note.version);
   }, []);
+
+  // A note fetched again replaces the one shown, buffer included.
+  const adoptReloadedNote = useCallback(
+    (note: Note) => {
+      adoptSavedNote(note);
+      setTitle(note.title);
+      setCreated(note.created);
+    },
+    [adoptSavedNote],
+  );
+
+  // A preview checkbox ticks or unticks its task with a line edit on the
+  // server, which only a clean buffer allows (the checkboxes are disabled
+  // otherwise). The note it returns becomes the base of the next save, so
+  // that save isn't refused because of the tick. When the task isn't where
+  // the preview put it any more, nothing is written and the note reloads.
+  const handleToggleTask = useCallback(
+    async ({ line, text, done }: { line: number; text: string; done: boolean }) => {
+      if (ticking.current || !canWrite || isDirty) return;
+      ticking.current = true;
+      setTaskNotice(null);
+      setTaskError(null);
+      try {
+        const { note } = await setTaskDone({
+          path,
+          line,
+          text,
+          done,
+          date: done ? localIsoDate() : null,
+        });
+        adoptSavedNote(note);
+      } catch (err) {
+        if (!isTaskChangedError(err)) {
+          setTaskError(errorMessage(err));
+          return;
+        }
+        try {
+          adoptReloadedNote(await getLiveNote(path));
+          setTaskNotice(TASK_CHANGED_MESSAGE);
+        } catch (reloadErr) {
+          // A note that is gone shows as one that can't be opened.
+          if (reloadErr instanceof ApiError && reloadErr.status === 404) {
+            setLoadError(reloadErr);
+          } else {
+            setTaskError(saveErrorMessage(reloadErr));
+          }
+        }
+      } finally {
+        ticking.current = false;
+      }
+    },
+    [path, canWrite, isDirty, adoptSavedNote, adoptReloadedNote],
+  );
+
+  // Hidden on a read-only vault (the checkboxes only show their state),
+  // disabled offline and while there are unsaved edits.
+  const taskToggle = useMemo<TaskToggle | undefined>(
+    () =>
+      vaultReadOnly
+        ? undefined
+        : {
+            content,
+            disabled: !canWrite || isDirty,
+            hint: isDirty ? SAVE_FIRST_HINT : null,
+            onToggle: handleToggleTask,
+          },
+    [vaultReadOnly, content, canWrite, isDirty, handleToggleTask],
+  );
+
+  // Opening a task from the list (`?line=N`) lands on it in the preview,
+  // but only while that file line still holds a task: one that moved opens
+  // the note at the top with a notice instead of highlighting the wrong
+  // line. Acted on once per note and line.
+  useEffect(() => {
+    if (loading || loadError || lineToOpen === null || mode !== "preview") return;
+    const key = `${path}\n${lineToOpen}`;
+    if (openedAt.current === key) return;
+    openedAt.current = key;
+    if (taskOnLine(content, lineToOpen) === null) {
+      setTaskNotice(TASK_MOVED_MESSAGE);
+      return;
+    }
+    setHighlightLine(lineToOpen);
+  }, [loading, loadError, lineToOpen, mode, path, content]);
+
+  useEffect(() => {
+    if (highlightLine === null) return;
+    editorRef.current
+      ?.querySelector(`[data-source-line="${highlightLine}"]`)
+      ?.scrollIntoView({ block: "center" });
+    const timer = window.setTimeout(() => setHighlightLine(null), HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [highlightLine]);
 
   // Every save from the editor goes through here (R16): it names the
   // version the buffer started from, so a file changed elsewhere since is
@@ -385,7 +522,7 @@ export function NoteViewPage() {
           onCancel={handleConflictCancel}
         />
       )}
-      <div className="note-editor">
+      <div className="note-editor" ref={editorRef}>
         <NotePathHeader
           path={path}
           title={title}
@@ -427,6 +564,17 @@ export function NoteViewPage() {
           }
         />
 
+        {taskNotice && (
+          <p className="note-notice" role="status">
+            {taskNotice}
+          </p>
+        )}
+        {taskError && (
+          <p className="error-text" role="alert">
+            {taskError}
+          </p>
+        )}
+
         {mode === "edit" ? (
           <MarkdownEditor
             value={content}
@@ -435,7 +583,13 @@ export function NoteViewPage() {
             readOnly={!canWrite}
           />
         ) : (
-          <MarkdownPreview body={stripFrontmatter(content)} currentPath={path} />
+          <MarkdownPreview
+            body={stripFrontmatter(content)}
+            lineOffset={frontmatterLineCount(content)}
+            currentPath={path}
+            tasks={taskToggle}
+            highlightLine={highlightLine}
+          />
         )}
 
         <div className="note-editor-actions">

@@ -646,3 +646,46 @@ describe("getLiveNote()", () => {
     });
   });
 });
+
+describe("setTaskDone()", () => {
+  it("posts the task's path, file line, text and change as JSON", async () => {
+    const client = await freshClient();
+    const written = { note: { path: "a.md" }, task: { path: "a.md", line: 3 } };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(written));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = {
+      path: "a.md",
+      line: 3,
+      text: "Water the herbs",
+      done: true,
+      date: "2026-10-26",
+    };
+
+    await expect(client.setTaskDone(body)).resolves.toEqual(written);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/tasks\/done$/);
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it("rejects a 409 as an ApiError with that status", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(
+            { detail: "The note changed since the task was loaded" },
+            { status: 409 },
+          ),
+        ),
+    );
+
+    await expect(
+      client.setTaskDone({ path: "a.md", line: 1, text: "x", done: false }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+});

@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Pure functions, no DOM -- skip jsdom's window/document bootstrap cost.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDailyNoteDefaultBody, getTodayNotePath } from "./dailyNote";
+import { getDailyNoteDefaultBody, getTodayNotePath, localIsoDate } from "./dailyNote";
 
 // The folder comes from the server via `vaultSettings.ts` (its own tests
 // cover loading, storage and normalization); here it's just a value.
@@ -44,6 +44,14 @@ describe("getTodayNotePath", () => {
     // (UTC-5) -- the local and UTC dates genuinely differ here.
     const date = new Date("2026-01-01T02:00:00Z");
     expect(getTodayNotePath(date)).toBe("daily/2025-12-31.md");
+  });
+});
+
+describe("localIsoDate", () => {
+  it("is the local calendar day as YYYY-MM-DD, the day a tick records", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    expect(localIsoDate(new Date("2026-01-01T02:00:00Z"))).toBe("2025-12-31");
+    expect(localIsoDate(new Date(2026, 0, 5))).toBe("2026-01-05");
   });
 });
 

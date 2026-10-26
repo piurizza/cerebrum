@@ -17,10 +17,16 @@ function dailyNoteFolder(): string {
  * the user is actually looking at. Accepts an optional `date` so tests
  * can inject a fixed value instead of depending on wall-clock time. */
 export function getTodayNotePath(date: Date = new Date()): string {
+  return `${dailyNoteFolder()}/${localIsoDate(date)}.md`;
+}
+
+/** The browser's local calendar day as YYYY-MM-DD, never the UTC one (see
+ * `getTodayNotePath`): the day a task ticked now is recorded as done. */
+export function localIsoDate(date: Date = new Date()): string {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
-  return `${dailyNoteFolder()}/${yyyy}-${mm}-${dd}.md`;
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 /** Default body for a newly-created daily note: just a date heading, not

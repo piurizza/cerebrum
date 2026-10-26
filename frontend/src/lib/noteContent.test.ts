@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   formatLinkTarget,
+  frontmatterLineCount,
   relativeLinkPath,
   resolveAttachmentTarget,
   resolveLinkTarget,
@@ -73,6 +74,23 @@ describe("stripFrontmatter", () => {
   it("leaves content unchanged when no frontmatter block is present", () => {
     const raw = "# Body\n\nContent here.";
     expect(stripFrontmatter(raw)).toBe(raw);
+  });
+});
+
+describe("frontmatterLineCount", () => {
+  it("counts the lines stripFrontmatter removes, so body line N is file line N + count", () => {
+    const raw = "---\ntitle: Hello\ntags: [a, b]\n---\n# Body\n- [ ] Task";
+    expect(frontmatterLineCount(raw)).toBe(4);
+    expect(raw.split("\n")[1 + 4]).toBe(stripFrontmatter(raw).split("\n")[1]);
+  });
+
+  it("counts CRLF frontmatter lines once each", () => {
+    expect(frontmatterLineCount("---\r\ntitle: Hello\r\n---\r\nBody")).toBe(3);
+  });
+
+  it("is 0 without frontmatter, or with an opening boundary that never closes", () => {
+    expect(frontmatterLineCount("# Body\n---\n")).toBe(0);
+    expect(frontmatterLineCount("---\n- [ ] Not frontmatter after all\n")).toBe(0);
   });
 });
 

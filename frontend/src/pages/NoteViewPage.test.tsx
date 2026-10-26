@@ -1,9 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, CachedNoteError, NoteConflictError } from "../api/client";
+import { localIsoDate } from "../lib/dailyNote";
+import { TASK_CHANGED_MESSAGE } from "../lib/tasks";
 import { loadVaultSettings } from "../lib/vaultSettings";
 import { setCachedVaultReadOnly } from "../test/factories";
-import type { Note } from "../types/note";
+import type { Note, SetTaskDoneRequest, TaskItem } from "../types/note";
 
 const TEST_PATH = "notes/a.md";
 
@@ -30,6 +33,8 @@ const mockPutNote =
   vi.fn<(path: string, content: string, options?: PutOptions) => Promise<Note>>();
 const mockGetBacklinks = vi.fn<(path: string) => Promise<unknown[]>>();
 const mockGetVaultSettings = vi.fn<() => Promise<unknown>>();
+const mockSetTaskDone =
+  vi.fn<(body: SetTaskDoneRequest) => Promise<{ note: Note; task: TaskItem }>>();
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
   return {
@@ -40,6 +45,7 @@ vi.mock("../api/client", async () => {
     putNote: (...args: [string, string, PutOptions?]) => mockPutNote(...args),
     getBacklinks: (path: string) => mockGetBacklinks(path),
     getVaultSettings: () => mockGetVaultSettings(),
+    setTaskDone: (body: SetTaskDoneRequest) => mockSetTaskDone(body),
   };
 });
 
@@ -66,8 +72,12 @@ vi.mock("react-router-dom", async () => {
     useNavigate: () => mockNavigate,
     useParams: () => ({ "*": TEST_PATH }),
     useBlocker: () => mockUseBlocker(),
+    useSearchParams: () => [searchParams, vi.fn()],
   };
 });
+
+// The note route's query string (`?line=N` opens a note at a task).
+let searchParams = new URLSearchParams();
 
 const mockUseOffline =
   vi.fn<() => { isOffline: boolean; lastSyncedAt: string | null }>();
@@ -100,11 +110,28 @@ vi.mock("../components/Editor/MarkdownEditor", () => ({
   },
 }));
 
-vi.mock("../components/Editor/MarkdownPreview", () => ({
-  MarkdownPreview: ({ body }: { body: string }) => (
-    <div data-testid="markdown-preview">{body}</div>
-  ),
-}));
+// The preview's task checkboxes and open-at-line work across the page and
+// the real preview, so tests of those set `realPreview` and get the actual
+// component; the rest keep the plain stub.
+let realPreview = false;
+vi.mock("../components/Editor/MarkdownPreview", async () => {
+  const actual = await vi.importActual<
+    typeof import("../components/Editor/MarkdownPreview")
+  >("../components/Editor/MarkdownPreview");
+  return {
+    ...actual,
+    MarkdownPreview: (props: ComponentProps<typeof actual.MarkdownPreview>) =>
+      realPreview ? (
+        <div data-testid="markdown-preview">
+          <actual.MarkdownPreview {...props} />
+        </div>
+      ) : (
+        <div data-testid="markdown-preview">{props.body}</div>
+      ),
+  };
+});
+
+vi.mock("../lib/mermaid", () => ({ renderMermaid: vi.fn() }));
 
 // biome-ignore lint/suspicious/noExplicitAny: captured props mirror whatever shape NoteViewPage passes.
 let capturedHeaderProps: any = null;
@@ -146,6 +173,9 @@ beforeEach(() => {
   mockUseZenMode.mockReturnValue({ isZen: false, toggleZen: vi.fn() });
   capturedEditorProps = null;
   capturedHeaderProps = null;
+  mockSetTaskDone.mockReset();
+  searchParams = new URLSearchParams();
+  realPreview = false;
   mockGetVaultSettings.mockReset();
   // Never fetched: counts as writable.
   setCachedVaultReadOnly(null);
@@ -628,5 +658,197 @@ describe("NoteViewPage guarded save", () => {
 
     await waitFor(() => expect(proceed).toHaveBeenCalled());
     expect(mockPutNote).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("NoteViewPage preview tasks", () => {
+  // The task is on file line 5: the frontmatter's three lines count.
+  const CONTENT = "---\ntitle: A\n---\n# A\n- [ ] Water the herbs\n";
+  const TICKED = "---\ntitle: A\n---\n# A\n- [x] Water the herbs ✅ 2026-10-26\n";
+
+  function written(content: string, version: string) {
+    const note = makeNote({ content, version });
+    const task: TaskItem = {
+      path: TEST_PATH,
+      title: "A",
+      tags: [],
+      line: 5,
+      text: "Water the herbs",
+      done: true,
+      done_date: "2026-10-26",
+    };
+    return { note, task };
+  }
+
+  async function openNote(content = CONTENT) {
+    realPreview = true;
+    mockGetNote.mockResolvedValue(makeNote({ content }));
+    render(<NoteViewPage />);
+    await screen.findByTestId("markdown-preview");
+  }
+
+  function checkbox() {
+    return screen.getByRole("checkbox", { name: "Water the herbs" });
+  }
+
+  it("ticks with the file line, frontmatter included, and today's date", async () => {
+    await openNote();
+    mockSetTaskDone.mockResolvedValue(written(TICKED, "version-2"));
+
+    fireEvent.click(checkbox());
+
+    expect(mockSetTaskDone).toHaveBeenCalledWith({
+      path: TEST_PATH,
+      line: 5,
+      text: "Water the herbs",
+      done: true,
+      date: localIsoDate(),
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "Water the herbs ✅ 2026-10-26" }),
+      ).toBeChecked(),
+    );
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+  });
+
+  it("saves the next edit against the version the tick returned", async () => {
+    await openNote();
+    mockSetTaskDone.mockResolvedValue(written(TICKED, "version-2"));
+    fireEvent.click(checkbox());
+    await waitFor(() => expect(screen.getAllByRole("checkbox")[0]).toBeChecked());
+    mockPutNote.mockImplementation(async (_path, content) =>
+      makeNote({ content, version: "version-3" }),
+    );
+
+    await typeInEditor(`${TICKED}More\n`);
+    pressCtrlS();
+
+    await waitFor(() =>
+      expect(mockPutNote).toHaveBeenCalledWith(TEST_PATH, `${TICKED}More\n`, {
+        baseVersion: "version-2",
+      }),
+    );
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+    expect(mockGetLiveNote).not.toHaveBeenCalled();
+  });
+
+  it("disables the checkboxes with a Save first hint while the buffer is dirty", async () => {
+    await openNote();
+    await typeInEditor(`${CONTENT}\nDraft\n`);
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(checkbox()).toBeDisabled();
+    expect(checkbox()).toHaveAccessibleDescription(/Save first/);
+    fireEvent.click(checkbox());
+    expect(mockSetTaskDone).not.toHaveBeenCalled();
+  });
+
+  it("disables the checkboxes offline", async () => {
+    setOffline(true);
+    await openNote();
+
+    expect(checkbox()).toBeDisabled();
+  });
+
+  it("renders no enabled checkbox on a read-only vault", async () => {
+    setCachedVaultReadOnly(true);
+    await openNote();
+
+    expect(checkbox()).toBeDisabled();
+    expect(screen.queryByText(/Save first/)).toBeNull();
+  });
+
+  it("shows the shared message and reloads the note on a 409", async () => {
+    await openNote();
+    mockSetTaskDone.mockRejectedValue(
+      new ApiError("The note changed since the task was loaded", 409),
+    );
+    mockGetLiveNote.mockResolvedValue(
+      makeNote({ content: "# A\n- [ ] Moved task\n", version: "version-9" }),
+    );
+
+    fireEvent.click(checkbox());
+
+    expect(await screen.findByText(TASK_CHANGED_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Moved task" })).toBeEnabled();
+    expect(mockGetLiveNote).toHaveBeenCalledWith(TEST_PATH);
+  });
+
+  it("shows the note's absence when a 404 tick's reload fails too", async () => {
+    await openNote();
+    mockSetTaskDone.mockRejectedValue(new ApiError("Note not found", 404));
+    mockGetLiveNote.mockRejectedValue(new ApiError("Note not found", 404));
+
+    fireEvent.click(checkbox());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Note not found");
+  });
+
+  it("reports any other failure inline and leaves the note as it was", async () => {
+    await openNote();
+    mockSetTaskDone.mockRejectedValue(new ApiError("This vault is read-only", 403));
+
+    fireEvent.click(checkbox());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This vault is read-only",
+    );
+    expect(checkbox()).not.toBeChecked();
+    expect(mockGetLiveNote).not.toHaveBeenCalled();
+  });
+});
+
+describe("NoteViewPage open at line", () => {
+  // Line 7 is the task; line 6 is a heading.
+  const CONTENT = "---\ntitle: A\ntags: [x]\n---\n\n# A\n- [ ] Call the plumber\n";
+  const scrollIntoView = vi.fn();
+
+  beforeEach(() => {
+    scrollIntoView.mockReset();
+    Element.prototype.scrollIntoView = scrollIntoView;
+  });
+
+  async function openAt(line: string, content = CONTENT) {
+    realPreview = true;
+    searchParams = new URLSearchParams({ line });
+    mockGetNote.mockResolvedValue(makeNote({ content }));
+    const view = render(<NoteViewPage />);
+    await screen.findByTestId("markdown-preview");
+    return view;
+  }
+
+  it("scrolls to the task on that line and highlights it for 2 seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { container } = await openAt("7");
+      const item = container.querySelector('[data-source-line="7"]');
+
+      await waitFor(() => expect(item).toHaveClass("task-list-item--highlight"));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.contexts[0]).toBe(item);
+      expect(item).toHaveTextContent("The task you opened");
+
+      act(() => vi.advanceTimersByTime(2000));
+      expect(item).not.toHaveClass("task-list-item--highlight");
+      expect(item).not.toHaveTextContent("The task you opened");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens at the top with a notice when that line no longer holds a task", async () => {
+    const { container } = await openAt("6");
+
+    expect(await screen.findByText(/task has moved/i)).toBeInTheDocument();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(container.querySelector(".task-list-item--highlight")).toBeNull();
+  });
+
+  it("ignores a line that isn't a number", async () => {
+    await openAt("seven");
+
+    expect(screen.queryByText(/task has moved/i)).toBeNull();
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });

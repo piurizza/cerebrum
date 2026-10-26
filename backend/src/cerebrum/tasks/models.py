@@ -50,7 +50,8 @@ class AddTaskRequest(BaseModel):
 class SetTaskDoneRequest(BaseModel):
     path: str
     line: int
-    # The task's text as the list returned it, without a done marker.
+    # The task's text as the list returned it, without a done marker, or
+    # as the line holds it with one: the marker is ignored either way.
     text: str
     done: bool
     # The day a tick records in its done marker: the client's today.

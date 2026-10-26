@@ -1,7 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MarkdownPreview } from "./MarkdownPreview";
+import { MarkdownPreview, type TaskToggle } from "./MarkdownPreview";
 
 // `fetchAttachmentBlobUrl` hits the network (via `fetchWithRetry`), which
 // isn't available in jsdom -- mock it so `AttachmentImage` gets a
@@ -37,6 +40,7 @@ vi.mock("../../lib/mermaid", () => ({ renderMermaid: vi.fn() }));
 import { ApiError, fetchAttachmentBlobUrl, findAttachment } from "../../api/client";
 import { ThemeProvider } from "../../context/ThemeContext";
 import { renderMermaid } from "../../lib/mermaid";
+import { frontmatterLineCount, stripFrontmatter } from "../../lib/noteContent";
 
 const mockFetchAttachmentBlobUrl = vi.mocked(fetchAttachmentBlobUrl);
 const mockFindAttachment = vi.mocked(findAttachment);
@@ -254,5 +258,189 @@ describe("MarkdownPreview", () => {
       );
       expect(mockFetchAttachmentBlobUrl).not.toHaveBeenCalled();
     });
+  });
+});
+
+interface TaskLineCases {
+  extract: {
+    name: string;
+    content: string;
+    tasks: { line: number; checked: boolean; text: string }[];
+  }[];
+}
+
+// A path, not `new URL(..., import.meta.url)` as the node-environment
+// tests use: under jsdom, `URL` is jsdom's own, which readFileSync refuses.
+const taskLineCases = JSON.parse(
+  readFileSync(
+    resolve(import.meta.dirname, "../../../../fixtures/task-lines.json"),
+    "utf-8",
+  ),
+) as TaskLineCases;
+
+// The preview as NoteViewPage renders it: the body without its
+// frontmatter, numbered back to file lines.
+function renderNote(
+  content: string,
+  props: Partial<ComponentProps<typeof MarkdownPreview>> = {},
+) {
+  return render(
+    <MemoryRouter>
+      <ThemeProvider>
+        <MarkdownPreview
+          body={stripFrontmatter(content)}
+          lineOffset={frontmatterLineCount(content)}
+          currentPath="notes/a.md"
+          {...props}
+        />
+      </ThemeProvider>
+    </MemoryRouter>,
+  );
+}
+
+function toggleFor(content: string, overrides: Partial<TaskToggle> = {}): TaskToggle {
+  return { content, disabled: false, hint: null, onToggle: vi.fn(), ...overrides };
+}
+
+describe("MarkdownPreview task items", () => {
+  const note =
+    "---\ntitle: Garden\ntags: [home]\n---\n\n# Garden\n- [ ] Water the [[herbs]]\n- [x] Rake ✅ 2026-10-20\n";
+
+  beforeEach(() => {
+    notePaths = [];
+  });
+
+  it("marks each task item with its file line, frontmatter included", () => {
+    const { container } = renderNote(note);
+
+    const lines = [...container.querySelectorAll("li.task-list-item")].map((item) =>
+      item.getAttribute("data-source-line"),
+    );
+    expect(lines).toEqual(["7", "8"]);
+  });
+
+  it("names each checkbox by its item's text", () => {
+    renderNote(note);
+
+    expect(screen.getByRole("checkbox", { name: "Water the herbs" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Rake ✅ 2026-10-20" })).toBeChecked();
+  });
+
+  it("leaves checkboxes disabled when no toggle is given (a read-only vault)", () => {
+    renderNote(note);
+
+    for (const box of screen.getAllByRole("checkbox")) expect(box).toBeDisabled();
+  });
+
+  it("sends the file line, the line's text and the new state on a click", () => {
+    const tasks = toggleFor(note);
+    renderNote(note, { tasks });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Water the herbs" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Rake ✅ 2026-10-20" }));
+
+    expect(tasks.onToggle).toHaveBeenNthCalledWith(1, {
+      line: 7,
+      text: "Water the [[herbs]]",
+      done: true,
+    });
+    expect(tasks.onToggle).toHaveBeenNthCalledWith(2, {
+      line: 8,
+      text: "Rake ✅ 2026-10-20",
+      done: false,
+    });
+  });
+
+  it("is keyboard-operable: Space on a focused checkbox toggles it", () => {
+    const tasks = toggleFor(note);
+    renderNote(note, { tasks });
+
+    const box = screen.getByRole("checkbox", { name: "Water the herbs" });
+    box.focus();
+    expect(box).toHaveFocus();
+    // jsdom turns a click into the change a Space keypress makes.
+    fireEvent.click(box);
+    expect(tasks.onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables a task item whose file line doesn't hold the task pattern", () => {
+    // GFM renders a checkbox in an ordered list; the file grammar doesn't.
+    const content = "1. [ ] Numbered\n- [ ] Bulleted\n";
+    renderNote(content, { tasks: toggleFor(content) });
+
+    expect(screen.getByRole("checkbox", { name: "Numbered" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Bulleted" })).toBeEnabled();
+  });
+
+  it("disables every checkbox with the hint when told to", () => {
+    renderNote(note, {
+      tasks: toggleFor(note, {
+        disabled: true,
+        hint: "Save first to tick tasks here.",
+      }),
+    });
+
+    const hint = screen.getByText("Save first to tick tasks here.");
+    for (const box of screen.getAllByRole("checkbox")) {
+      expect(box).toBeDisabled();
+      expect(box).toHaveAccessibleDescription("Save first to tick tasks here.");
+    }
+    expect(hint).toBeVisible();
+  });
+
+  it("shows no hint on a note without tasks", () => {
+    renderNote("Just text\n", {
+      tasks: toggleFor("Just text\n", { disabled: true, hint: "Save first" }),
+    });
+
+    expect(screen.queryByText("Save first")).not.toBeInTheDocument();
+  });
+
+  it("names a nested item's checkbox by its own text only", () => {
+    const content = "- [ ] Parent\n  - [ ] Child\n";
+    const { container } = renderNote(content);
+
+    expect(screen.getByRole("checkbox", { name: "Parent" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Child" })).toBeInTheDocument();
+    const lines = [...container.querySelectorAll("li.task-list-item")].map((item) =>
+      item.getAttribute("data-source-line"),
+    );
+    expect(lines).toEqual(["1", "2"]);
+  });
+
+  it("marks the highlighted line's item, with a text equivalent", () => {
+    const { container } = renderNote(note, { highlightLine: 7 });
+
+    const item = container.querySelector('[data-source-line="7"]');
+    expect(item).toHaveClass("task-list-item--highlight");
+    expect(item).toHaveTextContent("The task you opened");
+    expect(container.querySelector('[data-source-line="8"]')).not.toHaveClass(
+      "task-list-item--highlight",
+    );
+  });
+
+  describe("shared task-line cases", () => {
+    it.each(taskLineCases.extract.map((c) => [c.name, c] as const))(
+      "numbers %s like the server",
+      (_, c) => {
+        const tasks = toggleFor(c.content);
+        const { container } = renderNote(c.content, { tasks });
+
+        const items = [...container.querySelectorAll("li.task-list-item")];
+        expect(
+          items.map((item) => ({
+            line: Number(item.getAttribute("data-source-line")),
+            checked: (item.querySelector("input") as HTMLInputElement).checked,
+          })),
+        ).toEqual(c.tasks.map(({ line, checked }) => ({ line, checked })));
+
+        for (const item of items) {
+          fireEvent.click(item.querySelector("input") as HTMLInputElement);
+        }
+        expect(vi.mocked(tasks.onToggle).mock.calls.map(([task]) => task)).toEqual(
+          c.tasks.map(({ line, checked, text }) => ({ line, text, done: !checked })),
+        );
+      },
+    );
   });
 });

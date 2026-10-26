@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NoteConflictError } from "../../api/client";
 import { loadVaultSettings } from "../../lib/vaultSettings";
 import { makeNoteMeta, setCachedVaultReadOnly } from "../../test/factories";
 import type { NoteMeta } from "../../types/note";
@@ -26,7 +27,8 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
-const mockPutNote = vi.fn<(path: string, content: string) => Promise<unknown>>();
+const mockPutNote =
+  vi.fn<(path: string, content: string, options?: unknown) => Promise<unknown>>();
 const mockGetNote = vi.fn<(path: string) => Promise<{ content: string }>>();
 const mockGetVaultSettings = vi.fn<() => Promise<unknown>>();
 const mockSearchNotes = vi.fn<(query: string) => Promise<NoteMeta[]>>();
@@ -35,7 +37,8 @@ vi.mock("../../api/client", async () => {
     await vi.importActual<typeof import("../../api/client")>("../../api/client");
   return {
     ...actual,
-    putNote: (path: string, content: string) => mockPutNote(path, content),
+    // Rest args, so a call without options is still recorded with two.
+    putNote: (...args: [string, string, unknown?]) => mockPutNote(...args),
     getNote: (path: string) => mockGetNote(path),
     searchNotes: (query: string) => mockSearchNotes(query),
     getVaultSettings: () => mockGetVaultSettings(),
@@ -115,11 +118,37 @@ describe("NoteBrowser Today button", () => {
     renderBrowser();
     await user.click(screen.getByRole("button", { name: "Today" }));
 
+    // Create-only: a note made elsewhere since the list loaded is never
+    // overwritten (R24).
     await waitFor(() =>
-      expect(mockPutNote).toHaveBeenCalledWith(TODAY_PATH, TODAY_BODY),
+      expect(mockPutNote).toHaveBeenCalledWith(TODAY_PATH, TODAY_BODY, {
+        createOnly: true,
+      }),
     );
     expect(refreshNotes).toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith("/notes/daily/2026-08-11.md");
+  });
+
+  it("opens today's note instead of overwriting it when the server already has one", async () => {
+    // The list is stale: the phone made today's note after it loaded.
+    const user = userEvent.setup();
+    setNotesState([makeNoteMeta("other.md")]);
+    mockPutNote.mockRejectedValue(new NoteConflictError("Note already exists"));
+
+    renderBrowser();
+    await user.click(screen.getByRole("button", { name: "Today" }));
+
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith("/notes/daily/2026-08-11.md"),
+    );
+    expect(refreshNotes).toHaveBeenCalled();
+    // The one refused create-only attempt, never an unconditional retry.
+    expect(mockPutNote).toHaveBeenCalledTimes(1);
+    expect(mockPutNote).toHaveBeenCalledWith(TODAY_PATH, TODAY_BODY, {
+      createOnly: true,
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "Today" })).toBeEnabled();
   });
 
   it("navigates directly without calling putNote when today's note already exists", async () => {

@@ -1,19 +1,43 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useBlocker, useNavigate, useParams } from "react-router-dom";
-import { encodeNotePath, errorMessage, getNote, putNote } from "../api/client";
+import {
+  CachedNoteError,
+  encodeNotePath,
+  errorMessage,
+  getLiveNote,
+  getNote,
+  NoteConflictError,
+  putNote,
+} from "../api/client";
 import { BacklinksPanel } from "../components/Backlinks/BacklinksPanel";
 import { UnsavedChangesDialog } from "../components/ConfirmDialog/UnsavedChangesDialog";
 import { MarkdownEditor } from "../components/Editor/MarkdownEditor";
 import { MarkdownPreview } from "../components/Editor/MarkdownPreview";
 import { NotePathHeader } from "../components/Editor/NotePathHeader";
+import {
+  SaveConflictDialog,
+  UnsavedTextPanel,
+} from "../components/Editor/SaveConflictDialog";
 import { useOffline } from "../context/OfflineContext";
 import { useTheme } from "../context/ThemeContext";
 import { useZenMode } from "../context/ZenModeContext";
 import { useCanWrite, useVaultReadOnly } from "../hooks/useCanWrite";
 import { setEditorDirty } from "../lib/editorDirty";
+import { mergeNote } from "../lib/mergeNote";
 import { stripFrontmatter } from "../lib/noteContent";
+import type { Note } from "../types/note";
 
 type ViewMode = "edit" | "preview";
+
+// "conflict" means the save was refused and the conflict dialog is open.
+type SaveOutcome = "saved" | "conflict";
+
+// The merge needs the file as it is now, and only a cached copy came back.
+const OFFLINE_SAVE_MESSAGE = "Offline -- your changes aren't saved yet.";
+
+function saveErrorMessage(err: unknown): string {
+  return err instanceof CachedNoteError ? OFFLINE_SAVE_MESSAGE : errorMessage(err);
+}
 
 // Best-effort platform detection for the shortcut hint (R6) --
 // `navigator.platform` is deprecated but still universally supported;
@@ -27,7 +51,12 @@ export function NoteViewPage() {
   const path = params["*"] ?? "";
   const navigate = useNavigate();
   const [content, setContent] = useState("");
+  // The note as last loaded or saved, and its version: the base of the
+  // three-way merge when a save is refused because the file changed
+  // elsewhere (KTD5). No version (a response cached before notes had one)
+  // saves unconditionally, as before.
   const [savedContent, setSavedContent] = useState("");
+  const [baseVersion, setBaseVersion] = useState<string | undefined>(undefined);
   const [title, setTitle] = useState("");
   const [created, setCreated] = useState<string | null>(null);
   const [updated, setUpdated] = useState<string | null>(null);
@@ -47,6 +76,11 @@ export function NoteViewPage() {
   // connectivity flips mid-fetch -- refetching on every online/offline
   // toggle would fight the in-flight request.
   const [loadError, setLoadError] = useState<unknown>(null);
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [conflictError, setConflictError] = useState<string | null>(null);
+  // The edits a Reload took out of the editor, kept on screen to copy
+  // until dismissed.
+  const [unsavedText, setUnsavedText] = useState<string | null>(null);
   const { isZen, toggleZen } = useZenMode();
   const { theme, toggleTheme } = useTheme();
   const { isOffline } = useOffline();
@@ -71,12 +105,15 @@ export function NoteViewPage() {
     setLoading(true);
     setLoadError(null);
     setSaveError(null);
+    setConflictOpen(false);
+    setConflictError(null);
     setMode("preview");
     getNote(path)
       .then((note) => {
         if (cancelled) return;
         setContent(note.content);
         setSavedContent(note.content);
+        setBaseVersion(note.version ?? undefined);
         setTitle(note.title);
         setCreated(note.created);
         setUpdated(note.updated);
@@ -99,17 +136,53 @@ export function NoteViewPage() {
 
   const isDirty = content !== savedContent;
 
-  const handleSave = useCallback(async () => {
+  // The server re-renders frontmatter on a write, so its content, not the
+  // buffer's, is the new base.
+  const adoptSavedNote = useCallback((note: Note) => {
+    setSavedContent(note.content);
+    setContent(note.content);
+    setUpdated(note.updated);
+    setBaseVersion(note.version);
+  }, []);
+
+  // Every save from the editor goes through here (R16): it names the
+  // version the buffer started from, so a file changed elsewhere since is
+  // refused rather than overwritten. A refused save is merged with the file
+  // as it is now and saved once more; when the changes overlap, or that
+  // second save is refused too, the conflict dialog takes over. Throws on
+  // any other failure, for the caller to report.
+  const handleSave = useCallback(async (): Promise<SaveOutcome> => {
     setSaving(true);
     try {
-      const note = await putNote(path, content);
-      setSavedContent(note.content);
-      setContent(note.content);
-      setUpdated(note.updated);
+      let note: Note;
+      try {
+        note = await putNote(path, content, { baseVersion });
+      } catch (err) {
+        if (!(err instanceof NoteConflictError)) throw err;
+        // Rejects with CachedNoteError when only the offline cache answers:
+        // merging against a copy older than the file would only be refused
+        // again, so the buffer stays dirty instead.
+        const fresh = await getLiveNote(path);
+        const merged = mergeNote(savedContent, content, fresh.content);
+        if (!merged.ok) {
+          setConflictOpen(true);
+          return "conflict";
+        }
+        try {
+          note = await putNote(path, merged.text, { baseVersion: fresh.version });
+        } catch (retryErr) {
+          // Changed yet again: one automatic merge only, then ask.
+          if (!(retryErr instanceof NoteConflictError)) throw retryErr;
+          setConflictOpen(true);
+          return "conflict";
+        }
+      }
+      adoptSavedNote(note);
+      return "saved";
     } finally {
       setSaving(false);
     }
-  }, [path, content]);
+  }, [path, content, savedContent, baseVersion, adoptSavedNote]);
 
   // The Save button's and Cmd+S's entry point: unlike handleSave (which
   // handleBlockedSave needs to throw), reports a failure inline.
@@ -118,9 +191,49 @@ export function NoteViewPage() {
     try {
       await handleSave();
     } catch (err) {
-      setSaveError(errorMessage(err));
+      setSaveError(saveErrorMessage(err));
     }
   }, [handleSave]);
+
+  // Reload: the note as it is now replaces the buffer, whose text moves to
+  // the copy panel instead of being lost.
+  const handleConflictReload = useCallback(async () => {
+    setConflictError(null);
+    setSaving(true);
+    try {
+      const fresh = await getLiveNote(path);
+      setUnsavedText(content);
+      adoptSavedNote(fresh);
+      setTitle(fresh.title);
+      setCreated(fresh.created);
+      setSaveError(null);
+      setConflictOpen(false);
+    } catch (err) {
+      setConflictError(saveErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [path, content, adoptSavedNote]);
+
+  // Keep mine: unconditional on purpose, the user chose to overwrite.
+  const handleConflictKeepMine = useCallback(async () => {
+    setConflictError(null);
+    setSaving(true);
+    try {
+      adoptSavedNote(await putNote(path, content));
+      setSaveError(null);
+      setConflictOpen(false);
+    } catch (err) {
+      setConflictError(saveErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [path, content, adoptSavedNote]);
+
+  function handleConflictCancel() {
+    setConflictError(null);
+    setConflictOpen(false);
+  }
 
   // Warns on tab close/refresh (R2) -- browsers only allow a native,
   // unstyled confirmation here, no custom Save/Discard/Cancel UI is
@@ -162,14 +275,22 @@ export function NoteViewPage() {
     if (!canWrite) return;
     setBlockerError(null);
     try {
-      await handleSave();
-      if (blocker.state === "blocked") blocker.proceed();
+      const outcome = await handleSave();
+      if (blocker.state !== "blocked") return;
+      if (outcome === "saved") {
+        blocker.proceed();
+      } else {
+        // Nothing was saved and the conflict dialog is open: stay on the
+        // note, where a Reload's copy panel is visible, rather than stack
+        // two dialogs over a navigation that would lose it.
+        blocker.reset();
+      }
     } catch (err) {
       // handleSave's own finally already reset `saving` -- only the
       // dialog's error state is this function's responsibility. Do NOT
       // proceed(): the edit must stay on this note until Save succeeds,
       // Discard is chosen, or Cancel is chosen (R3).
-      setBlockerError(errorMessage(err));
+      setBlockerError(saveErrorMessage(err));
     }
   }, [handleSave, blocker, canWrite]);
 
@@ -195,9 +316,10 @@ export function NoteViewPage() {
         (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
       if (!isSaveShortcut) return;
       event.preventDefault();
-      // A no-op offline or on a read-only vault (still preventDefault'ed
-      // above, so the browser's own "Save page" never opens).
-      if (saving || !canWrite) return;
+      // A no-op offline, on a read-only vault, with nothing to save, or
+      // while the conflict dialog is asking (still preventDefault'ed above,
+      // so the browser's own "Save page" never opens).
+      if (saving || !canWrite || !isDirty || conflictOpen) return;
       // Route through the dialog's own Save handler while it's blocking
       // navigation, so blocker.proceed()/the dialog's error state stay in
       // sync -- the plain handleSave() never calls blocker.proceed(), so
@@ -212,7 +334,16 @@ export function NoteViewPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [path, saving, canWrite, handleSaveWithError, blocker.state, handleBlockedSave]);
+  }, [
+    path,
+    saving,
+    canWrite,
+    isDirty,
+    conflictOpen,
+    handleSaveWithError,
+    blocker.state,
+    handleBlockedSave,
+  ]);
 
   if (!path) {
     return (
@@ -244,6 +375,16 @@ export function NoteViewPage() {
           onCancel={handleBlockedCancel}
         />
       )}
+      {conflictOpen && (
+        <SaveConflictDialog
+          error={conflictError}
+          busy={saving}
+          isOffline={!canWrite}
+          onReload={handleConflictReload}
+          onKeepMine={handleConflictKeepMine}
+          onCancel={handleConflictCancel}
+        />
+      )}
       <div className="note-editor">
         <NotePathHeader
           path={path}
@@ -253,6 +394,9 @@ export function NoteViewPage() {
           onRenamed={(updatedNote) => {
             setContent(updatedNote.content);
             setSavedContent(updatedNote.content);
+            // A rename rewrites the file, so its old version would refuse
+            // the next save.
+            setBaseVersion(updatedNote.version);
             setTitle(updatedNote.title);
             setUpdated(updatedNote.updated);
             if (updatedNote.path !== path) {
@@ -339,6 +483,9 @@ export function NoteViewPage() {
           <p className="error-text save-error" role="alert">
             {saveError}
           </p>
+        )}
+        {unsavedText !== null && (
+          <UnsavedTextPanel text={unsavedText} onDismiss={() => setUnsavedText(null)} />
         )}
       </div>
       <aside className="note-backlinks">

@@ -434,6 +434,27 @@ export function getNote(path: string): Promise<Note> {
   return request<Note>(`/notes/${encodeNotePath(path)}`);
 }
 
+// Rejected by getLiveNote() when the service worker answered from its
+// cache because the server couldn't be reached (`X-SW-Cache-Fallback`).
+export class CachedNoteError extends Error {
+  constructor() {
+    super("The server can't be reached right now.");
+    this.name = "CachedNoteError";
+  }
+}
+
+// getNote() for when only the file as it is now will do, such as merging a
+// save the server refused: a cached copy may be older than the file that
+// refused it. fetchWithToken() has already reported the outage either way.
+export async function getLiveNote(path: string): Promise<Note> {
+  const notePath = `/notes/${encodeNotePath(path)}`;
+  const response = await fetchWithRetry(notePath);
+  if (response.headers.get("X-SW-Cache-Fallback")) {
+    throw new CachedNoteError();
+  }
+  return toResult<Note>(response, notePath);
+}
+
 // Without options the save is unconditional. `baseVersion` is the `version`
 // the note had when it was loaded, so a note changed elsewhere since is
 // refused instead of overwritten; `createOnly` refuses the save if a note

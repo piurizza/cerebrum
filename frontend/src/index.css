@@ -1127,6 +1127,51 @@ a {
   color: var(--text-faint);
 }
 
+.save-conflict-choices {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* The edits a conflict Reload took out of the editor. Quiet, like the
+   offline banner: nothing failed, the text is just waiting to be copied. */
+.unsaved-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+
+.unsaved-text-title {
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.unsaved-text p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.unsaved-text-body {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85rem;
+}
+
 .shortcut-hint {
   font-size: 0.8rem;
   color: var(--text-faint);

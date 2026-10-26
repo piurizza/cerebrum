@@ -592,3 +592,57 @@ describe("putNote() conditional saves", () => {
     await expect(failure).rejects.not.toBeInstanceOf(client.NoteConflictError);
   });
 });
+
+describe("getLiveNote()", () => {
+  const note = {
+    path: "note.md",
+    title: "note",
+    tags: [],
+    created: null,
+    updated: null,
+    content: "body",
+    version: "server-version",
+  };
+
+  it("returns the note the server sent", async () => {
+    const client = await freshClient();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(note)));
+
+    await expect(client.getLiveNote("note.md")).resolves.toEqual(note);
+  });
+
+  it("refuses the service worker's cached copy, which may be older than the file", async () => {
+    const client = await freshClient();
+    const onFailure = vi.fn();
+    client.setOnNetworkStatusChange({ onFailure, onRecovery: vi.fn() });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(note, { headers: { "X-SW-Cache-Fallback": "1" } }),
+        ),
+    );
+
+    await expect(client.getLiveNote("note.md")).rejects.toBeInstanceOf(
+      client.CachedNoteError,
+    );
+    // Still reported as offline, like every other cache-served answer.
+    expect(onFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes a server error through as an ApiError", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ detail: "Note not found" }, { status: 404 })),
+    );
+
+    await expect(client.getLiveNote("note.md")).rejects.toMatchObject({
+      status: 404,
+      message: "Note not found",
+    });
+  });
+});

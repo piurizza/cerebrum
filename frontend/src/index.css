@@ -160,6 +160,12 @@ a {
   margin: 0 0 0.9rem;
 }
 
+.app-title a,
+.app-topbar-brand {
+  color: inherit;
+  text-decoration: none;
+}
+
 /* Zen mode (R12): collapses the sidebar for distraction-free reading.
    Width/padding animate away rather than a hard display:none, so the
    transition reads as "sliding away" instead of an abrupt cut. */

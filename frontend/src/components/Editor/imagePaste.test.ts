@@ -111,6 +111,16 @@ describe("imagePasteExtension", () => {
     expect(view.state.doc.toString()).not.toContain(placeholder);
   });
 
+  it("encodes an attachment path with spaces so the image still shows", async () => {
+    mockUploadAttachment.mockResolvedValue({ path: "My Note.attachments/image.png" });
+    const file = new File(["binary"], "image.png", { type: "image/png" });
+    handler(fakePasteEvent([fakeClipboardItem("image/png", file)]), view);
+
+    await vi.waitFor(() => {
+      expect(view.state.doc.toString()).toBe("![](My%20Note.attachments/image.png)");
+    });
+  });
+
   it("removes the placeholder and reports the error message on a failed upload", async () => {
     let rejectUpload!: (err: unknown) => void;
     mockUploadAttachment.mockReturnValue(

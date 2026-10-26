@@ -1,6 +1,7 @@
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { errorMessage, uploadAttachment } from "../../api/client";
+import { formatLinkTarget } from "../../lib/noteContent";
 
 function findImageItem(
   items: DataTransferItemList | undefined,
@@ -66,7 +67,11 @@ export function imagePasteExtension(
 
       uploadAttachment(notePath, file)
         .then((result) => {
-          replacePlaceholder(view, placeholder, `![](${result.path})`);
+          replacePlaceholder(
+            view,
+            placeholder,
+            `![](${formatLinkTarget(result.path)})`,
+          );
         })
         .catch((err: unknown) => {
           replacePlaceholder(view, placeholder, "");

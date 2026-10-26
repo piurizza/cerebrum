@@ -63,7 +63,8 @@ _WHOLE_DOCUMENT_WARNING = (
 _LINK_GUIDANCE = {
     "markdown": (
         "Link to other notes with markdown links to their path relative to "
-        "this note, e.g. [Shown text](other-note.md). [[wikilinks]] also work."
+        "this note, e.g. [Shown text](other-note.md); write a space in the "
+        "path as %20, e.g. [Plan](My%20Plan.md). [[wikilinks]] also work."
     ),
     "wikilink": (
         "Link to other notes with wikilinks by file name, not title: "

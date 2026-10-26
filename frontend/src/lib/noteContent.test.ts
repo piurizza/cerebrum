@@ -1,7 +1,9 @@
 // @vitest-environment node
 // Pure functions, no DOM -- skip jsdom's window/document bootstrap cost.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  formatLinkTarget,
   relativeLinkPath,
   resolveAttachmentTarget,
   resolveLinkTarget,
@@ -132,5 +134,41 @@ describe("relativeLinkPath", () => {
 
   it("finds the common ancestor for two nested notes in different branches", () => {
     expect(relativeLinkPath("notes/a/x.md", "notes/b/y.md")).toBe("../b/y.md");
+  });
+});
+
+interface LinkTargetCases {
+  resolve: { name: string; source: string; target: string; expected: string | null }[];
+  format: { name: string; path: string; expected: string }[];
+}
+
+const linkCases = JSON.parse(
+  readFileSync(
+    new URL("../../../fixtures/markdown-link-targets.json", import.meta.url),
+    "utf-8",
+  ),
+) as LinkTargetCases;
+
+describe("shared markdown link target cases", () => {
+  it.each(linkCases.resolve.map((c) => [c.name, c] as const))("resolves %s", (_, c) => {
+    expect(resolveLinkTarget(c.source, c.target)).toBe(c.expected);
+  });
+
+  it.each(linkCases.format.map((c) => [c.name, c] as const))("writes %s", (_, c) => {
+    expect(formatLinkTarget(c.path)).toBe(c.expected);
+  });
+});
+
+describe("resolveAttachmentTarget with special characters", () => {
+  it("decodes an image path with spaces", () => {
+    expect(
+      resolveAttachmentTarget("notes/My Note.md", "My%20Note.attachments/a.png"),
+    ).toBe("notes/My Note.attachments/a.png");
+  });
+
+  it("reads an image path in angle brackets", () => {
+    expect(resolveAttachmentTarget("My Note.md", "<My Note.attachments/a b.png>")).toBe(
+      "My Note.attachments/a b.png",
+    );
   });
 });

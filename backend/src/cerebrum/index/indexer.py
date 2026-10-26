@@ -29,8 +29,10 @@ logger = logging.getLogger(__name__)
 # in the database file header for exactly this purpose; a database that
 # predates this constant (including a brand-new one, which starts at 0)
 # reads back 0 and gets one forced full rescan. Version 2 adds the
-# `wikilinks` table.
-_SCHEMA_BACKFILL_VERSION = 2
+# `wikilinks` table. Version 3 numbers task lines from the top of the
+# file, frontmatter included, where earlier versions counted from the
+# body python-frontmatter returns.
+_SCHEMA_BACKFILL_VERSION = 3
 
 
 @dataclass

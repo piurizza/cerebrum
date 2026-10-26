@@ -643,6 +643,50 @@ def test_rebuild_index_backfills_wikilinks_from_an_older_index(
     assert db.execute("PRAGMA user_version").fetchone()[0] == _SCHEMA_BACKFILL_VERSION
 
 
+def test_upsert_note_stores_task_lines_counted_from_the_top_of_the_file(
+    vault: Path, db: sqlite3.Connection
+) -> None:
+    # Written as is: write_note would rewrite the frontmatter.
+    (vault / "a.md").write_text(
+        "---\ntitle: A\ntags: []\n---\n\n# Today\n- [ ] Water\n", encoding="utf-8"
+    )
+
+    upsert_note(db, vault, "a.md")
+
+    assert [(row["line"], row["text"]) for row in _task_rows(db, "a.md")] == [
+        (7, "Water")
+    ]
+
+
+def test_rebuild_index_reindexes_every_note_from_a_version_2_index(
+    vault: Path, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A version-2 index counted task lines from the note body, after the
+    frontmatter. Every note goes through upsert_note once more so its task
+    rows carry file lines, even though no file changed."""
+    (vault / "a.md").write_text("---\ntitle: A\n---\n- [ ] Water\n", encoding="utf-8")
+    (vault / "b.md").write_text("No tasks.\n", encoding="utf-8")
+    rebuild_index(db, vault)
+    db.execute("UPDATE tasks SET line = 1 WHERE source_path = 'a.md'")
+    db.execute("PRAGMA user_version = 2")
+    db.commit()
+
+    calls: list[str] = []
+    original_upsert = indexer.upsert_note
+
+    def spy_upsert(conn: sqlite3.Connection, vault_root: Path, path: str) -> None:
+        calls.append(path)
+        original_upsert(conn, vault_root, path)
+
+    monkeypatch.setattr(indexer, "upsert_note", spy_upsert)
+
+    rebuild_index(db, vault)
+
+    assert sorted(calls) == ["a.md", "b.md"]
+    assert [row["line"] for row in _task_rows(db, "a.md")] == [4]
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
 def _index_row_from_before_hidden_folders_were_skipped(
     db: sqlite3.Connection, path: str
 ) -> None:

@@ -1,0 +1,72 @@
+{
+  "description": "Shared task-line cases. The backend extractor (backend/tests/test_parser.py) and the preview's line mapping both run every case, so a task has the same line number on both sides. A line is the text between \\n characters, counted from 1 at the first line of the raw file, frontmatter included; a \\r before the \\n belongs to its line, and no other character (U+2028, form feed) splits lines. Tasks in the frontmatter block or in fenced code are not tasks. The text is the task text as written, trailing whitespace removed.",
+  "extract": [
+    {
+      "name": "no frontmatter",
+      "content": "- [ ] First\n\nSome text.\n- [x] Second\n",
+      "tasks": [
+        {"line": 1, "checked": false, "text": "First"},
+        {"line": 4, "checked": true, "text": "Second"}
+      ]
+    },
+    {
+      "name": "frontmatter and a blank line",
+      "content": "---\ntitle: Groceries\ntags: [home]\n---\n\n# List\n- [ ] Milk\n",
+      "tasks": [{"line": 7, "checked": false, "text": "Milk"}]
+    },
+    {
+      "name": "blank lines before the frontmatter",
+      "content": "\n\n---\ntitle: Groceries\n---\n- [ ] Milk\n",
+      "tasks": [{"line": 6, "checked": false, "text": "Milk"}]
+    },
+    {
+      "name": "task syntax inside the frontmatter",
+      "content": "---\nnotes: |\n  - [ ] not a task\n---\n- [ ] Real\n",
+      "tasks": [{"line": 5, "checked": false, "text": "Real"}]
+    },
+    {
+      "name": "opening boundary without a closing one",
+      "content": "---\n- [ ] Not frontmatter after all\n",
+      "tasks": [{"line": 2, "checked": false, "text": "Not frontmatter after all"}]
+    },
+    {
+      "name": "rules further down are not frontmatter",
+      "content": "Intro\n---\n- [ ] Between rules\n---\n- [ ] After\n",
+      "tasks": [
+        {"line": 3, "checked": false, "text": "Between rules"},
+        {"line": 5, "checked": false, "text": "After"}
+      ]
+    },
+    {
+      "name": "crlf line endings",
+      "content": "---\r\ntitle: Groceries\r\n---\r\n\r\n- [ ] Milk\r\n- [X] Bread\r\n",
+      "tasks": [
+        {"line": 5, "checked": false, "text": "Milk"},
+        {"line": 6, "checked": true, "text": "Bread"}
+      ]
+    },
+    {
+      "name": "line separator does not split a line",
+      "content": "- [ ] One still one\n- [ ] Two\n",
+      "tasks": [
+        {"line": 1, "checked": false, "text": "One still one"},
+        {"line": 2, "checked": false, "text": "Two"}
+      ]
+    },
+    {
+      "name": "form feed does not split a line",
+      "content": "Intro\f- [ ] Not at the start of a line\n- [ ] Real\n",
+      "tasks": [{"line": 2, "checked": false, "text": "Real"}]
+    },
+    {
+      "name": "fenced code after frontmatter",
+      "content": "---\ntitle: Docs\n---\n```\n- [ ] Example\n```\n- [ ] Real\n",
+      "tasks": [{"line": 7, "checked": false, "text": "Real"}]
+    },
+    {
+      "name": "done marker and block id stay in the text",
+      "content": "  * [x] Water ✅ 2026-10-26 ^water\n",
+      "tasks": [{"line": 1, "checked": true, "text": "Water ✅ 2026-10-26 ^water"}]
+    }
+  ]
+}

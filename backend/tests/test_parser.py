@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from cerebrum.notes.parser import (
@@ -11,6 +15,14 @@ from cerebrum.notes.parser import (
     render_note,
     resolve_link_target,
     retarget_links,
+)
+
+# Also run by the preview's line mapping, so a task has the same line
+# number on both sides.
+_TASK_LINE_CASES: dict[str, Any] = json.loads(
+    (Path(__file__).parents[2] / "fixtures" / "task-lines.json").read_text(
+        encoding="utf-8"
+    )
 )
 
 
@@ -265,6 +277,27 @@ def test_extract_tasks_extracts_indented_subtask() -> None:
     assert [t.text for t in tasks] == ["Parent", "Child"]
 
 
+@pytest.mark.parametrize(
+    "case",
+    _TASK_LINE_CASES["extract"],
+    ids=[case["name"] for case in _TASK_LINE_CASES["extract"]],
+)
+def test_shared_task_line_cases(case: dict[str, Any]) -> None:
+    found = [
+        {"line": task.line, "checked": task.checked, "text": task.text}
+        for task in extract_tasks(case["content"])
+    ]
+    assert found == case["tasks"]
+
+
+def test_parse_note_numbers_tasks_by_file_line_past_the_frontmatter() -> None:
+    # Four frontmatter lines and a blank line: the task is on line 7 of
+    # the file, which is what a tick will look for, not line 2 of the body.
+    raw = "---\ntitle: Todo\ntags: [home]\n---\n\n# Today\n- [ ] Water\n"
+    parsed = parse_note("todo.md", raw)
+    assert [(t.line, t.text) for t in parsed.tasks] == [(7, "Water")]
+
+
 def test_parse_note_extracts_tasks_end_to_end() -> None:
     raw = (
         "---\ntitle: Todo\n---\n"
@@ -273,7 +306,7 @@ def test_parse_note_extracts_tasks_end_to_end() -> None:
         "- [x] Closed task\n"
     )
     parsed = parse_note("todo.md", raw)
-    assert [(t.checked, t.text) for t in parsed.tasks] == [
-        (False, "Open task"),
-        (True, "Closed task"),
+    assert [(t.line, t.checked, t.text) for t in parsed.tasks] == [
+        (4, False, "Open task"),
+        (8, True, "Closed task"),
     ]

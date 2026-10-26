@@ -5,16 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // The note list wikilinks resolve against -- the real hook needs a
 // NotesProvider, which would fetch (matches MarkdownPreview.test.tsx).
 let notePaths: string[] = [];
-vi.mock("../../context/NotesContext", () => ({
-  useNotesIfLoaded: () =>
-    notePaths.map((path) => ({
-      path,
-      title: path,
-      tags: [],
-      created: null,
-      updated: null,
-    })),
-}));
+vi.mock("../../context/NotesContext", async () => {
+  const { NoteLookup } =
+    await vi.importActual<typeof import("../../lib/wikilinks")>("../../lib/wikilinks");
+  return { useNoteLookup: () => new NoteLookup(notePaths) };
+});
 
 import { InlineMarkdown } from "./InlineMarkdown";
 

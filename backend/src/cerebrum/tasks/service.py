@@ -10,7 +10,7 @@ from pathlib import Path
 from cerebrum.index.db import write_lock
 from cerebrum.notes.models import Note
 from cerebrum.notes.parser import extract_tasks
-from cerebrum.notes.service import edit_note_text
+from cerebrum.notes.service import edit_note_text, normalize_newlines
 from cerebrum.tasks.markers import (
     parse_task_line,
     split_done_marker,
@@ -46,19 +46,24 @@ def list_done_tasks(
     """Every task ticked with a done marker dated `since` or later, newest
     first, leaving out notes under `templates_folder`. A task ticked
     without a done marker has no date to list it under."""
-    tasks = [
-        task
-        for task in _list_tasks(conn, checked=True, templates_folder=templates_folder)
-        if task.done_date is not None and task.done_date >= since
-    ]
+    tasks = _list_tasks(
+        conn, checked=True, templates_folder=templates_folder, min_done=since
+    )
     # Stable, so a day's tasks keep their path and line order.
     tasks.sort(key=lambda task: task.done_date or since, reverse=True)
     return tasks
 
 
 def _list_tasks(
-    conn: sqlite3.Connection, *, checked: bool, templates_folder: str
+    conn: sqlite3.Connection,
+    *,
+    checked: bool,
+    templates_folder: str,
+    min_done: date | None = None,
 ) -> list[TaskItem]:
+    """The tasks the index holds in state `checked`, by note path and line,
+    leaving out notes under `templates_folder`. With `min_done`, only tasks
+    done on that day or later: a task without a done date is left out."""
     # write_lock: this read races the filesystem watcher/backstop rescan's
     # sustained writes against the same shared connection -- see
     # index/db.py's write_lock docstring for the exact hazard
@@ -76,18 +81,28 @@ def _list_tasks(
             (checked,),
         ).fetchall()
     templates_prefix = f"{templates_folder}/"
-    return [
-        _task_item(
-            path=row["source_path"],
-            title=row["title"],
-            tags=json.loads(row["tags"]),
-            line=row["line"],
-            checked=checked,
-            stored_text=row["text"],
+    tasks: list[TaskItem] = []
+    # The cheap rejections come first, so a skipped row's tags are never
+    # parsed.
+    for row in rows:
+        if row["source_path"].startswith(templates_prefix):
+            continue
+        text, marker_date = split_done_marker(row["text"])
+        done_date = marker_date if checked else None
+        if min_done is not None and (done_date is None or done_date < min_done):
+            continue
+        tasks.append(
+            TaskItem(
+                path=row["source_path"],
+                title=row["title"],
+                tags=json.loads(row["tags"]),
+                line=row["line"],
+                text=text,
+                done=checked,
+                done_date=done_date,
+            )
         )
-        for row in rows
-        if not row["source_path"].startswith(templates_prefix)
-    ]
+    return tasks
 
 
 # The arguments are the task's fields, each named at every call site.
@@ -185,9 +200,9 @@ def add_task(
         new_content = _append_task_line(content, f"- [ ] {task_text}")
         # The line the indexer will list it on: it reads the file with
         # universal newlines, so count the way it does.
-        task_line = _universal_newlines(new_content).count("\n")
+        task_line = normalize_newlines(new_content).count("\n")
         listed = {
-            task.line: task for task in extract_tasks(_universal_newlines(new_content))
+            task.line: task for task in extract_tasks(normalize_newlines(new_content))
         }
         added = listed.get(task_line)
         if added is None or added.text != task_text:
@@ -222,10 +237,6 @@ def _append_task_line(content: str, line: str) -> str:
         last is not None and parse_task_line(last) is None and lines[-1].strip() != ""
     )
     return f"{content}{ending if needs_blank_line else ''}{line}{ending}"
-
-
-def _universal_newlines(text: str) -> str:
-    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 # The arguments are the task's identity and the change, each named at

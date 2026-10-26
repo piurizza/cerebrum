@@ -78,8 +78,14 @@ def _read_raw(file_path: Path) -> tuple[str, str]:
     return _decode(raw_bytes), note_version(raw_bytes)
 
 
+def normalize_newlines(text: str) -> str:
+    """`text` with universal newlines, as `read_text` reads a file: CRLF
+    and a lone CR both become LF."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _decode(raw_bytes: bytes) -> str:
-    return raw_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return normalize_newlines(raw_bytes.decode("utf-8"))
 
 
 def _write_raw(file_path: Path, raw_content: str) -> str:

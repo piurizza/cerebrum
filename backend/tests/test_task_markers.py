@@ -5,7 +5,9 @@ from datetime import date
 
 import pytest
 
+from cerebrum.notes.parser import _TASK_LINE_PATTERN
 from cerebrum.tasks.markers import (
+    _TASK_LINE,
     parse_task_line,
     split_done_marker,
     tick_line,
@@ -113,3 +115,38 @@ def test_builders_refuse_a_line_that_is_not_a_task(
 ) -> None:
     with pytest.raises(ValueError, match="not a task line"):
         builder("Just prose\n")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "- [ ] Water",
+        "* [x] Water",
+        "+ [X] Water",
+        "  - [ ] Indented",
+        "\t- [x] Tabbed",
+        " \t * [ ] Mixed indent",
+        "- [ ] ",
+        "- [ ] Text\twith a tab",
+        "- [ ]\tTab after the box",
+        "- [ ]Water",
+        "- [x]",
+        "-[ ] Water",
+        "- [y] Water",
+        "- [ ]  Two spaces",
+        "> - [ ] Quoted",
+        "1. [ ] Numbered",
+        "- [ ] Trailing space   ",
+        "",
+    ],
+)
+def test_task_line_grammar_matches_the_parser(line: str) -> None:
+    """The index lists tasks with notes/parser.py's pattern and the writes
+    find them with this module's: the two must agree on what a task line
+    is, and on its state and text."""
+    listed = _TASK_LINE_PATTERN.match(line)
+    parsed = _TASK_LINE.fullmatch(line)
+    assert (listed is None) == (parsed is None)
+    if listed is not None and parsed is not None:
+        assert listed.group(1) == parsed.group(3)
+        assert listed.group(2) == parsed.group(4)

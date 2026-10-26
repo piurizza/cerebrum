@@ -4,10 +4,12 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { errorMessage, listNotes } from "../api/client";
+import { NoteLookup } from "../lib/wikilinks";
 import type { NoteMeta } from "../types/note";
 
 interface NotesContextValue {
@@ -26,6 +28,9 @@ interface NotesContextValue {
    * -- can `await` it. Callers that don't care (the existing
    * fire-and-forget call sites) can still call it without awaiting. */
   refreshNotes: () => Promise<void>;
+  /** `notes` indexed for resolving wikilinks, built once per list rather
+   * than by every rendered preview (one per row on the Tasks page). */
+  noteLookup: NoteLookup;
 }
 
 const NotesContext = createContext<NotesContextValue | null>(null);
@@ -102,19 +107,27 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
   }, [fetchNotes]);
 
+  const noteLookup = useMemo(
+    () => new NoteLookup(notes.map((note) => note.path)),
+    [notes],
+  );
+
   return (
-    <NotesContext.Provider value={{ notes, error, loading, refreshNotes }}>
+    <NotesContext.Provider value={{ notes, error, loading, refreshNotes, noteLookup }}>
       {children}
     </NotesContext.Provider>
   );
 }
 
-/** The vault's notes, or an empty list outside a `NotesProvider` -- for
- * components that only enrich their output with the note list (the
- * preview's wikilinks) and should still render without one. */
-export function useNotesIfLoaded(): NoteMeta[] {
-  return useContext(NotesContext)?.notes ?? [];
+/** The vault's notes as a wikilink lookup, or one with no notes outside a
+ * `NotesProvider` -- for components that only enrich their output with
+ * the note list (the preview's wikilinks) and should still render without
+ * one. */
+export function useNoteLookup(): NoteLookup {
+  return useContext(NotesContext)?.noteLookup ?? NO_NOTES;
 }
+
+const NO_NOTES = new NoteLookup([]);
 
 /** Refetches the vault's notes, or does nothing outside a
  * `NotesProvider` -- for a write that may create a note (adding a task to

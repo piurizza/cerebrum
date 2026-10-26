@@ -29,6 +29,14 @@ export function localIsoDate(date: Date = new Date()): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/** The start of the local calendar day `isoDay` (YYYY-MM-DD) names: the
+ * inverse of `localIsoDate`, never parsed as UTC as `new Date(isoDay)`
+ * would be. */
+export function localDateFromIso(isoDay: string): Date {
+  const [year, month, day] = isoDay.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 /** Default body for a newly-created daily note: just a date heading, not
  * an empty file. This is a fixed, single-purpose default for this one
  * feature -- not the general template mechanism (`lib/templates.ts`),

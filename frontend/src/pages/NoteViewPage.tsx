@@ -340,9 +340,7 @@ export function NoteViewPage() {
     try {
       const fresh = await getLiveNote(path);
       setUnsavedText(content);
-      adoptSavedNote(fresh);
-      setTitle(fresh.title);
-      setCreated(fresh.created);
+      adoptReloadedNote(fresh);
       setSaveError(null);
       setConflictOpen(false);
     } catch (err) {
@@ -350,7 +348,7 @@ export function NoteViewPage() {
     } finally {
       setSaving(false);
     }
-  }, [path, content, adoptSavedNote]);
+  }, [path, content, adoptReloadedNote]);
 
   // Keep mine: unconditional on purpose, the user chose to overwrite.
   const handleConflictKeepMine = useCallback(async () => {

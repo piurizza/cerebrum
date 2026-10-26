@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -11,8 +10,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel, Field
 
-from cerebrum.index.indexer import remove_note as remove_note_from_index
-from cerebrum.index.indexer import upsert_note as upsert_note_in_index
+from cerebrum.index.indexer import sync_note_in_index
 from cerebrum.index.search_query import ParsedQuery, normalize_tag
 from cerebrum.mcp.context import INDEX_LAG_WARNING, get_db
 from cerebrum.notes.parser import InvalidNoteContentError
@@ -28,8 +26,6 @@ from cerebrum.tasks.service import (
     list_open_tasks,
     set_task_done,
 )
-
-logger = logging.getLogger(__name__)
 
 _READ_ONLY_ANNOTATIONS = {"readOnlyHint": True, "idempotentHint": True}
 _ADD_ANNOTATIONS = {
@@ -245,14 +241,6 @@ def _refusals_as_tool_errors(path: str) -> Iterator[None]:
 
 
 def _sync_index(app: FastAPI, path: str) -> None:
-    """Re-read `path` into the index, or drop it when the file is gone.
-    The file is already as it should be, so an index failure is logged,
-    not reported: the index is a rebuildable cache (see SPEC.md)."""
-    vault_root = get_settings().cerebrum_vault_path
-    try:
-        if (vault_root / path).is_file():
-            upsert_note_in_index(get_db(app), vault_root, path)
-        else:
-            remove_note_from_index(get_db(app), path)
-    except Exception:  # noqa: BLE001 -- index is a rebuildable cache (see SPEC.md)
-        logger.exception("Failed to update index for %s after a task write", path)
+    """Re-read `path` into the index, or drop it when the file is gone;
+    an index failure is logged, not reported (see `sync_note_in_index`)."""
+    sync_note_in_index(get_db(app), get_settings().cerebrum_vault_path, path)

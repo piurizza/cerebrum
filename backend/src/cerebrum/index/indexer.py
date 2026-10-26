@@ -233,6 +233,23 @@ def remove_note(conn: sqlite3.Connection, path: str) -> None:
         conn.execute("DELETE FROM tasks WHERE source_path = ?", (path,))
 
 
+def sync_note_in_index(conn: sqlite3.Connection, vault_root: Path, path: str) -> None:
+    """Re-read `path` into the index after a write, or drop its rows when
+    the file is gone.
+
+    The file (source of truth) is already as it should be. An index-write
+    failure here must not turn a successful write into a misleading error
+    -- the index is a disposable cache and self-heals on the next startup
+    rescan (see SPEC.md) -- so it is logged, not raised."""
+    try:
+        if (vault_root / path).is_file():
+            upsert_note(conn, vault_root, path)
+        else:
+            remove_note(conn, path)
+    except Exception:  # noqa: BLE001 -- index is a rebuildable cache (see SPEC.md)
+        logger.exception("Failed to update index for %s after a write", path)
+
+
 def rebuild_index(
     conn: sqlite3.Connection,
     vault_root: Path,

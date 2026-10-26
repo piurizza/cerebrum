@@ -48,10 +48,15 @@ vi.mock("../context/OfflineContext", () => ({
 
 // Wikilinks resolve against no notes; an add refreshes the sidebar's list.
 const mockRefreshNotes = vi.fn<() => Promise<void>>();
-vi.mock("../context/NotesContext", () => ({
-  useNotesIfLoaded: () => [],
-  useRefreshNotesIfLoaded: () => mockRefreshNotes,
-}));
+vi.mock("../context/NotesContext", async () => {
+  const { NoteLookup } =
+    await vi.importActual<typeof import("../lib/wikilinks")>("../lib/wikilinks");
+  const noNotes = new NoteLookup([]);
+  return {
+    useNoteLookup: () => noNotes,
+    useRefreshNotesIfLoaded: () => mockRefreshNotes,
+  };
+});
 
 import { TasksPage } from "./TasksPage";
 
@@ -241,6 +246,26 @@ describe("TasksPage lists", () => {
 
     fireEvent(document, new Event("visibilitychange"));
     await waitFor(() => expect(mockGetTasks).toHaveBeenCalledTimes(3));
+  });
+
+  it("refetches once when focus and visibilitychange fire together", async () => {
+    mockGetTasks.mockResolvedValue([task("a.md", 1, "Rake the leaves")]);
+    renderPage();
+    await screen.findByText("Rake the leaves");
+    expect(mockGetTasks).toHaveBeenCalledTimes(1);
+    expect(mockGetDoneTasks).toHaveBeenCalledTimes(1);
+
+    mockGetTasks.mockResolvedValue([
+      task("a.md", 1, "Rake the leaves"),
+      task("b.md", 1, "Added on the phone"),
+    ]);
+    // Coming back to the tab fires both.
+    fireEvent(document, new Event("visibilitychange"));
+    fireEvent.focus(window);
+
+    expect(await screen.findByText("Added on the phone")).toBeInTheDocument();
+    expect(mockGetTasks).toHaveBeenCalledTimes(2);
+    expect(mockGetDoneTasks).toHaveBeenCalledTimes(2);
   });
 });
 

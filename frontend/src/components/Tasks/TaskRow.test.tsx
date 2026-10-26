@@ -6,11 +6,11 @@ import type { TaskItem } from "../../types/note";
 
 // The note list wikilinks resolve against -- the real hook needs a
 // NotesProvider, which would fetch (matches InlineMarkdown.test.tsx).
-vi.mock("../../context/NotesContext", () => ({
-  useNotesIfLoaded: () => [
-    { path: "garden/herbs.md", title: "herbs", tags: [], created: null, updated: null },
-  ],
-}));
+vi.mock("../../context/NotesContext", async () => {
+  const { NoteLookup } =
+    await vi.importActual<typeof import("../../lib/wikilinks")>("../../lib/wikilinks");
+  return { useNoteLookup: () => new NoteLookup(["garden/herbs.md"]) };
+});
 
 import { TaskRow } from "./TaskRow";
 

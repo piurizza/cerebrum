@@ -728,7 +728,7 @@ def test_upsert_note_on_a_hidden_path_removes_it_from_the_index(
 
     assert list_notes(db) == []
     assert search_notes(db, "stale") == []
-    assert list_open_tasks(db, "templates") == []
+    assert not list_open_tasks(db, "templates")
 
 
 def _symlinks_out_of_the_vault(vault: Path, tmp_path: Path) -> list[str]:

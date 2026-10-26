@@ -5,6 +5,7 @@ import {
   getDailyNoteDefaultBody,
   getDailyNoteHeading,
   getTodayNotePath,
+  localDateFromIso,
   localIsoDate,
 } from "./dailyNote";
 
@@ -57,6 +58,18 @@ describe("localIsoDate", () => {
     vi.stubEnv("TZ", "America/New_York");
     expect(localIsoDate(new Date("2026-01-01T02:00:00Z"))).toBe("2025-12-31");
     expect(localIsoDate(new Date(2026, 0, 5))).toBe("2026-01-05");
+  });
+});
+
+describe("localDateFromIso", () => {
+  it("is the start of that local calendar day, the inverse of localIsoDate", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    const date = localDateFromIso("2026-01-05");
+    expect(date).toEqual(new Date(2026, 0, 5));
+    expect(localIsoDate(date)).toBe("2026-01-05");
+    expect(localDateFromIso(localIsoDate(new Date(2026, 9, 26, 23, 30)))).toEqual(
+      new Date(2026, 9, 26),
+    );
   });
 });
 

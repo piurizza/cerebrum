@@ -20,7 +20,21 @@ export function taskOnLine(
   content: string,
   line: number,
 ): { checked: boolean; text: string } | null {
-  const lines = content.split("\n");
+  return taskInLines(splitLines(content), line);
+}
+
+/** A note's raw content split into the lines `taskInLines` reads: on `\n`
+ * only. */
+export function splitLines(content: string): string[] {
+  return content.split("\n");
+}
+
+/** `taskOnLine` for content already split with `splitLines`, so a caller
+ * reading many lines of one note splits it once. */
+export function taskInLines(
+  lines: readonly string[],
+  line: number,
+): { checked: boolean; text: string } | null {
   if (!Number.isInteger(line) || line < 1 || line > lines.length) return null;
   const match = TASK_LINE.exec(lines[line - 1].replace(/\r$/, ""));
   if (!match) return null;

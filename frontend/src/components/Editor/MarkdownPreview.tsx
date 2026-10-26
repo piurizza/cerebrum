@@ -17,15 +17,15 @@ import {
   fetchAttachmentBlobUrl,
   findAttachment,
 } from "../../api/client";
-import { useNotesIfLoaded } from "../../context/NotesContext";
+import { useNoteLookup } from "../../context/NotesContext";
 import { resolveAttachmentTarget, resolveLinkTarget } from "../../lib/noteContent";
 import {
   remarkWikilinks,
   WIKILINK_EMBED,
   WIKILINK_TARGET,
 } from "../../lib/remarkWikilinks";
-import { hasTaskLine, taskOnLine } from "../../lib/tasks";
-import { isAttachmentTarget, NoteLookup } from "../../lib/wikilinks";
+import { hasTaskLine, splitLines, taskInLines } from "../../lib/tasks";
+import { isAttachmentTarget } from "../../lib/wikilinks";
 import { MermaidDiagram } from "./MermaidDiagram";
 
 /** What a preview needs to tick and untick its tasks. */
@@ -187,8 +187,7 @@ export const REMARK_PLUGINS = [remarkGfm, remarkWikilinks];
  * the note at `currentPath`: shared by the note preview and the task text
  * (`InlineMarkdown`), so a link resolves the same way in both. */
 export function useMarkdownComponents(currentPath: string): Components {
-  const notes = useNotesIfLoaded();
-  const lookup = useMemo(() => new NoteLookup(notes.map((note) => note.path)), [notes]);
+  const lookup = useNoteLookup();
 
   // Memoized so that a re-render (a tick adopting the new content, say)
   // updates the elements in place instead of remounting them, which would
@@ -241,6 +240,8 @@ export function useMarkdownComponents(currentPath: string): Components {
 interface TaskItemsState {
   lineOffset: number;
   tasks: TaskToggle | undefined;
+  /** `tasks.content` split into lines once, rather than by each checkbox. */
+  taskLines: readonly string[] | undefined;
   hintId: string | undefined;
   highlightLine: number | null;
 }
@@ -250,6 +251,7 @@ interface TaskItemsState {
 const TaskItemsContext = createContext<TaskItemsState>({
   lineOffset: 0,
   tasks: undefined,
+  taskLines: undefined,
   hintId: undefined,
   highlightLine: null,
 });
@@ -315,11 +317,11 @@ function TaskCheckbox({
   ...props
 }: ComponentProps<"input"> & ExtraProps) {
   const item = useContext(TaskItemContext);
-  const { tasks, hintId } = useContext(TaskItemsContext);
+  const { tasks, taskLines, hintId } = useContext(TaskItemsContext);
   if (type !== "checkbox" || item === null) {
     return <input type={type} checked={checked} {...props} />;
   }
-  const task = tasks ? taskOnLine(tasks.content, item.line) : null;
+  const task = taskLines ? taskInLines(taskLines, item.line) : null;
   const live = tasks !== undefined && !tasks.disabled && task !== null;
   return (
     <input
@@ -350,15 +352,22 @@ export function MarkdownPreview({
     [base],
   );
   const hintId = useId();
-  const showHint = Boolean(tasks?.hint) && hasTaskLine(body);
+  const hint = tasks?.hint;
+  const showHint = useMemo(() => Boolean(hint) && hasTaskLine(body), [hint, body]);
+  const content = tasks?.content;
+  const taskLines = useMemo(
+    () => (content === undefined ? undefined : splitLines(content)),
+    [content],
+  );
   const state = useMemo<TaskItemsState>(
     () => ({
       lineOffset,
       tasks,
+      taskLines,
       hintId: showHint ? hintId : undefined,
       highlightLine,
     }),
-    [lineOffset, tasks, showHint, hintId, highlightLine],
+    [lineOffset, tasks, taskLines, showHint, hintId, highlightLine],
   );
 
   return (

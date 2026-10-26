@@ -2,6 +2,7 @@
 // narrows them by, all applied in the browser, and the orders it keeps.
 import type { TaskItem } from "../types/note";
 import { localIsoDate } from "./dailyNote";
+import { splitNotePath } from "./noteTree";
 import { describeChips, noteMatchesTags, type TagChip } from "./tagQuery";
 
 /** How many days the Done tab looks back over, today included. */
@@ -24,17 +25,12 @@ export function taskKey(task: Pick<TaskItem, "path" | "line">): string {
   return `${task.path}\n${task.line}`;
 }
 
-function folderOf(path: string): string {
-  const slash = path.lastIndexOf("/");
-  return slash === -1 ? "" : path.slice(0, slash);
-}
-
 /** Every folder holding a task, with the folders above it, which hold
  * those tasks too, sorted. */
 export function taskFolders(tasks: readonly TaskItem[]): string[] {
   const folders = new Set<string>();
   for (const task of tasks) {
-    const segments = folderOf(task.path).split("/").filter(Boolean);
+    const segments = splitNotePath(task.path).folder.split("/").filter(Boolean);
     for (let i = 1; i <= segments.length; i++) {
       folders.add(segments.slice(0, i).join("/"));
     }
@@ -46,11 +42,20 @@ function filterWords(words: string): string[] {
   return words.toLowerCase().split(/\s+/).filter(Boolean);
 }
 
+/** Whether a task passes `filters`, as a test made once per filters, so
+ * the words are split once rather than for every task. */
+export function taskFilter(filters: TaskFilterState): (task: TaskItem) => boolean {
+  const words = filterWords(filters.words);
+  return (task) => {
+    if (!noteMatchesTags(task.tags, filters.chips)) return false;
+    if (filters.folder && !task.path.startsWith(`${filters.folder}/`)) return false;
+    const text = task.text.toLowerCase();
+    return words.every((word) => text.includes(word));
+  };
+}
+
 export function taskMatchesFilters(task: TaskItem, filters: TaskFilterState): boolean {
-  if (!noteMatchesTags(task.tags, filters.chips)) return false;
-  if (filters.folder && !task.path.startsWith(`${filters.folder}/`)) return false;
-  const text = task.text.toLowerCase();
-  return filterWords(filters.words).every((word) => text.includes(word));
+  return taskFilter(filters)(task);
 }
 
 export function hasActiveFilters(filters: TaskFilterState): boolean {

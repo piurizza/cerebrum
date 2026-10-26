@@ -23,7 +23,7 @@ import { TaskRow } from "../components/Tasks/TaskRow";
 import { useRefreshNotesIfLoaded } from "../context/NotesContext";
 import { useTagSelection } from "../context/TagSelectionContext";
 import { useCanWrite, useVaultReadOnly } from "../hooks/useCanWrite";
-import { getDailyNoteHeading, localIsoDate } from "../lib/dailyNote";
+import { getDailyNoteHeading, localDateFromIso, localIsoDate } from "../lib/dailyNote";
 import { findDuplicateTitles } from "../lib/duplicateTitles";
 import { normalizeTag } from "../lib/tagQuery";
 import {
@@ -34,9 +34,9 @@ import {
   doneListSince,
   hasActiveFilters,
   type TaskFilterState,
+  taskFilter,
   taskFolders,
   taskKey,
-  taskMatchesFilters,
 } from "../lib/taskList";
 import { isTaskChangedError, TASK_CHANGED_MESSAGE } from "../lib/tasks";
 import type { TaskItem } from "../types/note";
@@ -124,8 +124,7 @@ function dayHeading(isoDay: string, now: Date): string {
   if (isoDay === localIsoDate(now)) return "Today";
   const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
   if (isoDay === localIsoDate(yesterday)) return "Yesterday";
-  const [year, month, day] = isoDay.split("-").map(Number);
-  return dayHeadingFormatter.format(new Date(year, month - 1, day));
+  return dayHeadingFormatter.format(localDateFromIso(isoDay));
 }
 
 /** The working task list: add a task to today's daily note, tick and
@@ -239,10 +238,18 @@ export function TasksPage() {
 
   // Ticks made in the note, on another device or by an assistant only
   // reach the list through a fresh fetch, so one is made whenever the
-  // window comes back to the foreground.
+  // window comes back to the foreground. Coming back to the tab fires both
+  // events, so one fetch serves the pair; a write's refetch never waits on
+  // it and always fetches anew.
   useEffect(() => {
+    let inFlight = false;
+
     function refreshWhenVisible() {
-      if (document.visibilityState === "visible") void refresh();
+      if (inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      void refresh().finally(() => {
+        inFlight = false;
+      });
     }
     window.addEventListener("focus", refreshWhenVisible);
     document.addEventListener("visibilitychange", refreshWhenVisible);
@@ -380,6 +387,7 @@ export function TasksPage() {
     [chips, folder, words],
   );
   const filtering = hasActiveFilters(filters);
+  const matchesFilters = useMemo(() => taskFilter(filters), [filters]);
 
   // The lists as fetched, with the rows still in their Undo window kept
   // in the list they were changed in.
@@ -405,13 +413,13 @@ export function TasksPage() {
   const visibleOpen = useMemo(
     () =>
       (openRows ?? []).filter(
-        (task) => addedKeys.has(taskKey(task)) || taskMatchesFilters(task, filters),
+        (task) => addedKeys.has(taskKey(task)) || matchesFilters(task),
       ),
-    [openRows, addedKeys, filters],
+    [openRows, addedKeys, matchesFilters],
   );
   const visibleDone = useMemo(
-    () => (doneRows ?? []).filter((task) => taskMatchesFilters(task, filters)),
-    [doneRows, filters],
+    () => (doneRows ?? []).filter(matchesFilters),
+    [doneRows, matchesFilters],
   );
 
   const folders = useMemo(
@@ -437,17 +445,23 @@ export function TasksPage() {
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     const index = TABS.findIndex((item) => item.id === tab);
-    const next =
-      event.key === "ArrowRight"
-        ? TABS[(index + 1) % TABS.length]
-        : event.key === "ArrowLeft"
-          ? TABS[(index - 1 + TABS.length) % TABS.length]
-          : event.key === "Home"
-            ? TABS[0]
-            : event.key === "End"
-              ? TABS[TABS.length - 1]
-              : null;
-    if (!next) return;
+    let next: (typeof TABS)[number];
+    switch (event.key) {
+      case "ArrowRight":
+        next = TABS[(index + 1) % TABS.length];
+        break;
+      case "ArrowLeft":
+        next = TABS[(index - 1 + TABS.length) % TABS.length];
+        break;
+      case "Home":
+        next = TABS[0];
+        break;
+      case "End":
+        next = TABS[TABS.length - 1];
+        break;
+      default:
+        return;
+    }
     event.preventDefault();
     setTab(next.id);
     tabRefs.current[next.id]?.focus();
@@ -464,10 +478,7 @@ export function TasksPage() {
         onToggle={() => toggle(task, origin)}
         onUndo={entry?.origin === origin ? () => void undo(key) : undefined}
         outsideFilters={
-          origin === "open" &&
-          filtering &&
-          addedKeys.has(key) &&
-          !taskMatchesFilters(task, filters)
+          origin === "open" && filtering && addedKeys.has(key) && !matchesFilters(task)
         }
         showNote={origin === "done"}
       />

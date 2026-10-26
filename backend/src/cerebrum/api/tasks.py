@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from cerebrum.api.deps import get_db, require_writable_vault
-from cerebrum.index.indexer import remove_note as remove_note_from_index
-from cerebrum.index.indexer import upsert_note as upsert_note_in_index
+from cerebrum.index.indexer import sync_note_in_index
 from cerebrum.notes.parser import InvalidNoteContentError
 from cerebrum.notes.service import InvalidNotePathError, NoteNotFoundError
 from cerebrum.settings import get_settings
@@ -29,8 +26,6 @@ from cerebrum.tasks.service import (
     list_open_tasks,
     set_task_done,
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -68,7 +63,7 @@ def add_task_endpoint(
             body.text,
             body.heading,
         )
-    _sync_index(db, settings.cerebrum_vault_path, note.path)
+    sync_note_in_index(db, settings.cerebrum_vault_path, note.path)
     return TaskWriteResponse(note=note, task=task)
 
 
@@ -95,9 +90,9 @@ def set_task_done_endpoint(
             # The index listed the task where it no longer is: bring the
             # note's rows up to date, so the list the client fetches next
             # is right.
-            _sync_index(db, settings.cerebrum_vault_path, body.path)
+            sync_note_in_index(db, settings.cerebrum_vault_path, body.path)
             raise
-    _sync_index(db, settings.cerebrum_vault_path, body.path)
+    sync_note_in_index(db, settings.cerebrum_vault_path, body.path)
     return TaskWriteResponse(note=note, task=task)
 
 
@@ -117,19 +112,3 @@ def _refusals_as_http_errors() -> Iterator[None]:
         raise HTTPException(status_code=404, detail="Note not found") from exc
     except InvalidNoteContentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-def _sync_index(db: sqlite3.Connection, vault_root: Path, path: str) -> None:
-    """Re-read `path` into the index, or drop it when the file is gone.
-
-    The file (source of truth) is already as it should be. An index-write
-    failure here must not turn a successful write into a misleading error
-    response -- the index is a disposable cache and self-heals on the
-    next startup rescan (see SPEC.md)."""
-    try:
-        if (vault_root / path).is_file():
-            upsert_note_in_index(db, vault_root, path)
-        else:
-            remove_note_from_index(db, path)
-    except Exception:  # noqa: BLE001 -- index is a rebuildable cache (see SPEC.md)
-        logger.exception("Failed to update index for %s after a task write", path)

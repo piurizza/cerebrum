@@ -50,6 +50,10 @@ export async function syncVault(): Promise<void> {
     return;
   }
 
+  // Alongside the notes rather than after them: it never throws, so it is
+  // only awaited before the sync counts as done.
+  const taskLists = syncTaskLists();
+
   await runWithConcurrency(notePaths, SYNC_CONCURRENCY, async (path) => {
     try {
       await getNote(path);
@@ -62,7 +66,7 @@ export async function syncVault(): Promise<void> {
     }
   });
 
-  await syncTaskLists();
+  await taskLists;
 
   persistLastSyncedAt();
 }

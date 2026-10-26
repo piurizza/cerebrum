@@ -1,17 +1,17 @@
 import { useId } from "react";
 import { Link } from "react-router-dom";
 import { encodeNotePath } from "../../api/client";
+import { localDateFromIso } from "../../lib/dailyNote";
 import type { TaskItem } from "../../types/note";
 import { InlineMarkdown } from "../Editor/InlineMarkdown";
 
 const doneDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
 /** A done date (YYYY-MM-DD) as a local calendar day, e.g. "Oct 26, 2026".
- * Built from its parts: `new Date("2026-10-26")` is midnight UTC, which
- * is the day before west of Greenwich. */
+ * Not `new Date("2026-10-26")`, which is midnight UTC, the day before west
+ * of Greenwich. */
 export function formatDoneDate(isoDay: string): string {
-  const [year, month, day] = isoDay.split("-").map(Number);
-  return doneDateFormatter.format(new Date(year, month - 1, day));
+  return doneDateFormatter.format(localDateFromIso(isoDay));
 }
 
 interface TaskRowProps {

@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     app_env: str = "development"
     app_name: str = "Cerebrum"
-    log_level: str = "INFO"
+    # How much Cerebrum's own code logs (uvicorn's request log is separate).
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     cerebrum_vault_path: Path = Path("./vault")
     # Where the derived index and the accounts database live. Unset means
@@ -154,6 +155,15 @@ class Settings(BaseSettings):
         `Path(".")` and fail startup."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: object) -> object:
+        """Ignore case and surrounding spaces; blank means the default.
+        Anything else that isn't a standard level fails startup."""
+        if isinstance(value, str):
+            return value.strip().upper() or "INFO"
         return value
 
     @field_validator("cerebrum_link_format", mode="before")

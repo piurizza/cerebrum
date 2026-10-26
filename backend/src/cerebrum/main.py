@@ -213,8 +213,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
 
 
+def _configure_logging(level: str) -> None:
+    """Send Cerebrum's own log lines to stderr at `level` (LOG_LEVEL).
+    Without this they went to Python's default, which drops anything below
+    a warning, so info lines -- several about sign-in problems -- never
+    showed. Idempotent: `create_app` can run more than once per process."""
+    package_logger = logging.getLogger("cerebrum")
+    package_logger.setLevel(level)
+    if not package_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(levelname)s:     %(name)s: %(message)s")
+        )
+        package_logger.addHandler(handler)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
+    _configure_logging(settings.log_level)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(

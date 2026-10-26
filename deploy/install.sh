@@ -286,8 +286,8 @@ main() {
 		say "    $(env_value AUTH_SETUP_TOKEN)"
 		say "The token only works for the first account, so create yours now."
 		say ""
-		say "To use Cerebrum from your phone or other computers, set CEREBRUM_BIND_ADDRESS"
-		say "and CEREBRUM_TLS_SAN in $INSTALL_DIR/.env (see the README), then run the installer again."
+		say "To use Cerebrum from your phone or other computers, see"
+		say "https://piurizza.github.io/cerebrum/running/https/"
 	elif [ -z "$(env_value CEREBRUM_VERSION)" ] && [ -n "$previous" ] && [ "$previous" != "$current" ]; then
 		say "Cerebrum updated from $previous to $current and running at $url"
 	else

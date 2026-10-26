@@ -17,10 +17,51 @@ const { chromium, devices } = require("playwright");
 const SENTINEL = "about-this-demo-vault.md";
 
 // One entry per image. `path` is the app route; `phone` captures at phone
-// width; `prepare` runs before the capture.
+// width; `readOnly` marks shots taken from a stack in read-only mode (the
+// script captures only the shots matching the server it is pointed at);
+// `prepare` runs before the capture.
 const SHOTS = [
+  {
+    name: "tag-front-page",
+    path: "/",
+    prepare: async (page) => {
+      await page.getByRole("button", { name: /^cooking \(/ }).click();
+      await page.locator(".tag-result-list").waitFor();
+    },
+  },
   { name: "note", path: "/notes/projects/home-server.md" },
   { name: "note-with-image", path: "/notes/projects/garden-shed.md" },
+  {
+    name: "link-picker",
+    path: "/notes/projects/backup-plan.md",
+    prepare: async (page) => {
+      await page.getByRole("button", { name: "Edit" }).click();
+      const editor = page.locator(".cm-content");
+      await editor.click();
+      await page.keyboard.press("Control+End");
+      await page.keyboard.type("\nSee also [[hom");
+      await page.locator(".cm-tooltip-autocomplete").waitFor();
+    },
+  },
+  { name: "daily-note", path: "/notes/daily/2026-10-26.md" },
+  {
+    name: "template-picker",
+    path: "/notes/welcome.md",
+    prepare: async (page) => {
+      await page.getByRole("button", { name: "+ New note" }).click();
+      await page.getByPlaceholder("note.md").fill("team-sync.md");
+      await page.getByPlaceholder("note.md").press("Enter");
+      await page.getByRole("group", { name: "Template" }).waitFor();
+    },
+  },
+  {
+    name: "tag-search",
+    path: "/notes/welcome.md",
+    prepare: async (page) => {
+      await page.getByRole("combobox", { name: "Search notes" }).fill("#read");
+      await page.getByRole("listbox", { name: "Tags" }).waitFor();
+    },
+  },
   { name: "graph", path: "/graph" },
   { name: "tasks", path: "/tasks" },
   { name: "phone-note", path: "/notes/recipes/lentil-soup.md", phone: true },
@@ -28,20 +69,37 @@ const SHOTS = [
     name: "phone-drawer",
     path: "/notes/welcome.md",
     phone: true,
-    prepare: async (page) => {
-      await page.locator("button[aria-label='Menu']").tap();
-      const drawer = page.locator(".app-sidebar.is-open");
-      await drawer.waitFor();
-      // Let the slide-in finish, and drop the focus ring the drawer's focus
-      // trap puts on its first link.
-      await drawer.evaluate((el) =>
-        Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
-      );
-      await page.waitForTimeout(300);
-      await page.evaluate(() => document.activeElement?.blur());
-    },
+    prepare: openDrawer,
   },
+  {
+    name: "phone-offline",
+    path: "/notes/welcome.md",
+    phone: true,
+    prepare: async (page) => {
+      // The app caches the vault once it has synced; then cut the network
+      // and open another note from the cache.
+      await page.waitForTimeout(2000);
+      await page.context().setOffline(true);
+      await page.goto(`${baseUrl}/notes/garden/herbs.md`);
+      await page.getByText(/offline/i).first().waitFor();
+    },
+    after: async (page) => page.context().setOffline(false),
+  },
+  { name: "read-only", path: "/notes/projects/home-server.md", readOnly: true },
 ];
+
+async function openDrawer(page) {
+  await page.locator("button[aria-label='Menu']").tap();
+  const drawer = page.locator(".app-sidebar.is-open");
+  await drawer.waitFor();
+  // Let the slide-in finish, and drop the focus ring the drawer's focus
+  // trap puts on its first link.
+  await drawer.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+  );
+  await page.waitForTimeout(300);
+  await page.evaluate(() => document.activeElement?.blur());
+}
 
 const [credentialsPath, outDir] = process.argv.slice(2);
 if (!credentialsPath || !outDir) {
@@ -69,6 +127,10 @@ async function assertDemoVault() {
   if (!body?.content?.includes("demo_vault: cerebrum-docs")) {
     throw new Error("refusing to capture: this server does not hold the demo vault");
   }
+  const settings = await fetch(`${baseUrl}/api/vault-settings`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  return (await settings.json()).read_only === true;
 }
 
 async function signIn(page) {
@@ -79,7 +141,8 @@ async function signIn(page) {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
-await assertDemoVault();
+const readOnly = await assertDemoVault();
+const shots = SHOTS.filter((shot) => Boolean(shot.readOnly) === readOnly);
 mkdirSync(outDir, { recursive: true });
 const browser = await chromium.launch();
 const contexts = {
@@ -95,12 +158,13 @@ for (const [kind, context] of Object.entries(contexts)) {
   await signIn(pages[kind]);
 }
 
-for (const shot of SHOTS) {
+for (const shot of shots) {
   const page = pages[shot.phone ? "phone" : "desktop"];
   await page.goto(`${baseUrl}${shot.path}`, { waitUntil: "networkidle" });
   if (shot.prepare) await shot.prepare(page);
   const file = join(outDir, `${shot.name}.webp`);
   await page.screenshot({ path: file, type: "webp", quality: 80 });
+  if (shot.after) await shot.after(page);
   console.log(`wrote ${file}`);
 }
 await browser.close();

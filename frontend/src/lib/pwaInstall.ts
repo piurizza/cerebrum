@@ -48,7 +48,7 @@ export function canInstall(): boolean {
  * deferred event is **kept** so the in-app button stays available for a
  * retry -- Chrome may not re-fire `beforeinstallprompt` for ~90 days after
  * a dismissal, and this button is the only Android install affordance
- * besides the README.
+ * besides the docs.
  */
 export async function promptInstall(): Promise<
   "accepted" | "dismissed" | "unavailable"

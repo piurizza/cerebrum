@@ -175,6 +175,18 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-groups
 
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      # The site's own copy of Mermaid, so no page loads it from a CDN.
+      - name: Install site assets
+        working-directory: .
+        run: make docs-assets
+
       - name: Lint (ruff)
         run: uv run ruff check scripts tests && uv run ruff format --check scripts tests
 

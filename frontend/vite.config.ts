@@ -58,7 +58,7 @@ export default defineConfig({
     // HTML/JS/CSS when the configured server is unreachable and answer from
     // the Cache API instead; the manifest below makes the app installable
     // to a phone's home screen (over a browser-trusted origin -- see the
-    // README "Install on a phone" section).
+    // docs' Phone app and HTTPS pages).
     VitePWA({
       // `prompt`, not `autoUpdate` (KTD7): a waiting SW surfaces a Reload
       // toast (ReloadPrompt, U8) instead of silently skip-waiting and

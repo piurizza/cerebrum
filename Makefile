@@ -5,7 +5,7 @@
         check clean up down logs \
         generate-api-types check-api-types build-desktop audit-deps \
         lint-website format-website test-website \
-        docs-serve docs-build docs-check docs-check-runtime \
+        docs-assets docs-serve docs-build docs-check docs-check-runtime \
         generate-docs-api check-docs-api docs-screenshots
 
 UV ?= uv
@@ -82,10 +82,17 @@ check: lint type-check test
 # The documentation site (website/, Zensical). Its URL lives only in
 # website/zensical.toml; the checks read it from there.
 
-docs-serve:
-	cd website && $(UV) run zensical serve
+# The site serves its own copy of Mermaid instead of the theme's CDN one
+# (R19): installed from website/package-lock.json, copied into the source.
+docs-assets:
+	cd website && $(NPM) ci --ignore-scripts && \
+		mkdir -p docs/assets/javascripts/vendor && \
+		cp node_modules/mermaid/dist/mermaid.min.js docs/assets/javascripts/vendor/
 
-docs-build:
+docs-serve: docs-assets
+	cd website && $(UV) run zensical serve --dev-addr localhost:8001
+
+docs-build: docs-assets
 	cd website && $(UV) sync --locked && $(UV) run zensical build --clean
 
 # Static checks on the built site: nothing loads from another host (R19),
@@ -127,16 +134,21 @@ check-api-types: generate-api-types
 	git diff --exit-code -- frontend/src/api/generated/schema.ts || \
 		(echo "Generated API types are out of date -- run 'make generate-api-types' and commit the result." && exit 1)
 
-# Captures the documentation's screenshots from a throwaway stack on a
-# generated demo vault (website/scripts/demo_stack.sh), then removes it.
+# Captures the documentation's screenshots from throwaway stacks on a
+# generated demo vault (website/scripts/demo_stack.sh): one as usual, then
+# one in read-only mode for the read-only page, each removed afterwards.
 # Needs Docker and Node 22; installs the frontend's Playwright and Chromium.
 # Run it after a UI change and commit the images.
+SCREENSHOTS := website/docs/assets/screenshots
+
 docs-screenshots:
 	cd frontend && $(NPM) ci && npx playwright install chromium
-	@work=$$(mktemp -d) && \
-		trap 'website/scripts/demo_stack.sh down "$$work"' EXIT && \
-		website/scripts/demo_stack.sh up "$$work" && \
-		node website/scripts/screenshots.mjs "$$work/credentials.json" website/docs/assets/screenshots
+	@for mode in "" read-only; do \
+		work=$$(mktemp -d) && \
+		( trap 'website/scripts/demo_stack.sh down "$$work"' EXIT && \
+		  website/scripts/demo_stack.sh up "$$work" $$mode && \
+		  node website/scripts/screenshots.mjs "$$work/credentials.json" $(SCREENSHOTS) ) || exit 1; \
+	done
 
 # Regenerates the REST API reference page from the backend's current
 # OpenAPI schema (the same gitignored bridge file generate-api-types uses).

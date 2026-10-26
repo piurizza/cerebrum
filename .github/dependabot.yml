@@ -31,6 +31,18 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      website-npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly

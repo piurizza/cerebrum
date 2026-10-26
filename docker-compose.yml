@@ -38,15 +38,15 @@ services:
       # Where the index and the accounts database live. Empty means inside
       # the vault (`<vault>/.cerebrum/`). To keep them out of the vault, set
       # both to paths under /data/cerebrum and enable the data mount below
-      # -- see "Accounts and the index" in the README before moving an
+      # -- see "Read-only vault and a second instance" in the docs before moving an
       # existing accounts database.
       CEREBRUM_INDEX_PATH: ${CEREBRUM_INDEX_PATH:-}
       CEREBRUM_AUTH_DB_PATH: ${CEREBRUM_AUTH_DB_PATH:-}
       # `true` serves the vault without ever writing to it (for a folder
       # another tool owns, e.g. a git checkout). Needs both paths above set
-      # outside the vault -- see "Serve a read-only vault" in the README.
+      # outside the vault -- see "Read-only vault and a second instance" in the docs.
       CEREBRUM_VAULT_READ_ONLY: ${CEREBRUM_VAULT_READ_ONLY:-false}
-      # Sign in with an OpenID Connect provider (see the README). Blank means
+      # Sign in with an OpenID Connect provider (see the docs). Blank means
       # off; the issuer, client id and secret go together.
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}

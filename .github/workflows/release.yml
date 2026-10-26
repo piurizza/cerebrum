@@ -203,7 +203,7 @@ jobs:
 
   # One universal .dmg for Apple Silicon and Intel Macs. Ad-hoc signed, not
   # notarized (that needs a paid Apple Developer ID), so Gatekeeper asks the
-  # user to allow it once -- see README "Run desktop app".
+  # user to allow it once -- see the docs' desktop app page.
   desktop-macos:
     needs: target
     if: needs.target.outputs.tag != '' && github.event_name != 'schedule' && !inputs.docs_only
@@ -255,7 +255,7 @@ jobs:
             src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
 
   # An NSIS setup .exe for 64-bit Windows. Not code-signed, so SmartScreen
-  # warns on first run -- see README "Run desktop app". The desktop smoke
+  # warns on first run -- see the docs' desktop app page. The desktop smoke
   # test workflow installs and launches this same build on every desktop PR.
   desktop-windows:
     needs: target
@@ -394,9 +394,22 @@ jobs:
       - if: steps.present.outputs.present == 'true'
         run: uv sync --locked --all-groups
 
-      # The website's own tests, run against the release's tag. Once the
-      # upgrade pages exist they include a check that every CHANGELOG
-      # version has one, so a release without its page is never published.
+      # The site serves its own pinned Mermaid (website/package-lock.json)
+      # rather than the theme's CDN copy.
+      - if: steps.present.outputs.present == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - if: steps.present.outputs.present == 'true'
+        working-directory: .
+        run: make docs-assets
+
+      # The website's own tests, run against the release's tag. They include
+      # a check that every CHANGELOG version has an upgrade page, so a
+      # release without its page is never published.
       - if: steps.present.outputs.present == 'true'
         run: uv run pytest
 

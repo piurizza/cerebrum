@@ -196,3 +196,33 @@ describe("AppShell banners", () => {
     expect(screen.queryByText("This vault is read-only")).toBeNull();
   });
 });
+
+describe("AppShell way home", () => {
+  it("returns to the front page from the Home link", async () => {
+    setViewport(false);
+    renderShell("/graph");
+
+    const home = screen.getByRole("link", { name: "Home" });
+    expect(home).not.toHaveAttribute("aria-current");
+
+    await userEvent.click(home);
+
+    expect(screen.getByText("home page")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("link", { name: "Graph" })).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
+
+  it("links the wordmark in the sidebar and the phone's top bar to the front page", () => {
+    setViewport(false);
+    renderShell("/tasks");
+
+    const wordmarks = screen.getAllByRole("link", { name: "Cerebrum" });
+    expect(wordmarks).toHaveLength(2);
+    for (const link of wordmarks) expect(link).toHaveAttribute("href", "/");
+  });
+});

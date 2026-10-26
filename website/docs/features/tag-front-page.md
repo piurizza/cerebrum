@@ -12,7 +12,9 @@ that carry all of them are listed, most recently updated first.
 - **Clear** removes the selection.
 
 The selection is the same one as the chips in the search box, so it follows
-you into a note and back. It is forgotten when you reload.
+you into a note and back: **Home** in the sidebar, or the Cerebrum name above
+it, returns to the front page with your tags still picked. It is forgotten
+when you reload.
 
 On a phone, the first pick folds the tag list away to make room for the
 results; **Show all tags** brings it back.

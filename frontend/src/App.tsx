@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   createBrowserRouter,
+  Link,
   Navigate,
   NavLink,
   Outlet,
@@ -114,7 +115,9 @@ export function AppShell() {
           >
             <span aria-hidden="true">☰</span>
           </button>
-          <span className="app-topbar-brand">Cerebrum</span>
+          <Link to="/" className="app-topbar-brand">
+            Cerebrum
+          </Link>
         </header>
 
         {drawerOpen && (
@@ -141,8 +144,19 @@ export function AppShell() {
           inert={sidebarHidden}
           aria-hidden={sidebarHidden}
         >
-          <h1 className="app-title">Cerebrum</h1>
+          <h1 className="app-title">
+            <Link to="/">Cerebrum</Link>
+          </h1>
           <nav className="app-nav">
+            {/* `end`, or every route would mark Home active. The front page
+              keeps the tags picked there, so this is the way back to them. */}
+            <NavLink
+              to="/"
+              end
+              className={({ isActive }) => (isActive ? "is-active" : undefined)}
+            >
+              Home
+            </NavLink>
             <NavLink
               to="/graph"
               className={({ isActive }) => (isActive ? "is-active" : undefined)}

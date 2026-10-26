@@ -5,7 +5,7 @@ const EXTERNAL_PREFIXES = ["http://", "https://", "mailto:", "#"];
 // rest are written as they are. Mirrors `format_link_target` in
 // backend/src/cerebrum/notes/parser.py; both run the cases in
 // fixtures/markdown-link-targets.json.
-const ENCODED_IN_TARGETS = new Set([...' %()<>[]\\"']);
+const ENCODED_IN_TARGETS = new Set([...' #%()<>[]\\"']);
 
 /** A path written as a markdown link target, e.g. `My Note.md` as
  * `My%20Note.md`, so the link still works when the name has spaces. */

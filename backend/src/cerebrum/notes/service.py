@@ -283,11 +283,10 @@ def _rebase_attachment_references(body: str, old_path: str, new_path: str) -> st
     # A stem with spaces or similar is written percent-encoded in a plain
     # link and as it is in an angle-bracket one; each form is replaced by
     # the new stem in the same form.
-    forms = {
-        old_stem: new_stem,
-        format_link_target(old_stem): format_link_target(new_stem),
-    }
-    for old_form, new_form in forms.items():
+    forms = [(old_stem, new_stem)]
+    if format_link_target(old_stem) != old_stem:
+        forms.append((format_link_target(old_stem), format_link_target(new_stem)))
+    for old_form, new_form in forms:
         pattern = re.compile(rf"(?<![\w-]){re.escape(old_form)}\.attachments/")
         # Backslashes doubled: `sub` reads them in the replacement as escapes.
         body = pattern.sub(new_form.replace("\\", "\\\\") + ".attachments/", body)

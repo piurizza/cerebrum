@@ -1,28 +1,31 @@
 {
   "description": "Shared markdown-link cases. The backend (backend/tests/test_link_targets.py) and the preview (frontend/src/lib/noteContent.test.ts) both run every case, so links resolve and are written the same way on both sides. A target is the link destination as written: plain, with spaces as %20, or in angle brackets.",
   "resolve": [
-    { "name": "plain", "source": "a/b.md", "target": "other.md", "expected": "a/other.md" },
-    { "name": "encoded space", "source": "a/b.md", "target": "My%20Note.md", "expected": "a/My Note.md" },
-    { "name": "angle brackets", "source": "a/b.md", "target": "<My Note.md>", "expected": "a/My Note.md" },
-    { "name": "angle brackets with escapes", "source": "a/b.md", "target": "<My%20Note.md>", "expected": "a/My Note.md" },
-    { "name": "encoded parentheses up a folder", "source": "a/b.md", "target": "../x/Plan%20%28v2%29.md", "expected": "x/Plan (v2).md" },
-    { "name": "heading after the path", "source": "a/b.md", "target": "My%20Note.md#Some%20Heading", "expected": "a/My Note.md" },
-    { "name": "encoded percent sign", "source": "a/b.md", "target": "100%25.md", "expected": "a/100%.md" },
-    { "name": "non-ascii as written", "source": "a/b.md", "target": "café.md", "expected": "a/café.md" },
-    { "name": "non-ascii encoded", "source": "a/b.md", "target": "caf%C3%A9.md", "expected": "a/café.md" },
-    { "name": "stray percent kept", "source": "a/b.md", "target": "50%off.md", "expected": "a/50%off.md" },
-    { "name": "external url", "source": "a/b.md", "target": "https://example.com/a.md", "expected": null },
-    { "name": "external url in angle brackets", "source": "a/b.md", "target": "<https://example.com/a b.md>", "expected": null },
-    { "name": "same-note heading", "source": "a/b.md", "target": "#Heading", "expected": null },
-    { "name": "not a note", "source": "a/b.md", "target": "photo%201.png", "expected": null }
+    {"name":  "plain", "source":  "a/b.md", "target":  "other.md", "expected":  "a/other.md"},
+    {"name":  "encoded space", "source":  "a/b.md", "target":  "My%20Note.md", "expected":  "a/My Note.md"},
+    {"name":  "angle brackets", "source":  "a/b.md", "target":  "<My Note.md>", "expected":  "a/My Note.md"},
+    {"name":  "angle brackets with escapes", "source":  "a/b.md", "target":  "<My%20Note.md>", "expected":  "a/My Note.md"},
+    {"name":  "encoded parentheses up a folder", "source":  "a/b.md", "target":  "../x/Plan%20%28v2%29.md", "expected":  "x/Plan (v2).md"},
+    {"name":  "heading after the path", "source":  "a/b.md", "target":  "My%20Note.md#Some%20Heading", "expected":  "a/My Note.md"},
+    {"name":  "encoded percent sign", "source":  "a/b.md", "target":  "100%25.md", "expected":  "a/100%.md"},
+    {"name":  "non-ascii as written", "source":  "a/b.md", "target":  "café.md", "expected":  "a/café.md"},
+    {"name":  "non-ascii encoded", "source":  "a/b.md", "target":  "caf%C3%A9.md", "expected":  "a/café.md"},
+    {"name":  "stray percent kept", "source":  "a/b.md", "target":  "50%off.md", "expected":  "a/50%off.md"},
+    {"name":  "external url", "source":  "a/b.md", "target":  "https://example.com/a.md", "expected":  null},
+    {"name":  "external url in angle brackets", "source":  "a/b.md", "target":  "<https://example.com/a b.md>", "expected":  null},
+    {"name":  "same-note heading", "source":  "a/b.md", "target":  "#Heading", "expected":  null},
+    {"name":  "not a note", "source":  "a/b.md", "target":  "photo%201.png", "expected":  null},
+    {"name":  "encoded hash in the name", "source":  "a/b.md", "target":  "C%23%20basics.md", "expected":  "a/C# basics.md"},
+    {"name":  "invalid utf-8 escape kept", "source":  "a/b.md", "target":  "a%FFb.md", "expected":  "a/a%FFb.md"}
   ],
   "format": [
-    { "name": "no special characters", "path": "notes/plan.md", "expected": "notes/plan.md" },
-    { "name": "space", "path": "My Note.md", "expected": "My%20Note.md" },
-    { "name": "parentheses", "path": "notes/Plan (v2).md", "expected": "notes/Plan%20%28v2%29.md" },
-    { "name": "percent sign", "path": "50%.md", "expected": "50%25.md" },
-    { "name": "angle brackets", "path": "a<b>.md", "expected": "a%3Cb%3E.md" },
-    { "name": "non-ascii stays readable", "path": "café/Crème brûlée.md", "expected": "café/Crème%20brûlée.md" },
-    { "name": "relative path", "path": "../My Folder/x.md", "expected": "../My%20Folder/x.md" }
+    {"name":  "no special characters", "path":  "notes/plan.md", "expected":  "notes/plan.md"},
+    {"name":  "space", "path":  "My Note.md", "expected":  "My%20Note.md"},
+    {"name":  "parentheses", "path":  "notes/Plan (v2).md", "expected":  "notes/Plan%20%28v2%29.md"},
+    {"name":  "percent sign", "path":  "50%.md", "expected":  "50%25.md"},
+    {"name":  "hash", "path":  "C# basics.md", "expected":  "C%23%20basics.md"},
+    {"name":  "angle brackets", "path":  "a<b>.md", "expected":  "a%3Cb%3E.md"},
+    {"name":  "non-ascii stays readable", "path":  "café/Crème brûlée.md", "expected":  "café/Crème%20brûlée.md"},
+    {"name":  "relative path", "path":  "../My Folder/x.md", "expected":  "../My%20Folder/x.md"}
   ]
 }

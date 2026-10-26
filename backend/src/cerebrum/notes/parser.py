@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import bisect
 import posixpath
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
-from urllib.parse import unquote
 
 import frontmatter
 import yaml
 
-from cerebrum.notes.code_regions import iter_lines_with_fence_state
+from cerebrum.notes.code_regions import code_ranges, iter_lines_with_fence_state
 from cerebrum.notes.models import (
     ParsedLink,
     ParsedNote,
@@ -29,15 +29,17 @@ from cerebrum.notes.wikilinks import (
 # the destination is either wrapped in angle brackets, where it may hold
 # spaces, or a run of non-space characters, where a space is written `%20`.
 _LINK_PATTERN = re.compile(
-    r'\[([^\]]*)\]\(\s*(<[^<>\n]*>|[^)\s<][^)\s]*)(\s+"[^"\n]*")?\s*\)'
+    r"\[([^\]]*)\]\(\s*(<[^<>\n]*>|[^)\s<][^)\s]*)"
+    r"(\s+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^()\n]*\)))?\s*\)"
 )
+_PERCENT_ESCAPES = re.compile(r"(?:%[0-9A-Fa-f]{2})+")
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
 # Characters percent-encoded when Cerebrum writes a link target: the ones
 # that would end or break a markdown link destination. Everything else,
 # accented letters included, is written as it is. Mirrors
 # `formatLinkTarget` in frontend/src/lib/noteContent.ts; both run the cases
 # in fixtures/markdown-link-targets.json.
-_ENCODED_IN_TARGETS = frozenset(' %()<>[]\\"')
+_ENCODED_IN_TARGETS = frozenset(' #%()<>[]\\"')
 _TASK_LINE_PATTERN = re.compile(r"^[ \t]*[-*+] \[([ xX])\] (.*)$")
 _MANAGED_METADATA_KEYS = frozenset({"title", "tags", "created", "updated"})
 
@@ -74,6 +76,21 @@ class _Destination:
     angle: bool
 
 
+def _decode_path(path: str) -> str:
+    """Decode the percent-escapes in a link target's path. A run of escapes
+    that isn't valid UTF-8, or a stray `%`, is kept as written, as the
+    preview's `decodeLinkPath` does."""
+
+    def _decode(match: re.Match[str]) -> str:
+        escapes = match.group(0)
+        try:
+            return bytes.fromhex(escapes.replace("%", "")).decode("utf-8")
+        except UnicodeDecodeError:
+            return escapes
+
+    return _PERCENT_ESCAPES.sub(_decode, path)
+
+
 def _parse_destination(raw: str) -> _Destination | None:
     """None for an external link or a same-note `#heading` link."""
     angle = raw.startswith("<") and raw.endswith(">")
@@ -81,7 +98,21 @@ def _parse_destination(raw: str) -> _Destination | None:
     if inner.startswith(_EXTERNAL_PREFIXES):
         return None
     path, _, fragment = inner.partition("#")
-    return _Destination(unquote(path), fragment, angle)
+    return _Destination(_decode_path(path), fragment, angle)
+
+
+def _links_outside_code(body: str) -> list[re.Match[str]]:
+    """The markdown links in `body`, skipping fenced code blocks and inline
+    code spans, where link syntax is an example, not a link."""
+    skipped = code_ranges(body)
+    skipped_starts = [start for start, _ in skipped]
+    matches: list[re.Match[str]] = []
+    for match in _LINK_PATTERN.finditer(body):
+        index = bisect.bisect_right(skipped_starts, match.start()) - 1
+        if index >= 0 and match.start() < skipped[index][1]:
+            continue
+        matches.append(match)
+    return matches
 
 
 def format_link_target(path: str) -> str:
@@ -98,8 +129,10 @@ def format_link_target(path: str) -> str:
 def _format_destination(path: str, fragment: str, angle: bool) -> str:
     """Write a destination back in the style it was written in: angle
     brackets stay angle brackets (with the path as it is), anything else is
-    percent-encoded."""
-    if angle and not any(char in path for char in "<>\n"):
+    percent-encoded. A path that can't sit unencoded between angle brackets
+    -- one with `#`, `%` or angle brackets of its own -- is percent-encoded
+    instead."""
+    if angle and not any(char in path for char in "#%<>\n"):
         return f"<{path}#{fragment}>" if fragment else f"<{path}>"
     target = format_link_target(path)
     return f"{target}#{fragment}" if fragment else target
@@ -123,7 +156,7 @@ def resolve_link_target(source_path: str, target: str) -> str | None:
 
 def extract_links(source_path: str, body: str) -> list[ParsedLink]:
     links: list[ParsedLink] = []
-    for match in _LINK_PATTERN.finditer(body):
+    for match in _links_outside_code(body):
         link_text, target = match.group(1), match.group(2)
         resolved = resolve_link_target(source_path, target)
         if resolved is not None:
@@ -188,7 +221,14 @@ def _rewrite_link_targets(body: str, resolver: Callable[[str], str | None]) -> s
         )
         return f"[{link_text}]({written}{title or ''})"
 
-    return _LINK_PATTERN.sub(_replace, body)
+    pieces: list[str] = []
+    position = 0
+    for match in _links_outside_code(body):
+        pieces.append(body[position : match.start()])
+        pieces.append(_replace(match))
+        position = match.end()
+    pieces.append(body[position:])
+    return "".join(pieces)
 
 
 def _relative_link_path(base_dir: PurePosixPath, absolute_target: str) -> str:

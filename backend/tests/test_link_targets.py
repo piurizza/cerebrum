@@ -115,3 +115,52 @@ def test_moving_a_note_with_spaces_rewrites_links_and_its_images(
     linker = (vault / "linker.md").read_text(encoding="utf-8")
     assert "[old](Moved/New%20Name.md)" in linker
     assert "[again](<Moved/New Name.md>)" in linker
+
+
+def test_moving_keeps_a_link_to_a_name_with_a_hash_working() -> None:
+    # In angle brackets too, a bare `#` starts a heading, so a name with a
+    # `#` is always written encoded.
+    body = "[x](C%23%20tips.md) [y](<C%23 tips.md>)"
+    moved = rebase_links(body, "a.md", "deep/a.md")
+    assert moved == "[x](../C%23%20tips.md) [y](../C%23%20tips.md)"
+    assert [link.target_path for link in extract_links("deep/a.md", moved)] == [
+        "C# tips.md",
+        "C# tips.md",
+    ]
+
+
+def test_reads_single_quoted_and_parenthesized_titles() -> None:
+    body = "[a](x%20y.md 'One') [b](<z w.md> (Two))"
+    assert [link.target_path for link in extract_links("n.md", body)] == [
+        "x y.md",
+        "z w.md",
+    ]
+
+
+def test_links_inside_code_are_not_links_and_are_not_rewritten() -> None:
+    body = (
+        "Write `[x](<Old Note.md>)` like this:\n\n"
+        "```\n[y](Old%20Note.md)\n```\n\n[z](Old%20Note.md)\n"
+    )
+    assert [link.link_text for link in extract_links("n.md", body)] == ["z"]
+    assert retarget_links(body, "n.md", "Old Note.md", "New.md") == body.replace(
+        "[z](Old%20Note.md)", "[z](New.md)"
+    )
+
+
+def test_renaming_to_a_spaced_name_keeps_wikilink_image_embeds_raw(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path
+    (vault / "Plain.md").write_text(
+        "![[Plain.attachments/a.png]]\n![](Plain.attachments/b.png)\n",
+        encoding="utf-8",
+    )
+    (vault / "Plain.attachments").mkdir()
+    (vault / "Plain.attachments" / "a.png").write_bytes(b"png")
+
+    move_note(vault, "Plain.md", "New Name.md")
+
+    moved = (vault / "New Name.md").read_text(encoding="utf-8")
+    assert "![[New Name.attachments/a.png]]" in moved
+    assert "![](New Name.attachments/b.png)" in moved

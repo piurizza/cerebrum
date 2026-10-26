@@ -39,7 +39,7 @@ Copy the exported folder into the vault, for example as
   flat folder. Move notes into folders if you like; wikilinks keep working
   because they find notes by name.
 - **Markdown links to notes or images with spaces in their names**; see
-  [Import](index.md#what-doesnt-yet).
+  [Import](index.md#what-doesnt-carry-over).
 
 ## Known gaps
 

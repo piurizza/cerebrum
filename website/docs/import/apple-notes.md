@@ -21,15 +21,15 @@ Copy the exported files into the vault, for example as
 
 - Note text, headings, lists and checklists.
 - Images, from the `Attachments` folder. Copy it along with the notes. Images
-  whose file names contain spaces don't show yet; see
-  [Import](index.md#what-doesnt-yet).
+  whose file names contain spaces don't show; see
+  [Import](index.md#what-doesnt-carry-over).
 
 ## Fix by hand
 
 - **Folders.** Recreate your Notes folders as folders in the vault.
 - **Tags.** Notes' tags are written in the text, such as `#garden`, and
   Cerebrum only reads tags in frontmatter. Add a `tags:` list to the notes you
-  filter by. See [Import](index.md#what-doesnt-yet).
+  filter by. See [Import](index.md#what-doesnt-carry-over).
 - **Formatting** beyond headings, lists and links may come out simplified.
 
 ## Known gaps

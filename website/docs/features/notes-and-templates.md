@@ -31,7 +31,9 @@ image is saved next to the note in a folder named `<note name>.attachments/`,
 so `garden-shed.md` keeps its images in `garden-shed.attachments/`. The folder
 moves with the note and is deleted with it.
 
-Images are limited to 10 MB each by default (`MAX_ATTACHMENT_SIZE_BYTES`).
+Images are limited to 10 MB each (`MAX_ATTACHMENT_SIZE_BYTES`). In Docker,
+the bundled web server also caps uploads at 10 MB, so the setting can lower
+the limit but not raise it.
 
 ## Renaming, moving and deleting
 
@@ -60,6 +62,9 @@ The folder is set by `CEREBRUM_TEMPLATES_FOLDER` (default `templates`). If you
 already have an unrelated folder with that name, choose another one before you
 start: every note in it becomes a template.
 
-**Limits:** placeholders such as `{{date}}` are not filled in; the text is
-copied as it is. Templates are normal notes, so they also show up in search,
-tags, the graph and tasks.
+## Known limits
+
+- Template placeholders such as `{{date}}` are not filled in; the text is
+  copied as it is.
+- Templates are normal notes, so they also show up in search, tags, the graph
+  and tasks.

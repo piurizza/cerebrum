@@ -40,7 +40,7 @@ Copy the converted folder into the vault, for example as
 - **Formatting** that markdown can't express, such as font colours and
   complex tables, comes out simplified.
 - **Links between notes** depend on the converter; check a few, and replace
-  broken ones with `[[wikilinks]]`. See [Import](index.md#what-doesnt-yet).
+  broken ones with `[[wikilinks]]`. See [Import](index.md#what-doesnt-carry-over).
 
 ## Known gaps
 

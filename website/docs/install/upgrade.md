@@ -30,6 +30,11 @@ curl -fsSL https://github.com/piurizza/cerebrum/releases/latest/download/install
 It replaces `compose.yaml` with the new release's copy, pulls the images and
 restarts. It never touches `.env` or your notes.
 
+- If you installed into another folder, put the same
+  `CEREBRUM_INSTALL_DIR=...` in front of `sh`.
+- If `.env` has a `CEREBRUM_VERSION` line, for example after going back to an
+  older release, delete it first. Otherwise Cerebrum stays on that version.
+
 ## Upgrade a hand install
 
 In the folder with `docker-compose.yml`:

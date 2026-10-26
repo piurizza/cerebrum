@@ -3,14 +3,18 @@
 Every person has their own account. Accounts, sessions and API tokens are
 stored by Cerebrum itself, in its accounts database.
 
+All accounts share one vault: everyone who can sign in reads and edits the
+same notes. There are no private notes or per-folder permissions. For separate
+notes, run a separate Cerebrum.
+
 ## The first account
 
-The first account is created with the setup token, `AUTH_SETUP_TOKEN` in
-`.env` (the install script prints it). Open Cerebrum, choose **Register**, and
+The first account is created with the invite token in `AUTH_SETUP_TOKEN` in
+`.env`; the install script prints it. Open Cerebrum, choose **Register**, and
 paste it as the **Invite token**. That account is an admin.
 
-The setup token only works while there are no accounts. Once the first one
-exists, everyone else needs an invite.
+That token only works while there are no accounts. Once the first one exists,
+everyone else needs an invite from **Settings**.
 
 ## Inviting people
 
@@ -42,5 +46,5 @@ last active admin who has a password.
 
 ## Lost the admin password?
 
-There is no password reset yet. If you still have another admin account, use
+Cerebrum has no password reset. If you still have another admin account, use
 it. Otherwise see [Troubleshooting](../help/troubleshooting.md#locked-out-of-the-only-admin-account).

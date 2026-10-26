@@ -7,7 +7,7 @@ install script, both are in `~/cerebrum-server`.
 |---|---|---|
 | Your notes and images | `vault/` | They are the notes. |
 | The accounts database | `vault/.cerebrum/auth.sqlite3` | Accounts, password hashes, sessions, API tokens and invites. It can't be rebuilt. |
-| Settings and secrets | `.env` | Holds `AUTH_JWT_SECRET` and `AUTH_SETUP_TOKEN`. |
+| Settings and secrets | `.env` | Holds `AUTH_JWT_SECRET`, `AUTH_SETUP_TOKEN` and, if you use one, `OIDC_CLIENT_SECRET`. |
 | The search index | `vault/.cerebrum/index.sqlite3` | Optional: Cerebrum rebuilds it from the notes on every start. |
 
 If you moved Cerebrum's state out of the vault (`CEREBRUM_AUTH_DB_PATH`), the
@@ -27,12 +27,14 @@ For example, in the install folder:
 
 ```sh
 docker compose stop backend
-tar -czf ~/cerebrum-backup-$(date +%F).tar.gz .env vault
+(umask 077; tar -czf ~/cerebrum-backup-$(date +%F).tar.gz .env vault)
 docker compose start backend
 ```
 
-With state moved out of the vault, add the data folder and the override file:
-`tar -czf … .env vault data compose.override.yaml`.
+The `umask 077` keeps the archive readable only by you. With state moved out
+of the vault, also add `data` and your override file: `compose.override.yaml`
+for an install-script install, `docker-compose.override.yml` for a hand
+install.
 
 Copying while Cerebrum runs is usually fine for the notes, but the accounts
 database may be caught mid-write.

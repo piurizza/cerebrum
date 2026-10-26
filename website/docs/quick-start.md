@@ -51,16 +51,34 @@ Cerebrum now answers at `http://localhost:7811`, on the server only.
 Phones only install web apps from a trusted HTTPS address. Tailscale serve
 gives Cerebrum one, with a certificate it renews on its own.
 
-1. Install Tailscale on the server and sign in. On Fedora, for example:
+1. Install Tailscale on the server and sign in:
 
-    ```sh
-    sudo dnf install tailscale
-    sudo systemctl enable --now tailscaled
-    sudo tailscale up
-    ```
+    === "Linux"
 
-    For other systems, follow
-    [Tailscale's install instructions](https://tailscale.com/download).
+        ```sh
+        curl -fsSL https://tailscale.com/install.sh | sh
+        sudo tailscale up
+        ```
+
+        Tailscale's script picks the right package for your distribution.
+
+    === "Fedora"
+
+        ```sh
+        sudo dnf install tailscale
+        sudo systemctl enable --now tailscaled
+        sudo tailscale up
+        ```
+
+    === "macOS"
+
+        Install the Tailscale app from
+        [tailscale.com/download](https://tailscale.com/download) and sign in.
+        Run the commands below with its command-line tool, as Tailscale's
+        documentation for macOS describes.
+
+    `tailscale up` opens a sign-in link. Other systems are on
+    [Tailscale's download page](https://tailscale.com/download).
 
 2. In the Tailscale admin console, open **DNS** and turn on **MagicDNS** and
    **HTTPS Certificates**.
@@ -114,5 +132,6 @@ offline. See [Phone app](install/phone.md) for details.
 - [Connect an AI assistant over MCP](agents/index.md).
 - [Install the desktop app](install/desktop.md).
 - Learn the [features](features/index.md).
-- When a new release comes out, [upgrade](install/upgrade.md) by running the
-  install command again.
+- When a new release comes out, read its
+  [upgrade notes](upgrade/index.md), then [upgrade](install/upgrade.md) by
+  running the install command again.

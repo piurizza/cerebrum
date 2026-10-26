@@ -6,14 +6,17 @@ it an HTTPS address. HTTPS keeps your password and API tokens private on the
 network, and phones need a **trusted** certificate to install the app and keep
 it working offline.
 
+Most people should use **Tailscale serve**. Choose another option if you sign
+in through an identity provider, or already have a domain and a reverse proxy.
+
 | Option | Trusted by phones | Needs | Identity-provider sign-in |
 |---|---|---|---|
-| [Tailscale serve](#tailscale-serve) | Yes | A Tailscale account | Not yet |
+| [Tailscale serve](#tailscale-serve) | Yes | A Tailscale account | No |
 | [Tailscale certificate on the built-in HTTPS port](#tailscale-certificate-on-the-built-in-https-port) | Yes | A Tailscale account, a monthly renewal | Yes |
-| [Reverse proxy with a domain](#reverse-proxy-with-a-domain) | Yes | A domain, a proxy such as Caddy | Not yet |
+| [Reverse proxy with a domain](#reverse-proxy-with-a-domain) | Yes | A domain, a proxy such as Caddy | No |
 | [Built-in self-signed certificate](#built-in-self-signed-certificate) | No | Nothing | Yes, after accepting the warning |
 
-"Not yet": behind a proxy that handles HTTPS in front of Cerebrum, sign-in
+"No": behind a proxy that handles HTTPS in front of Cerebrum, sign-in
 with an [identity provider](identity-provider.md) builds its return address
 with `http://`, and the provider rejects it. Password sign-in works.
 
@@ -49,7 +52,8 @@ Cerebrum's web server also listens for HTTPS, on `CEREBRUM_HTTPS_PORT` (7812).
 You can give it a Tailscale certificate instead of its self-signed one.
 
 1. Set up Tailscale with **MagicDNS** and **HTTPS Certificates**, as above.
-2. Allow your user to fetch certificates, once:
+2. Let your user run `tailscale` commands without `sudo`, including fetching
+   certificates, once:
 
     ```sh
     sudo tailscale set --operator=$USER
@@ -81,7 +85,9 @@ cron job is enough, and thanks to step 2 it doesn't need root.
 !!! warning
     With `0.0.0.0`, the ports are open on every network the server is on, not
     just the tailnet. Bind to the server's tailnet address instead (shown by
-    `tailscale ip -4`) to keep them on the tailnet only.
+    `tailscale ip -4`) to keep them on the tailnet only. If Cerebrum isn't
+    running after a reboot, Docker started before Tailscale had its address:
+    run `docker compose up -d`.
 
 ## Reverse proxy with a domain
 
@@ -97,6 +103,12 @@ notes.example.com {
 
 This needs the domain to point at your server and, for Let's Encrypt, the
 proxy to be reachable from the internet or to use a DNS challenge.
+
+!!! warning
+    If the proxy is reachable from the internet, so is Cerebrum: its sign-in
+    page, registration and MCP endpoint. To keep it private, allow only your
+    network or VPN at the proxy, and use a DNS challenge so nothing has to
+    listen publicly.
 
 ## Built-in self-signed certificate
 

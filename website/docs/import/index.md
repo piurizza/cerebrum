@@ -4,15 +4,15 @@ Cerebrum reads a folder of markdown files, so moving notes over is mostly a
 matter of exporting them as markdown from the other app and copying the files
 into the vault. There is no import button and none is needed.
 
-| Coming from | Export as | Effort |
-|---|---|---|
-| [Obsidian](obsidian.md) | Nothing to export: copy the vault folder | Low |
-| [Joplin](joplin.md) | Markdown with front matter | Low |
-| [Bear](bear.md) | Markdown | Low |
-| [Logseq](logseq.md) | Nothing to export: copy the graph folder | Medium |
-| [Notion](notion.md) | Markdown | Medium |
-| [Apple Notes](apple-notes.md) | Markdown, on recent versions | Medium |
-| [Evernote](evernote.md) | ENEX, then converted | Medium |
+| Coming from | Export as | Main fix by hand | Effort |
+|---|---|---|---|
+| [Obsidian](obsidian.md) | Nothing to export: copy the vault folder | Tags written in the text | Low |
+| [Joplin](joplin.md) | Markdown with front matter | Links to names with spaces | Low |
+| [Bear](bear.md) | Markdown | Every tag, written in the text | Medium |
+| [Logseq](logseq.md) | Nothing to export: copy the graph folder | Properties and outlines | Medium |
+| [Notion](notion.md) | Markdown | File names and links | Medium |
+| [Apple Notes](apple-notes.md) | Markdown, on recent versions | Tags and folders | Medium |
+| [Evernote](evernote.md) | ENEX, then converted | The conversion | Medium |
 
 ## The steps, for every source
 
@@ -37,7 +37,7 @@ Try a small export first, so you know what to expect before moving everything.
   without spaces.
 - **Images** linked from notes.
 
-## What doesn't, yet
+## What doesn't carry over
 
 - **Tags written in the text**, such as `#idea` in a sentence. Only tags in the
   frontmatter count. Many apps write tags in the text, so each guide says

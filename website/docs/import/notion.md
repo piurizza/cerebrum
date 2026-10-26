@@ -28,8 +28,8 @@ Copy the unzipped folder into the vault, for example as
   name, so rename the notes you use most in Cerebrum, or add a `title:` to
   their frontmatter.
 - **Links between pages.** Notion's export writes links with spaces encoded
-  as `%20`, which Cerebrum doesn't follow yet (see
-  [Import](index.md#what-doesnt-yet)). Replace the links you need with
+  as `%20`, which Cerebrum doesn't follow (see
+  [Import](index.md#what-doesnt-carry-over)). Replace the links you need with
   `[[wikilinks]]`, such as `[[Garden plan 1a2b3c…]]`, or with links to
   renamed files.
 - **Page properties** come out as plain text lines at the top of the page.

@@ -72,18 +72,18 @@ tied to an account in one of two ways:
 
 If you change `OIDC_ISSUER` or remove these settings, accounts created through
 the provider can't sign in any more: they have no password, and there is no
-way to give them one yet.
+way to give them one.
 
 ## Known limits
 
 - **Behind a proxy that handles HTTPS,** such as
   [Tailscale serve](https.md#tailscale-serve) or a reverse proxy, provider
-  sign-in doesn't work yet: Cerebrum builds the return address with `http://`.
+  sign-in doesn't work: Cerebrum builds the return address with `http://`.
   Use Cerebrum's own HTTPS port with a trusted certificate instead, as in
   [Tailscale certificate on the built-in HTTPS port](https.md#tailscale-certificate-on-the-built-in-https-port).
 - **iPhone home-screen app:** provider sign-in opens in Safari and finishes
   there, not in the app. Sign in from Safari instead.
 - **Google** refuses sign-in from embedded browsers, which includes the
   desktop app. Self-hosted providers work there.
-- Not built yet: several providers at once, creating accounts at the first
+- Not supported: several providers at once, creating accounts at the first
   provider sign-in without an invite, and signing out at the provider.

@@ -1,8 +1,9 @@
 # Configuration
 
 Cerebrum is configured with environment variables. With Docker, set them in
-the `.env` file next to `docker-compose.yml` (the install script writes one
-for you) and restart with `docker compose up -d`. Running the backend by
+the `.env` file next to the Compose file (`compose.yaml` for the install
+script, `docker-compose.yml` for a hand install) and restart with
+`docker compose up -d`. Running the backend by
 hand, set them in `backend/.env`.
 
 The **Docker `.env`** column says whether a variable takes effect from
@@ -10,10 +11,7 @@ Docker's `.env`. Variables marked *no* are not passed into the container by
 `docker-compose.yml`; to change one there, add it under the backend's
 `environment:` in a `docker-compose.override.yml`.
 
-This is the one list of every variable. A check in the test suite fails
-when a variable is added to the code, a `.env.example` file, the Compose
-file or the install script without a row here, so the table cannot fall
-behind.
+This is the one list of every variable.
 
 ## Vault and notes
 
@@ -21,7 +19,7 @@ behind.
 |---|---|---|---|
 | `CEREBRUM_VAULT_PATH` | `./vault` (`/data/vault` in Docker) | no | Folder of `.md` notes, as the backend sees it. In Docker this is the mounted `/data/vault`; you set the host folder with `CEREBRUM_VAULT_HOST_PATH` instead. |
 | `CEREBRUM_VAULT_HOST_PATH` | `./vault` | yes | Host folder mounted into the container as the vault. |
-| `CEREBRUM_VAULT_READ_ONLY` | `false` | yes | `true` serves the vault without ever writing to it. See [Running Cerebrum](../running/index.md). |
+| `CEREBRUM_VAULT_READ_ONLY` | `false` | yes | `true` serves the vault without ever writing to it. See [Read-only vault](../running/read-only-and-second-instance.md). |
 | `CEREBRUM_DAILY_NOTE_FOLDER` | `daily` | yes | Vault folder the **Today** button creates daily notes in. Applied on restart. |
 | `CEREBRUM_TEMPLATES_FOLDER` | `templates` | yes | Vault folder that holds note templates. Applied on restart. |
 | `CEREBRUM_LINK_FORMAT` | `markdown` | yes | `markdown` or `wikilink`: the link form the editor inserts and agents are asked to write. Both forms are always read. |

@@ -22,22 +22,22 @@ images are prebuilt, so nothing is compiled.
 
 | Resource | Needed | Measured |
 |---|---|---|
-| RAM | 100 MB | 75 MB backend and 11 MB web server, idle |
+| RAM | 150 MB | 116 MB backend and 20 MB web server, idle |
 | CPU | Any | Under 1% of one core when idle |
-| Disk, images | 470 MB | 349 MB backend and 114 MB web server |
-| Disk, notes | Your notes plus their index | 2.8 MB for 51 notes, index and accounts included |
+| Disk, images | 450 MB | 338 MB backend and 105 MB web server |
+| Disk, notes | Your notes plus their index | 3.2 MB for 58 notes, index and accounts included |
 
-Measured on Fedora 44, x86_64, Docker Engine 29.9, with a 51-note vault. The
-arm64 images run on Apple Silicon and are tested by CI; a Raspberry Pi is
-untested.
+Measured with the documentation's 58-note demo vault on x86_64 with Docker
+Engine. The arm64 images run on Apple Silicon and are tested in CI; a
+Raspberry Pi is untested.
 
 Cerebrum uses two ports, **7811** (HTTP) and **7812** (HTTPS), by default.
 Both listen on the server only until you choose otherwise.
 
-!!! note "On Linux, prefer Docker Engine over Docker Desktop"
-    Docker Desktop runs containers inside a virtual machine. On Fedora 44 that
-    machine crashed repeatedly during image downloads and builds. Docker Engine
-    runs containers directly, with no virtual machine.
+!!! note "On Linux, use Docker Engine"
+    Docker Engine runs containers directly. Docker Desktop on Linux runs them in
+    a virtual machine, which adds memory use and file-sharing delays, and is not
+    recommended for Cerebrum.
 
 **Browsers:** the end-to-end tests run on Chrome, including a phone-sized
 view. Other current browsers are expected to work. Offline use and installing

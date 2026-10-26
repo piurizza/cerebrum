@@ -24,19 +24,31 @@ streamable HTTP transport, and the token goes in an `Authorization` header as
 
 === "VS Code"
 
-    In `.vscode/mcp.json`, or your user MCP configuration:
+    In your user MCP configuration (**MCP: Open User Configuration**). VS Code
+    asks for the token the first time and stores it, so it never sits in a
+    file:
 
     ```json
     {
+      "inputs": [
+        {
+          "type": "promptString",
+          "id": "cerebrum-token",
+          "description": "Cerebrum API token",
+          "password": true
+        }
+      ],
       "servers": {
         "cerebrum": {
           "type": "http",
           "url": "https://<your-address>/api/mcp/",
-          "headers": { "Authorization": "Bearer cbm_pat_..." }
+          "headers": { "Authorization": "Bearer ${input:cerebrum-token}" }
         }
       }
     }
     ```
+
+    Don't paste a token into a `.vscode/mcp.json` that you commit.
 
 === "Claude Desktop"
 

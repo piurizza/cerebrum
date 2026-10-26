@@ -48,8 +48,9 @@ Then:
 
 3. `docker compose up -d`.
 
-The index needs no moving: it is rebuilt from the notes. Back up `data/` from
-now on; see [Backups](backups.md).
+Only the accounts database moves: the index is rebuilt from the notes, but its
+new path still has to be set in step 2. Back up `data/` from now on; see
+[Backups](backups.md).
 
 ## Turn on read-only mode
 
@@ -84,21 +85,57 @@ What changes:
 ## A read-only second instance
 
 To give people read-only access to a vault that your main Cerebrum writes to,
-run a second instance over the same vault folder, in read-only mode, with its
-own folder for state, its own ports and its own accounts.
+run a second Cerebrum over the same vault folder in read-only mode. It has its
+own folder for state, its own ports, its own accounts and its **own secrets**:
+with the same `AUTH_JWT_SECRET`, a sign-in on one instance would be accepted by
+the other, as whichever account has the same number there.
 
-Give it its **own `.env` with new secrets**: a different `AUTH_JWT_SECRET`
-and `AUTH_SETUP_TOKEN` (`openssl rand -hex 32` makes one). Don't copy the main
-instance's `.env`. With the same `AUTH_JWT_SECRET`, a sign-in on one instance
-is accepted by the other, as whichever account has the same number there.
-The simplest way is a second install with the install script and a different
-folder and ports, for example
-`CEREBRUM_INSTALL_DIR=~/cerebrum-readonly CEREBRUM_PORT=7821 CEREBRUM_HTTPS_PORT=7822`.
+1. Install it with the install script, in its own folder and on its own ports.
+   Don't register an account yet.
 
-If the main instance still keeps its accounts database in the vault, create
-the second instance's as an empty file first, for example
-`touch data/auth.sqlite3`. Otherwise it reads the database in the vault as one
-you forgot to move, and refuses to start.
+    ```sh
+    curl -fsSL https://github.com/piurizza/cerebrum/releases/latest/download/install.sh \
+      | CEREBRUM_INSTALL_DIR=~/cerebrum-readonly CEREBRUM_PORT=7821 CEREBRUM_HTTPS_PORT=7822 sh
+    ```
+
+    The script generates new secrets for it. Never copy the main instance's
+    `.env`.
+
+2. Stop it and create its state folder:
+
+    ```sh
+    cd ~/cerebrum-readonly
+    docker compose down
+    mkdir -p data
+    ```
+
+3. If the main instance keeps its accounts database in the vault (the
+   default), create this instance's as an empty file, or it refuses to start:
+
+    ```sh
+    touch data/auth.sqlite3
+    ```
+
+4. Add the data mount in `~/cerebrum-readonly/compose.override.yaml`, as in
+   [Move Cerebrum's state out of the vault](#move-cerebrums-state-out-of-the-vault).
+
+5. In `~/cerebrum-readonly/.env`, point it at the main vault and turn on
+   read-only mode:
+
+    ```sh
+    CEREBRUM_VAULT_HOST_PATH=/home/<you>/cerebrum-server/vault
+    CEREBRUM_INDEX_PATH=/data/cerebrum/index.sqlite3
+    CEREBRUM_AUTH_DB_PATH=/data/cerebrum/auth.sqlite3
+    CEREBRUM_VAULT_READ_ONLY=true
+    ```
+
+    Use the main vault's full path.
+
+6. Start it with `docker compose up -d`, open it on its own port, and register
+   with this instance's own `AUTH_SETUP_TOKEN` from its `.env`.
+
+To upgrade it later, run the install command again with the same
+`CEREBRUM_INSTALL_DIR=~/cerebrum-readonly` in front of `sh`.
 
 Read-only access is per instance: there are no read-only accounts or API
-tokens on a writable vault yet.
+tokens on a writable vault.

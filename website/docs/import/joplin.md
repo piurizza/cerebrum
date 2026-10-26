@@ -24,7 +24,7 @@ Copy the exported folder into the vault, for example as
 
 - **Links between notes and to images.** Joplin writes them as relative
   markdown links. Those whose target has spaces in its name, encoded as `%20`,
-  aren't followed yet; see [Import](index.md#what-doesnt-yet). Replace the
+  aren't followed; see [Import](index.md#what-doesnt-carry-over). Replace the
   ones you need with `[[wikilinks]]`.
 
 ## Known gaps

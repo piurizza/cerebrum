@@ -14,8 +14,12 @@ Ticked ones (`- [x]`) drop off the list. `*` and `+` work in place of `-`.
 
 Click a task or its note's title to open the note, then tick the task there.
 
-**Limits:** the list is read-only, so ticking a task means editing its note.
-It opens the note at the top, not at the task's line. There are no due dates,
-no filters by tag or folder, and no list of completed tasks. Checkboxes inside
-code blocks are ignored, but examples written as plain checkboxes, for example
-in a [template](notes-and-templates.md#templates), show up as tasks.
+## Known limits
+
+- The list is read-only: tick a task by editing its note.
+- A task opens its note at the top, not at the task's line.
+- There are no due dates, no filters by tag or folder, and no list of completed
+  tasks.
+- Checkboxes inside code blocks are ignored, but examples written as plain
+  checkboxes, for example in a [template](notes-and-templates.md#templates),
+  show up as tasks.

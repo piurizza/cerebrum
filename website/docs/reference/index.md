@@ -5,4 +5,5 @@
 - [REST API](rest-api.md): every route, generated from the backend's own
   schema.
 
-The MCP tools are listed in [Agents](../agents/mcp-tools.md).
+The MCP tools are listed in [Agents](../agents/mcp-tools.md). Working on
+Cerebrum itself? See [Development](../development/index.md).

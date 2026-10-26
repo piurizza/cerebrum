@@ -26,6 +26,16 @@ using Cerebrum and your notes are still just files.
 - **Your AI tools can use it.** A built-in MCP server lets assistants such as
   Claude read, search and write your notes with a token you control.
 
+## Is Cerebrum for you?
+
+**A good fit** if you want your notes as plain files on a machine you run,
+reachable from a browser, your phone and AI assistants: one person, or a
+household or small group sharing one set of notes.
+
+**Not built for** editing without a connection, keeping some notes private from
+other accounts on the same server, or running without a server: Cerebrum needs
+an always-on machine with Docker. The [FAQ](help/faq.md) has more.
+
 <div class="grid" markdown>
 
 ![The tag front page with notes tagged cooking](assets/screenshots/tag-front-page.webp)

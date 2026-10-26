@@ -11,6 +11,7 @@ This works on Linux, macOS and Windows.
 git clone https://github.com/piurizza/cerebrum.git
 cd cerebrum
 cp .env.example .env
+chmod 600 .env      # it will hold secrets; keep it readable only by you
 ```
 
 Edit `.env` and set the two secrets, each to a long random string. One way to

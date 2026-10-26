@@ -14,7 +14,7 @@ A `/` nests tags: `reading/fiction` is inside `reading`. Tags ignore case.
 
 !!! note
     Tags written in a note's text, such as `#idea` in a sentence, are not read
-    as tags yet. Only the frontmatter counts.
+    as tags. Only the frontmatter counts.
 
 ## Searching
 

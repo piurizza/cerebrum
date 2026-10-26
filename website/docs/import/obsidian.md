@@ -38,7 +38,7 @@ To keep writing wikilinks from Cerebrum, set
   only reads tags in the frontmatter. Move the ones you filter by into the
   `tags:` list.
 - **Markdown links to files with spaces in their names**, if you use markdown
-  links rather than wikilinks. See [Import](index.md#what-doesnt-yet).
+  links rather than wikilinks. See [Import](index.md#what-doesnt-carry-over).
 
 ## Known gaps
 

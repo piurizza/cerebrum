@@ -11,15 +11,17 @@ docker compose logs --tail 50 backend
 
 ### The install script says a port is in use
 
-Another program uses 7811 or 7812. Run the installer again with two free
-ports:
+Another program uses 7811 or 7812.
 
-```sh
-curl -fsSL https://github.com/piurizza/cerebrum/releases/latest/download/install.sh \
-  | CEREBRUM_PORT=7821 CEREBRUM_HTTPS_PORT=7822 sh
-```
+- **First install:** run the installer again with two free ports:
 
-On an existing install, change them in `.env` and run the installer again.
+    ```sh
+    curl -fsSL https://github.com/piurizza/cerebrum/releases/latest/download/install.sh \
+      | CEREBRUM_PORT=7821 CEREBRUM_HTTPS_PORT=7822 sh
+    ```
+
+- **Existing install:** change `CEREBRUM_PORT` and `CEREBRUM_HTTPS_PORT` in
+  `.env` and run `docker compose up -d` in the install folder.
 
 ### "Permission denied" on the vault, or notes can't be saved
 
@@ -56,7 +58,7 @@ keeps your `.env` and notes.
 
 ## Signing in
 
-### I lost the setup token
+### I lost the invite token for the first account
 
 It's `AUTH_SETUP_TOKEN` in `.env`, and it only works before the first account
 exists.
@@ -64,7 +66,7 @@ exists.
 ### Locked out of the only admin account
 
 After 5 wrong passwords, an account is locked for 15 minutes; wait and try
-again. If the password is lost, there is no reset yet. You can start the
+again. If the password is lost, Cerebrum has no password reset. You can start the
 accounts over, which keeps every note but removes every account, session and
 API token:
 
@@ -94,8 +96,8 @@ and the `/api/` path through unchanged.
 - **"redirect_uri" errors at the provider:** register the exact return
   address for every address you open Cerebrum on, port included:
   `https://<host>:<port>/api/auth/oidc/callback`.
-- **Behind Tailscale serve or a reverse proxy,** provider sign-in doesn't work
-  yet; see
+- **Behind Tailscale serve or a reverse proxy,** provider sign-in doesn't work;
+  see
   [Known limits](../running/identity-provider.md#known-limits).
 - **An issuer mismatch** shows in the backend log with both values. Copy the
   issuer exactly as the provider shows it, including any trailing `/`.
@@ -162,6 +164,7 @@ If its file name contains spaces, see
 
 ### It can't find the server
 
-Check the address under **Change server URL**, and that the server answers in
-a browser on the same computer. The desktop app needs the address including
-`http://` or `https://` and the port.
+Check that the server answers in a browser on the same computer. The desktop
+app needs the address including `http://` or `https://` and the port. To point
+it at another address, see
+[Connect to a different server](../install/desktop.md#connect-to-a-different-server).

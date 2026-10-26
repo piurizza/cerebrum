@@ -49,9 +49,17 @@ curl -fsSL https://github.com/piurizza/cerebrum/releases/latest/download/install
 | `CEREBRUM_BIND_ADDRESS` | `127.0.0.1` | `127.0.0.1` answers on this machine only. `0.0.0.0`, or one of the machine's addresses, lets phones and other computers connect directly. |
 | `CEREBRUM_TLS_SAN` | empty | Extra names for the built-in HTTPS certificate, for example `IP:192.0.2.10`. See [HTTPS](../running/https.md). |
 
-These go into `.env`. To change them later, edit
-`~/cerebrum-server/.env` and run `docker compose up -d` in that folder. Every
-other setting is listed in [Configuration](../reference/configuration.md).
+The installer reads the ports, bind address and certificate names only on the
+first install, and writes them into `.env`. To change them later, edit
+`~/cerebrum-server/.env` and run `docker compose up -d` in that folder; a new
+`CEREBRUM_TLS_SAN` also needs a new certificate, see
+[HTTPS](../running/https.md#built-in-self-signed-certificate).
+
+`CEREBRUM_INSTALL_DIR` is different: if you installed somewhere else, put it in
+front of `sh` **every** time you run the installer, including updates.
+Otherwise the installer looks in `~/cerebrum-server`.
+
+Every other setting is listed in [Configuration](../reference/configuration.md).
 
 ## What's in the folder
 
@@ -80,11 +88,12 @@ open them only on networks you trust. See [Security](../running/security.md).
 
 ## Updating
 
-Run the same command again. It downloads the new release's `compose.yaml`,
-pulls the images and restarts. Your notes and `.env` are never touched. Read
-the [upgrade notes](../upgrade/index.md) first.
+Run the same command again, with the same `CEREBRUM_INSTALL_DIR` if you set
+one. It downloads the new release's `compose.yaml`, pulls the images and
+restarts. Your notes and `.env` are never touched. Read the
+[upgrade notes](../upgrade/index.md) first; see [Upgrade](upgrade.md).
 
 ## Windows
 
-There is no install script for Windows yet. Follow
+The install script is for Linux and macOS. On Windows, follow
 [Install by hand](by-hand.md) with Docker Desktop.

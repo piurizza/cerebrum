@@ -24,14 +24,26 @@ extra_javascript = ["assets/javascripts/vendor/mermaid.min.js"]
 
 nav = [
   { "Home" = "index.md" },
-  { "Quick start" = "quick-start.md" },
-  { "Install" = [
-    "install/index.md",
-    "install/docker.md",
-    "install/by-hand.md",
-    "install/phone.md",
-    "install/desktop.md",
-    "install/upgrade.md",
+  { "Get started" = [
+    "quick-start.md",
+    { "Install" = [
+      "install/index.md",
+      "install/docker.md",
+      "install/by-hand.md",
+      "install/phone.md",
+      "install/desktop.md",
+    ] },
+    { "Upgrade" = [
+      "install/upgrade.md",
+      { "Upgrade notes" = [
+        "upgrade/index.md",
+        "upgrade/0.5.0.md",
+        "upgrade/0.4.0.md",
+        "upgrade/0.3.0.md",
+        "upgrade/0.2.0.md",
+        "upgrade/0.1.0.md",
+      ] },
+    ] },
   ] },
   { "Features" = [
     "features/index.md",
@@ -62,36 +74,28 @@ nav = [
   { "Import" = [
     "import/index.md",
     "import/obsidian.md",
-    "import/notion.md",
-    "import/logseq.md",
-    "import/bear.md",
     "import/joplin.md",
-    "import/evernote.md",
+    "import/bear.md",
+    "import/logseq.md",
+    "import/notion.md",
     "import/apple-notes.md",
+    "import/evernote.md",
   ] },
   { "Help" = [
     "help/index.md",
     "help/faq.md",
     "help/troubleshooting.md",
   ] },
-  { "Upgrade notes" = [
-    "upgrade/index.md",
-    "upgrade/0.5.0.md",
-    "upgrade/0.4.0.md",
-    "upgrade/0.3.0.md",
-    "upgrade/0.2.0.md",
-    "upgrade/0.1.0.md",
-  ] },
   { "Reference" = [
     "reference/index.md",
     "reference/configuration.md",
     "reference/rest-api.md",
-  ] },
-  { "Development" = [
-    "development/index.md",
-    "development/architecture.md",
-    "development/testing.md",
-    "development/releases.md",
+    { "Development" = [
+      "development/index.md",
+      "development/architecture.md",
+      "development/testing.md",
+      "development/releases.md",
+    ] },
   ] },
 ]
 

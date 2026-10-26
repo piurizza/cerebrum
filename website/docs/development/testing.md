@@ -30,6 +30,11 @@ make check-docs-api    # REST API reference page vs the backend's schema
 
 When one fails, run the matching `generate-` target and commit the result.
 
+The [configuration reference](../reference/configuration.md) is checked too: a
+backend test fails when a variable is added to the code, a `.env.example`
+file, the Compose file or the install script without a row there, or when a
+Compose default differs from the backend's.
+
 ## End-to-end tests
 
 The Playwright tests in `frontend/e2e/` drive a real browser against a running

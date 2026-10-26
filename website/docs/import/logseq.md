@@ -40,7 +40,7 @@ as notes.
     ```
 
 - **Tags in the text,** such as `#garden`, aren't read; see
-  [Import](index.md#what-doesnt-yet).
+  [Import](index.md#what-doesnt-carry-over).
 - **Namespaced pages** such as `project/garden` are stored with an encoded
   file name, such as `project___garden.md`. A `[[project/garden]]` link looks
   for `project/garden.md`, so rename those files or their links.

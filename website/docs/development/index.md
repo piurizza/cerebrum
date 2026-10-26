@@ -36,6 +36,10 @@ make install
 This copies the `.env.example` files to `.env` for the backend, frontend and
 desktop app, installs dependencies, and installs the pre-commit hooks.
 
+Then set `AUTH_JWT_SECRET` and `AUTH_SETUP_TOKEN` in `backend/.env` to long
+random strings (`openssl rand -hex 32` makes one). For `make up`, also copy the
+root `.env.example` to `.env` and set the same two values there.
+
 ## Run it
 
 Without Docker, in two terminals:
@@ -87,7 +91,7 @@ site serves its own copy of Mermaid for diagrams, installed from
 `website/package-lock.json`.
 
 ```sh
-make docs-serve        # preview at http://localhost:8000, reloads on change
+make docs-serve        # preview at http://localhost:8001, reloads on change
 make docs-check        # strict build, no third-party requests, links resolve
 make docs-screenshots  # retake the screenshots from a demo vault (Docker, Node 22)
 ```

@@ -70,7 +70,7 @@ place, unresolved.
 - **File names with spaces.** A markdown link only counts when its target has
   no spaces: `[x](my-note.md)` works, but `[x](My Note.md)`,
   `[x](My%20Note.md)` and `[x](<My Note.md>)` are not followed. Wikilinks
-  such as `[[My Note]]` work with any name. Until this is fixed, prefer file
+  such as `[[My Note]]` work with any name. Prefer file
   names without spaces, or `CEREBRUM_LINK_FORMAT=wikilink`.
 - Links inside notes in hidden folders, such as `.trash/`, are not updated
   when the note they point at moves.

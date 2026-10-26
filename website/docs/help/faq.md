@@ -14,6 +14,9 @@ shows it when you come back to it or reload. On Docker Desktop for macOS or
 Windows, set `WATCHFILES_FORCE_POLLING=1`; see
 [Troubleshooting](troubleshooting.md#changes-made-outside-cerebrum-dont-show-up).
 
+If a sync tool or git covers the vault, exclude its `.cerebrum/` folder, which
+holds the accounts database; see [Security](../running/security.md#secrets).
+
 ## Can I stop using Cerebrum?
 
 Yes, with nothing to export: your notes are already markdown files, with
@@ -61,8 +64,12 @@ provider's terms apply to what it sends there.
 ## Can I use a different port?
 
 Yes: set `CEREBRUM_PORT` and `CEREBRUM_HTTPS_PORT` in `.env` and run
-`docker compose up -d`. If the phone app is installed, it belongs to the old
-address; install it again from the new one.
+`docker compose up -d`.
+
+- With Tailscale serve, also run `sudo tailscale serve --bg <new port>`. The
+  address your phone uses stays the same.
+- If your phone opens Cerebrum on an address that includes the port, that
+  address changes: install the app again from the new one.
 
 ## Is there a mobile app in the app stores?
 

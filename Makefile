@@ -90,7 +90,7 @@ docs-assets:
 		cp node_modules/mermaid/dist/mermaid.min.js docs/assets/javascripts/vendor/
 
 docs-serve: docs-assets
-	cd website && $(UV) run zensical serve
+	cd website && $(UV) run zensical serve --dev-addr localhost:8001
 
 docs-build: docs-assets
 	cd website && $(UV) sync --locked && $(UV) run zensical build --clean

@@ -627,7 +627,10 @@ history.
       ID token must be signed with an asymmetric algorithm the provider
       advertises, and its issuer, audience and expiry are checked. The
       redirect URI is built from the request's `Host` and
-      `X-Forwarded-Proto` (nginx sends both for `/api/auth/oidc/`), so
+      `X-Forwarded-Proto` (nginx sends both for `/api/auth/oidc/`; behind
+      an outer proxy that handles HTTPS, such as Tailscale serve or Caddy,
+      nginx passes on that proxy's `X-Forwarded-Proto` instead of its own
+      `http`), so
       every origin people use must be registered at the provider as an
       exact URI.
 - [x] (optional) `OIDC_ADMIN_GROUP` makes members of a provider group admins

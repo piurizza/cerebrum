@@ -10,6 +10,7 @@ import jwt
 import pytest
 from fastapi import FastAPI
 
+from cerebrum.accounts.oidc import flow_cookie_audience
 from cerebrum.accounts.tokens import create_api_token
 from cerebrum.auth import AuthenticationError, verify_credential
 from cerebrum.auth_db import connect, token_audience
@@ -266,3 +267,18 @@ def test_each_accounts_database_has_its_own_stable_audience(
     finally:
         for conn in (first, reopened, other):
             conn.close()
+
+
+def test_verify_credential_rejects_a_sign_in_flow_cookie(
+    auth_db: sqlite3.Connection,
+) -> None:
+    # Signed with the same secret, but for the sign-in flow, not access.
+    user_id = _insert_user(auth_db)
+    token = _mint_jwt(
+        auth_db,
+        user_id,
+        aud=flow_cookie_audience(token_audience(auth_db)),
+    )
+
+    with pytest.raises(AuthenticationError):
+        asyncio.run(verify_credential(token, auth_db))

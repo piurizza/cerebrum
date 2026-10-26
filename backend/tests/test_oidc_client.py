@@ -40,16 +40,23 @@ from tests.oidc_fake import (
 )
 
 _JWT_SECRET = "x" * 32
+_INSTANCE = "cerebrum:test-instance"
 
 
 def _start(intent: FlowIntent | None = None) -> oidc.FlowStart:
-    return asyncio.run(oidc.start_flow(REDIRECT_URI, intent or LoginIntent()))
+    return asyncio.run(
+        oidc.start_flow(REDIRECT_URI, intent or LoginIntent(), instance=_INSTANCE)
+    )
 
 
 def _run_flow(provider: FakeProvider, intent: FlowIntent | None = None) -> FlowResult:
     started = _start(intent)
     code, state = provider.authorize(started.authorization_url)
-    return asyncio.run(oidc.finish_flow(started.flow_cookie, state=state, code=code))
+    return asyncio.run(
+        oidc.finish_flow(
+            started.flow_cookie, state=state, code=code, instance=_INSTANCE
+        )
+    )
 
 
 def _refused(provider: FakeProvider) -> OidcError:
@@ -69,7 +76,7 @@ def _flow_claims(flow_cookie: str) -> dict[str, object]:
         flow_cookie,
         _JWT_SECRET,
         algorithms=["HS256"],
-        audience=oidc.FLOW_COOKIE_AUDIENCE,
+        audience=oidc.flow_cookie_audience(_INSTANCE),
     )
     return claims
 
@@ -123,7 +130,7 @@ def test_link_user_id_is_never_the_flow_cookie_subject() -> None:
 def test_flow_cookie_expires_after_ten_minutes() -> None:
     claims = _flow_claims(_start().flow_cookie)
 
-    assert claims["aud"] == "cerebrum-oidc-flow"
+    assert claims["aud"] == "cerebrum-oidc-flow:cerebrum:test-instance"
     assert isinstance(claims["exp"], int) and isinstance(claims["iat"], int)
     assert claims["exp"] - claims["iat"] == 600
 
@@ -158,7 +165,11 @@ def test_each_flow_gets_fresh_state_nonce_and_verifier() -> None:
 def test_token_request_carries_the_pkce_verifier(fake_provider: FakeProvider) -> None:
     started = _start()
     code, state = fake_provider.authorize(started.authorization_url)
-    asyncio.run(oidc.finish_flow(started.flow_cookie, state=state, code=code))
+    asyncio.run(
+        oidc.finish_flow(
+            started.flow_cookie, state=state, code=code, instance=_INSTANCE
+        )
+    )
     form = _token_form(fake_provider)
 
     assert form["grant_type"] == "authorization_code"
@@ -187,7 +198,11 @@ def test_state_mismatch_is_refused_as_expired(fake_provider: FakeProvider) -> No
     code, _state = fake_provider.authorize(started.authorization_url)
 
     with pytest.raises(OidcError) as excinfo:
-        asyncio.run(oidc.finish_flow(started.flow_cookie, state="forged", code=code))
+        asyncio.run(
+            oidc.finish_flow(
+                started.flow_cookie, state="forged", code=code, instance=_INSTANCE
+            )
+        )
 
     assert excinfo.value.code == "expired"
     assert not fake_provider.token_requests
@@ -215,7 +230,9 @@ def test_bad_flow_cookie_is_refused_as_expired(
     cookie = _resigned_flow_cookie(started.flow_cookie, secret, **changes)
 
     with pytest.raises(OidcError) as excinfo:
-        asyncio.run(oidc.finish_flow(cookie, state=state, code=code))
+        asyncio.run(
+            oidc.finish_flow(cookie, state=state, code=code, instance=_INSTANCE)
+        )
 
     assert excinfo.value.code == "expired"
     assert not fake_provider.token_requests
@@ -227,7 +244,9 @@ def test_missing_or_garbled_flow_cookie_is_refused_as_expired(
     cookie: str | None,
 ) -> None:
     with pytest.raises(OidcError) as excinfo:
-        asyncio.run(oidc.finish_flow(cookie, state="state", code="code"))
+        asyncio.run(
+            oidc.finish_flow(cookie, state="state", code="code", instance=_INSTANCE)
+        )
 
     assert excinfo.value.code == "expired"
 
@@ -239,7 +258,7 @@ def test_access_token_is_not_a_flow_cookie() -> None:
     )
 
     with pytest.raises(OidcError) as excinfo:
-        oidc.decode_flow_cookie(access_token)
+        oidc.decode_flow_cookie(access_token, instance=_INSTANCE)
 
     assert excinfo.value.code == "expired"
 
@@ -554,3 +573,24 @@ def test_module_has_no_web_framework_imports() -> None:
     assert not {
         name for name in imported if name.split(".")[0] in {"fastapi", "starlette"}
     }
+
+
+def test_flow_cookie_from_another_instance_is_refused(
+    fake_provider: FakeProvider,
+) -> None:
+    # Same AUTH_JWT_SECRET, another accounts database: another Cerebrum.
+    started = _start()
+    code, state = fake_provider.authorize(started.authorization_url)
+
+    with pytest.raises(OidcError) as excinfo:
+        asyncio.run(
+            oidc.finish_flow(
+                started.flow_cookie,
+                state=state,
+                code=code,
+                instance="cerebrum:another-instance",
+            )
+        )
+
+    assert excinfo.value.code == "expired"
+    assert not fake_provider.token_requests

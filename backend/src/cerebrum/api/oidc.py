@@ -59,6 +59,7 @@ from cerebrum.auth import (
     NotASessionError,
     verify_session_credential,
 )
+from cerebrum.auth_db import auth_write_lock, token_audience
 from cerebrum.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -220,6 +221,12 @@ async def _intent(
     return LoginIntent()
 
 
+def _instance(auth_db: sqlite3.Connection) -> str:
+    """This instance's audience, which the flow cookie is bound to."""
+    with auth_write_lock:
+        return token_audience(auth_db)
+
+
 @oidc_router.post("/start", response_model=OidcStartResponse)
 async def start(
     body: OidcStartRequest,
@@ -229,7 +236,9 @@ async def start(
 ) -> OidcStartResponse:
     intent = await _intent(body, request, auth_db)
     try:
-        started = await start_flow(_redirect_uri(request), intent)
+        started = await start_flow(
+            _redirect_uri(request), intent, instance=_instance(auth_db)
+        )
     except OidcError as exc:
         # Discovery failed; `accounts/oidc.py` has logged why.
         raise HTTPException(
@@ -288,7 +297,8 @@ async def callback(
     try:
         # First, so a failure for any later reason knows which page to go
         # back to.
-        intent = decode_flow_cookie(flow_cookie).intent
+        instance = _instance(auth_db)
+        intent = decode_flow_cookie(flow_cookie, instance=instance).intent
         if error is not None:
             # The provider's own text goes to the log, never into the URL.
             logger.info("OIDC provider returned error %r", error[:100])
@@ -296,7 +306,9 @@ async def callback(
         if code is None or state is None:
             logger.info("OIDC callback without a code or state")
             raise OidcError("provider_error")
-        result = await finish_flow(flow_cookie, state=state, code=code)
+        result = await finish_flow(
+            flow_cookie, state=state, code=code, instance=instance
+        )
         response = _complete(result, auth_db)
     except OidcError as exc:
         response = RedirectResponse(_failure_location(intent, exc.code), 303)

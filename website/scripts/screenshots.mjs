@@ -145,11 +145,17 @@ const readOnly = await assertDemoVault();
 const shots = SHOTS.filter((shot) => Boolean(shot.readOnly) === readOnly);
 mkdirSync(outDir, { recursive: true });
 const browser = await chromium.launch();
+// The docs show Cerebrum's dark theme, which the app picks from the
+// system's colour scheme when no theme is chosen in Settings.
 const contexts = {
-  desktop: await browser.newContext({ viewport: { width: 1280, height: 800 } }),
+  desktop: await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    colorScheme: "dark",
+  }),
   phone: await browser.newContext({
     ...devices["Pixel 7"],
     viewport: { width: 412, height: 915 },
+    colorScheme: "dark",
   }),
 };
 const pages = {};

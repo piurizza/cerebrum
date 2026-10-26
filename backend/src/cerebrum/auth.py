@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 
-from cerebrum.auth_db import auth_write_lock, hash_token
+from cerebrum.auth_db import auth_write_lock, hash_token, token_audience
 from cerebrum.settings import get_settings
 
 # `_verify_api_token()` records `last_used_at` on every successful use, but
@@ -117,10 +117,17 @@ async def _verify_access_token(credential: str, auth_db: sqlite3.Connection) -> 
     `AuthenticationError` for a valid one whose account is gone or
     inactive."""
     settings = get_settings()
+    with auth_write_lock:
+        audience = token_audience(auth_db)
+    # Expiry, audience and issue time are all required: a token without an
+    # expiry would never expire, and one without this instance's audience
+    # was issued by another Cerebrum.
     payload = jwt.decode(
         credential,
         settings.auth_jwt_secret.get_secret_value(),
         algorithms=["HS256"],
+        audience=audience,
+        options={"require": ["exp", "iat", "sub", "aud"]},
     )
 
     user_id = payload.get("sub")

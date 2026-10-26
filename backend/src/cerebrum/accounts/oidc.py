@@ -48,8 +48,19 @@ OidcErrorCode = Literal[
 FLOW_COOKIE_NAME = "oidc_flow"
 FLOW_COOKIE_MAX_AGE_SECONDS = 600
 # Distinguishes a flow cookie from an access token signed with the same
-# secret: access tokens carry no `aud`, so neither verifies as the other.
+# secret: each carries its own `aud`, so neither verifies as the other. The
+# instance's audience is appended (`flow_cookie_audience`), so a flow cookie
+# another Cerebrum issued -- one sharing AUTH_JWT_SECRET -- can't finish a
+# flow here, for example linking an identity to the account that has the
+# same number on this instance.
 FLOW_COOKIE_AUDIENCE = "cerebrum-oidc-flow"
+
+
+def flow_cookie_audience(instance: str) -> str:
+    """The flow cookie's audience on the instance whose access-token
+    audience is `instance` (`auth_db.token_audience`)."""
+    return f"{FLOW_COOKIE_AUDIENCE}:{instance}"
+
 
 HTTP_TIMEOUT_SECONDS = 10.0
 _METADATA_TTL_SECONDS = 3600.0
@@ -341,7 +352,17 @@ def _intent_claim(intent: FlowIntent) -> dict[str, Any]:
     return {"kind": "login"}
 
 
-async def start_flow(redirect_uri: str, intent: FlowIntent) -> FlowStart:
+def _scope(configured: str) -> str:
+    """The requested scopes, with `openid` always among them."""
+    scopes = configured.split()
+    if "openid" not in scopes:
+        scopes.insert(0, "openid")
+    return " ".join(scopes)
+
+
+async def start_flow(
+    redirect_uri: str, intent: FlowIntent, *, instance: str
+) -> FlowStart:
     """Begin a flow: the provider's authorization URL to send the browser
     to, and the signed flow-cookie value that remembers this flow until the
     callback. `redirect_uri` is built by the caller from the request's
@@ -356,15 +377,12 @@ async def start_flow(redirect_uri: str, intent: FlowIntent) -> FlowStart:
     nonce = secrets.token_urlsafe(32)
     code_verifier = secrets.token_urlsafe(64)
 
-    scopes = settings.oidc_scopes.split()
-    if "openid" not in scopes:
-        scopes.insert(0, "openid")
     query = urlencode(
         {
             "response_type": "code",
             "client_id": client_id,
             "redirect_uri": redirect_uri,
-            "scope": " ".join(scopes),
+            "scope": _scope(settings.oidc_scopes),
             "state": state,
             "nonce": nonce,
             "code_challenge": _pkce_challenge(code_verifier),
@@ -379,7 +397,7 @@ async def start_flow(redirect_uri: str, intent: FlowIntent) -> FlowStart:
     now = datetime.now(UTC)
     flow_cookie = jwt.encode(
         {
-            "aud": FLOW_COOKIE_AUDIENCE,
+            "aud": flow_cookie_audience(instance),
             "iat": now,
             "exp": now + timedelta(seconds=FLOW_COOKIE_MAX_AGE_SECONDS),
             "state": state,
@@ -420,7 +438,7 @@ def _parse_intent(claim: object) -> FlowIntent:
     raise ValueError(f"unrecognised intent {claim!r}")
 
 
-def decode_flow_cookie(value: str | None) -> FlowState:
+def decode_flow_cookie(value: str | None, *, instance: str) -> FlowState:
     """Verify and decode the flow cookie. A missing, expired, tampered or
     malformed cookie raises `OidcError("expired")`: to the user it is a
     flow that has to be started again.
@@ -435,7 +453,7 @@ def decode_flow_cookie(value: str | None) -> FlowState:
             value,
             get_settings().auth_jwt_secret.get_secret_value(),
             algorithms=["HS256"],
-            audience=FLOW_COOKIE_AUDIENCE,
+            audience=flow_cookie_audience(instance),
             options={"require": ["exp", "iat", "aud"]},
         )
         fields = {
@@ -641,12 +659,14 @@ def _display_name(claims: dict[str, Any]) -> str | None:
     return None
 
 
-async def finish_flow(flow_cookie: str | None, *, state: str, code: str) -> FlowResult:
+async def finish_flow(
+    flow_cookie: str | None, *, state: str, code: str, instance: str
+) -> FlowResult:
     """Turn the provider's callback into a verified identity: check the
     flow cookie and `state`, exchange `code`, and validate the ID token.
     Raises `OidcError`: `expired` for a cookie or `state` problem,
     `provider_error` for anything the provider got wrong."""
-    flow = decode_flow_cookie(flow_cookie)
+    flow = decode_flow_cookie(flow_cookie, instance=instance)
     # Constant-time, and over bytes: `compare_digest` refuses non-ASCII str.
     if not hmac.compare_digest(flow.state.encode(), state.encode()):
         logger.info("OIDC callback state does not match the flow cookie")

@@ -3,7 +3,7 @@ import type {
   CompletionContext,
   CompletionResult,
 } from "@codemirror/autocomplete";
-import { relativeLinkPath } from "../../lib/noteContent";
+import { formatLinkTarget, relativeLinkPath } from "../../lib/noteContent";
 import { vaultLinkFormat } from "../../lib/vaultSettings";
 import { isHiddenPath, NoteLookup } from "../../lib/wikilinks";
 import type { NoteMeta } from "../../types/note";
@@ -47,7 +47,7 @@ export function noteLinkCompletionSource(notes: NoteMeta[], currentPath: string)
       apply(view, _completion, from, to) {
         const linkText =
           (vaultLinkFormat() === "wikilink" && wikilinkTo(note, notes)) ||
-          `[${note.title}](${relativeLinkPath(currentPath, note.path)})`;
+          `[${note.title}](${formatLinkTarget(relativeLinkPath(currentPath, note.path))})`;
         const afterCursor = view.state.doc.sliceString(to, to + 2);
         const end = afterCursor === "]]" ? to + 2 : to;
         view.dispatch({

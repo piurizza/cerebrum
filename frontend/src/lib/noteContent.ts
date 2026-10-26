@@ -1,4 +1,45 @@
 const EXTERNAL_PREFIXES = ["http://", "https://", "mailto:", "#"];
+
+// Characters percent-encoded when the app writes a link target: the ones that
+// would end or break a markdown link destination. Accented letters and the
+// rest are written as they are. Mirrors `format_link_target` in
+// backend/src/cerebrum/notes/parser.py; both run the cases in
+// fixtures/markdown-link-targets.json.
+const ENCODED_IN_TARGETS = new Set([...' %()<>[]\\"']);
+
+/** A path written as a markdown link target, e.g. `My Note.md` as
+ * `My%20Note.md`, so the link still works when the name has spaces. */
+export function formatLinkTarget(path: string): string {
+  return [...path]
+    .map((char) =>
+      ENCODED_IN_TARGETS.has(char) || char.charCodeAt(0) < 0x20
+        ? [...new TextEncoder().encode(char)]
+            .map((byte) => `%${byte.toString(16).toUpperCase().padStart(2, "0")}`)
+            .join("")
+        : char,
+    )
+    .join("");
+}
+
+/** Decode the percent-escapes in a link target's path (`My%20Note.md`),
+ * leaving a stray `%` that isn't one (`50%off.md`) as written. */
+function decodeLinkPath(path: string): string {
+  return path.replace(/(?:%[0-9A-Fa-f]{2})+/g, (escapes) => {
+    try {
+      return decodeURIComponent(escapes);
+    } catch {
+      return escapes;
+    }
+  });
+}
+
+/** A link target as written, without the angle brackets markdown allows
+ * around one that holds spaces (`<My Note.md>`). */
+function unwrapTarget(target: string): string {
+  return target.startsWith("<") && target.endsWith(">")
+    ? target.slice(1, -1).trim()
+    : target;
+}
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
 /**
@@ -35,16 +76,17 @@ function normalizeRelativePath(sourcePath: string, target: string): string | nul
  * in-app navigation).
  */
 export function resolveLinkTarget(sourcePath: string, target: string): string | null {
-  if (EXTERNAL_PREFIXES.some((prefix) => target.startsWith(prefix))) {
+  const written = unwrapTarget(target);
+  if (EXTERNAL_PREFIXES.some((prefix) => written.startsWith(prefix))) {
     return null;
   }
 
-  const withoutHash = target.split("#")[0];
-  if (!withoutHash.endsWith(".md")) {
+  const path = decodeLinkPath(written.split("#")[0]);
+  if (!path.endsWith(".md")) {
     return null;
   }
 
-  return normalizeRelativePath(sourcePath, withoutHash);
+  return normalizeRelativePath(sourcePath, path);
 }
 
 /**
@@ -60,11 +102,12 @@ export function resolveAttachmentTarget(
   sourcePath: string,
   target: string,
 ): string | null {
-  if (EXTERNAL_PREFIXES.some((prefix) => target.startsWith(prefix))) {
+  const written = unwrapTarget(target);
+  if (EXTERNAL_PREFIXES.some((prefix) => written.startsWith(prefix))) {
     return null;
   }
 
-  return normalizeRelativePath(sourcePath, target);
+  return normalizeRelativePath(sourcePath, decodeLinkPath(written));
 }
 
 /** Strip the leading YAML frontmatter block, leaving just the note body. */

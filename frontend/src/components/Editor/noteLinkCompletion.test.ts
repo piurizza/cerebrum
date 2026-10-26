@@ -209,6 +209,13 @@ describe("noteLinkCompletionSource", () => {
       );
     });
 
+    it("writes a markdown link to a name with spaces so it still works", () => {
+      useLinkFormat("markdown");
+      expect(pick([makeNoteMeta("notes/My Plan (v2).md", "My Plan")], "My Plan")).toBe(
+        "[My Plan](My%20Plan%20%28v2%29.md)",
+      );
+    });
+
     it("treats an unknown stored format as markdown", () => {
       useLinkFormat("obsidian");
       expect(pick([makeNoteMeta("notes/b.md", "B")], "B")).toBe("[B](b.md)");

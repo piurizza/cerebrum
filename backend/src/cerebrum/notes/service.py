@@ -16,6 +16,7 @@ from cerebrum.attachments.service import (
 from cerebrum.notes.file_lock import file_lock
 from cerebrum.notes.models import Note
 from cerebrum.notes.parser import (
+    format_link_target,
     parse_note,
     rebase_links,
     render_note,
@@ -279,8 +280,18 @@ def _rebase_attachment_references(body: str, old_path: str, new_path: str) -> st
     new_stem = PurePosixPath(new_path).stem
     if old_stem == new_stem:
         return body
-    pattern = re.compile(rf"(?<![\w-]){re.escape(old_stem)}\.attachments/")
-    return pattern.sub(f"{new_stem}.attachments/", body)
+    # A stem with spaces or similar is written percent-encoded in a plain
+    # link and as it is in an angle-bracket one; each form is replaced by
+    # the new stem in the same form.
+    forms = {
+        old_stem: new_stem,
+        format_link_target(old_stem): format_link_target(new_stem),
+    }
+    for old_form, new_form in forms.items():
+        pattern = re.compile(rf"(?<![\w-]){re.escape(old_form)}\.attachments/")
+        # Backslashes doubled: `sub` reads them in the replacement as escapes.
+        body = pattern.sub(new_form.replace("\\", "\\\\") + ".attachments/", body)
+    return body
 
 
 def _rebase_own_links(

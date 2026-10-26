@@ -67,6 +67,17 @@ describe("MarkdownPreview", () => {
     expect(link).toHaveAttribute("href", "/notes/notes/b.md");
   });
 
+  it("links to a note whose name has spaces, written encoded or in angle brackets", () => {
+    renderPreview("[encoded](My%20Note.md) and [angled](<My Note.md>)", "notes/a.md");
+
+    for (const name of ["encoded", "angled"]) {
+      expect(screen.getByRole("link", { name })).toHaveAttribute(
+        "href",
+        "/notes/notes/My%20Note.md",
+      );
+    }
+  });
+
   it("renders an external link as a plain anchor with target=_blank and rel", () => {
     renderPreview("[example](https://example.com)");
 

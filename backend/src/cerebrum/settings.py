@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -88,6 +90,12 @@ class Settings(BaseSettings):
     # picker inserts and MCP tools ask agents to write. Both forms are
     # always read; this only picks which one gets written.
     cerebrum_link_format: Literal["markdown", "wikilink"] = "markdown"
+
+    # The IANA time zone (e.g. `Europe/Rome`) whose today the MCP task
+    # tools use when an assistant gives no date. Blank means the server's
+    # local zone, which in the Docker image is UTC. The web app always
+    # sends the device's own date instead.
+    cerebrum_timezone: str = ""
 
     # Sign-in through one OpenID Connect provider (Keycloak, Authentik,
     # Pocket ID, Google, ...). On when the issuer, client id and client
@@ -174,6 +182,24 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.strip().lower() or "markdown"
         return value
+
+    @field_validator("cerebrum_timezone")
+    @classmethod
+    def _require_known_timezone(cls, value: str) -> str:
+        """Trim surrounding spaces; blank means the local zone. A name
+        `zoneinfo` doesn't know fails startup, rather than the first task
+        an assistant ticks."""
+        name = value.strip()
+        if not name:
+            return ""
+        try:
+            ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(
+                "CEREBRUM_TIMEZONE must be an IANA time zone name like "
+                f"'Europe/Rome' or 'UTC', got {value!r}"
+            ) from exc
+        return name
 
     @field_validator(
         "oidc_issuer", "oidc_client_id", "oidc_client_secret", mode="before"
@@ -291,6 +317,12 @@ class Settings(BaseSettings):
             and self.oidc_client_id is not None
             and self.oidc_client_secret is not None
         )
+
+    def vault_date(self, moment: datetime) -> date:
+        """The day `moment` falls on in the vault's time zone."""
+        zone = ZoneInfo(self.cerebrum_timezone) if self.cerebrum_timezone else None
+        # `astimezone(None)` converts to the server's local zone.
+        return moment.astimezone(zone).date()
 
     @property
     def index_path(self) -> Path:

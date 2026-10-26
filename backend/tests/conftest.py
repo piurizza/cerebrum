@@ -54,11 +54,13 @@ def _state_paths_inside_test_vault(monkeypatch: pytest.MonkeyPatch) -> None:
     every test. A blank variable outranks backend/.env, so a developer's
     CEREBRUM_AUTH_DB_PATH (or one in the shell) can never point the suite at
     a real accounts database. Tests that need other paths set them again.
-    Read-only mode and the OpenID Connect provider are pinned off for the
-    same reason; `read_only_env` and `fake_provider` turn them back on."""
+    Read-only mode and the OpenID Connect provider are pinned off, and the
+    vault time zone to the local one, for the same reason; `read_only_env`
+    and `fake_provider` turn them back on."""
     monkeypatch.setenv("CEREBRUM_INDEX_PATH", "")
     monkeypatch.setenv("CEREBRUM_AUTH_DB_PATH", "")
     monkeypatch.setenv("CEREBRUM_VAULT_READ_ONLY", "false")
+    monkeypatch.setenv("CEREBRUM_TIMEZONE", "")
     pin_oidc_env_off(monkeypatch)
 
 

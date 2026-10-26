@@ -23,6 +23,7 @@ This is the one list of every variable.
 | `CEREBRUM_DAILY_NOTE_FOLDER` | `daily` | yes | Vault folder the **Today** button creates daily notes in. Applied on restart. |
 | `CEREBRUM_TEMPLATES_FOLDER` | `templates` | yes | Vault folder that holds note templates. Applied on restart. |
 | `CEREBRUM_LINK_FORMAT` | `markdown` | yes | `markdown` or `wikilink`: the link form the editor inserts and agents are asked to write. Both forms are always read. |
+| `CEREBRUM_TIMEZONE` | *(unset)* | yes | IANA time zone, such as `Europe/Rome`, whose today the MCP task tools use when an agent gives no date. Unset means the server's zone, which is UTC in Docker. The web app uses the device's date. |
 | `VITE_DAILY_NOTE_FOLDER` | *(unset)* | yes | Older name for `CEREBRUM_DAILY_NOTE_FOLDER`, still read as a fallback. |
 | `VITE_TEMPLATES_FOLDER` | *(unset)* | yes | Older name for `CEREBRUM_TEMPLATES_FOLDER`, still read as a fallback. |
 | `MAX_ATTACHMENT_SIZE_BYTES` | `10000000` | yes | Largest image, in bytes, that can be pasted into a note. In Docker, the bundled web server follows it. |

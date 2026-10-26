@@ -212,9 +212,9 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(
 
 CREATE TABLE tasks (
     source_path TEXT NOT NULL,
-    line        INTEGER NOT NULL,
+    line        INTEGER NOT NULL,   -- 1-based line in the raw file, frontmatter included
     checked     INTEGER NOT NULL,
-    text        TEXT NOT NULL,
+    text        TEXT NOT NULL,      -- after the checkbox, done marker included
     PRIMARY KEY (source_path, line)
 );
 CREATE INDEX idx_tasks_source ON tasks(source_path);
@@ -223,6 +223,14 @@ CREATE INDEX idx_tasks_source ON tasks(source_path);
 - `target_path` has **no foreign key** — broken links are valid data,
   validated in application code, not the schema.
 - `notes_fts` is scaffolded now; the search endpoint itself is future work.
+- `tasks.line` counts lines of the file as it is on disk, frontmatter
+  included, so it is the line a task write names. It used to count from the
+  body after the frontmatter; the indexer's schema backfill version (3)
+  forces one full rescan on upgrade to renumber existing rows.
+- A ticked task's done date is the `✅ YYYY-MM-DD` marker the Obsidian Tasks
+  plugin writes at the end of the line (before any `^block-id`). It stays in
+  `tasks.text`; `tasks/markers.py` is the one place that reads or writes it,
+  and the task routes return it split out as `done_date`.
 
 **Rebuild strategy:** full vault rescan (walk, skipping hidden folders and
 out-of-vault symlinks, hash, upsert changed rows, delete rows for removed
@@ -242,14 +250,17 @@ All endpoints under `/api`.
 |---|---|---|
 | GET | `/api/health` | Liveness + vault-path reachability |
 | GET | `/api/notes` | List notes (path, title, tags, updated) from the index |
-| GET | `/api/notes/{path:path}` | Fetch one note: raw markdown + parsed metadata |
-| PUT | `/api/notes/{path:path}` | Create or update a note (body = raw markdown) |
+| GET | `/api/notes/{path:path}` | Fetch one note: raw markdown + parsed metadata + `version` (sha256 of the file's bytes on disk) |
+| PUT | `/api/notes/{path:path}` | Create or update a note (body = raw markdown). Optional conditions, checked under the same per-file lock as the write: `X-Base-Version: <version>` refuses with 412 if the file changed or was deleted since that version was loaded; `X-Create-Only: 1` refuses with 412 if a note already exists. Custom headers rather than `If-Match`/`If-None-Match`, which nginx's not-modified filter evaluates itself. Without them, the save is unconditional as before |
 | DELETE | `/api/notes/{path:path}` | Delete a note file + its index rows |
 | POST | `/api/notes/{path:path}/move` | Relocate a note and/or rename its title (`{"new_path": "...", "title": "..."}` body, `title` optional) and rewrite every note's links that pointed at it (markdown links always, wikilinks only where they would stop resolving to it -- see [Wikilinks](#wikilinks); a move into a hidden folder such as `.trash/` leaves both kinds as written, so they work again once the note is restored); `new_path` may equal the current path for a title-only rename; 404 if source missing, 409 if destination exists |
 | GET | `/api/graph` | `{ nodes: [{path, title}], edges: [{source, target}] }` |
 | GET | `/api/notes/{path:path}/backlinks` | Notes that link to this note |
 | GET | `/api/search?q=...` | Full-text search over title + body via `notes_fts`; each word in `q` is an AND-ed prefix term, ranked by `bm25`. `#tag` keeps notes carrying that tag or one nested under it (`#work` matches `work/clientA`, not `workshop`), `-#tag` drops them, `#"two words"` quotes a tag with a space; tags ignore case and must all match. A `#` only starts a tag at the start of `q` or after a space, and a tag needs more than digits (`issue #42` stays words, as in Obsidian). With tags but no words, every note carrying them is listed by path. Empty/whitespace `q` returns `[]` |
-| GET | `/api/tasks` | Every open (unchecked) markdown checkbox across the vault, joined with its note's title, ordered by note path then line; read-only |
+| GET | `/api/tasks` | Every open (unchecked) markdown checkbox across the vault, with its note's title and tags, ordered by note path then line. Each item: `path`, `title`, `tags`, `line` (file line), `text` (without the done marker), `done`, `done_date`. Notes under the templates folder are left out |
+| GET | `/api/tasks/done?since=YYYY-MM-DD` | Ticked tasks whose done marker is dated `since` or later, newest date first, then by path and line; same item shape. A task ticked without a marker isn't listed. Templates are left out |
+| POST | `/api/tasks` | `{ text, date, heading? }` → 201 `{ note, task }`: appends `- [ ] <text>` to the daily note for `date` (the client's today), creating it with `# <heading>` (an English long date when omitted) if missing. The rest of the file is left byte for byte. Text is put on one line; empty text is 422, and a note ending inside an open code block is 409 |
+| POST | `/api/tasks/done` | `{ path, line, text, done, date? }` → `{ note, task }`: ticks the task on that file line with `✅ <date>` (`date` required to tick) or unticks it, removing the marker. Only that line changes; frontmatter and `updated` are left alone. 409 if the line no longer holds a task with that text (the task is never searched for elsewhere), 404 if the note is gone; either way nothing is written and the note's index rows are refreshed. A task already in the asked-for state is left as it is |
 | GET | `/api/vault-settings` | `{ daily_note_folder, templates_folder, link_format, read_only }` -- the server's vault conventions (see `CEREBRUM_DAILY_NOTE_FOLDER` / `CEREBRUM_TEMPLATES_FOLDER` / `CEREBRUM_LINK_FORMAT` below); the web app loads it on start and on login and keeps the last copy for offline use |
 | POST | `/api/attachments?note_path=...` | Upload a pasted image (raw bytes) into the note's `<stem>.attachments/` folder |
 | GET | `/api/attachments/{path:path}` | Serve a file inside a `*.attachments/` folder, or an image (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) anywhere in the vault outside hidden folders. Checked after symlinks are resolved, so nothing under `.cerebrum/` (the accounts database, the index) or any other hidden folder, and no non-image file outside `*.attachments/`, is ever served |
@@ -265,7 +276,7 @@ Sign-in routes live outside the authenticated API (no bearer token needed unless
 | GET | `/api/account/identity` | `{ linked, provider_name, display_name, has_password, password_usable }` for the caller (authenticated) |
 | DELETE | `/api/account/identity` | Unlink the caller's provider identity; 409 when their password can't sign them in, since unlinking would lock them out |
 
-In read-only mode (`CEREBRUM_VAULT_READ_ONLY`) the four vault-writing routes -- `PUT` and `DELETE /api/notes/{path}`, `POST /api/notes/{path}/move` and `POST /api/attachments` -- answer 403 "This vault is read-only" (the upload before its body is read). Account, token and admin routes keep working: they write the accounts database, not the vault.
+In read-only mode (`CEREBRUM_VAULT_READ_ONLY`) the vault-writing routes -- `PUT` and `DELETE /api/notes/{path}`, `POST /api/notes/{path}/move`, `POST /api/attachments`, `POST /api/tasks` and `POST /api/tasks/done` -- answer 403 "This vault is read-only" (the upload before its body is read). Account, token and admin routes keep working: they write the accounts database, not the vault.
 
 The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated with a personal API token:
 
@@ -281,8 +292,13 @@ The MCP server at `/api/mcp/` exposes the same vault as tools, authenticated wit
 | `append-to-note` | Add markdown at the end of an existing note, keeping the rest |
 | `edit-note` | Replace one passage (`old_text` must match exactly once, frontmatter included) |
 | `delete-note` | Delete a note and its attachments folder; links to it stay, as unresolved links |
+| `list-tasks` | Open tasks, or (`status: "done"`) tasks ticked in the last `days` days (default 14); filtered by `tags` (`-tag` excludes, nested tags match), `folder` (subfolders included) and `text` (all words), cut to `limit`, with the `total` before the cut. Each task carries its `path`, `line`, `text` and `done_date` |
+| `add-task` | Append a task to the daily note for `date` (optional), creating the note with an English heading (`# Monday, 26 October 2026`) if missing |
+| `set-task-done` | Tick (`done: true`, done marker for `date`) or untick the task at `path` + `line` whose text is `text`, as `list-tasks` returned them; fails without writing if the line changed |
 
-In read-only mode only the read tools (`list-notes`, `get-note`, `search-notes`, `get-graph`, `get-backlinks`) are registered, so `tools/list` shows exactly those. A client holding a tool list from before the switch gets "Unknown tool" for the others.
+The task tools take an optional strict `date` (`YYYY-MM-DD`). Without it they use today in `CEREBRUM_TIMEZONE` (an IANA name validated with `zoneinfo` at startup; blank means the server's zone, UTC in the Docker image), and results echo the `date_used`. The web app never relies on this: it sends the device's local date.
+
+In read-only mode only the read tools (`list-notes`, `get-note`, `search-notes`, `get-graph`, `get-backlinks`, `list-tasks`) are registered, so `tools/list` shows exactly those. A client holding a tool list from before the switch gets "Unknown tool" for the others.
 
 `append-to-note` and `edit-note` read and write under the same per-file lock (`modify_note` in `notes/service.py`), so a concurrent write to the same note can't be lost between the read and the write; a client calling `get-note` and then `update-note` has no such guarantee.
 
@@ -316,7 +332,8 @@ API calls.
 - **hatchling** as the PEP 517 build backend
 - New, not present in interview-blueprint: **FastAPI** + **uvicorn** (API
   layer), **python-frontmatter** (frontmatter parsing), **httpx** (for
-  FastAPI's `TestClient` in tests)
+  FastAPI's `TestClient` in tests), **tzdata** (so `CEREBRUM_TIMEZONE`
+  validates without the image's system time zone files)
 
 ### Frontend — React + TypeScript
 
@@ -349,6 +366,8 @@ API calls.
   handling out of the box. Canvas rendering scales to hundreds of nodes
   far better than an SVG-per-node approach, where every node/edge is a DOM
   element.
+- **node-diff3** for the editor's three-way line merge when a save finds
+  the note changed since it was loaded (`lib/mergeNote.ts`).
 - **Biome** for lint + format — one fast tool/config, mirroring ruff's
   role on the backend rather than combining ESLint + Prettier.
 - A thin `fetch`-based API client; no data-fetching library yet (see
@@ -457,7 +476,16 @@ reason.
 ### Note management
 
 - view/read a note
-- edit a note's content and save changes
+- edit a note's content and save changes -- every save from the
+      editor sends the `version` it loaded (`X-Base-Version`). When the
+      note changed elsewhere since (another device, a tick from the task
+      list, an MCP client, a file edited on disk), the editor merges the
+      two versions line by line and saves the result, so changes to other
+      lines, such as a task appended to a daily note, are kept. When both
+      touched the same lines, a dialog offers **Reload** (open the note as
+      it is now; the unsaved text stays on screen to copy) or **Keep
+      mine** (save over it). The Today button creates a missing daily note
+      with `X-Create-Only`, so it never overwrites one created elsewhere.
 - create a new note (pick a title/path, start writing) -- both note
       creation and rename/move use a shared folder-picker modal
       (`FolderPickerModal`) instead of a raw text path field: it lists
@@ -722,16 +750,44 @@ how consistently each was cited as high-value across that research.
       **Known trade-off:** template notes are ordinary vault notes with no
       exclusion mechanism, so they currently appear like any other note in
       search, tags, the sidebar tree, the Graph view, Backlinks, and MCP
-      tools. Obsidian's Templater is consistently the top-cited
-      "must-have" plugin in the research this item is sourced from.
-- a cross-vault task view -- the `/tasks` page aggregates every open
-      markdown checkbox (`- [ ]`/`* [ ]`/`+ [ ]`) across the vault into
-      one list, grouped by note, mirroring Obsidian's Tasks/Dataview-
-      query pattern. Extraction skips checkbox-shaped text inside a
-      fenced code block (documentation/example content, not a real
-      task). Read-only: clicking a task or its note's heading opens the
-      note as a whole, not the exact line -- no toggle-from-the-list, no
-      line-jump (see [Known gaps](#10-known-gaps--future-work)).
+      tools. The task lists are the exception: they leave the templates
+      folder out, since templates hold example checkboxes. Obsidian's
+      Templater is consistently the top-cited "must-have" plugin in the
+      research this item is sourced from.
+- a working task list -- the `/tasks` page gathers every markdown
+      checkbox (`- [ ]`/`* [ ]`/`+ [ ]`) across the vault, mirroring
+      Obsidian's Tasks/Dataview-query pattern. Extraction skips
+      checkbox-shaped text inside a fenced code block, and the lists
+      leave out notes under the templates folder. On it you can:
+      - add a task: an add box appends `- [ ] <text>` to today's daily
+        note (the browser's local day, as for the Today button), creating
+        the note if missing. A task added during the visit stays listed,
+        marked "Outside the current filters", when the filters would
+        hide it.
+      - tick and untick: a checkbox per task writes or removes a
+        `✅ YYYY-MM-DD` done marker (the Obsidian Tasks plugin's format,
+        dated by the browser's local day) on that one line only, through
+        `POST /api/tasks/done`. The row stays with **Undo** for 5 s. A
+        line that no longer holds the task is refused: nothing is
+        written, the user is told, and the list reloads.
+      - switch between **Open** (grouped by note) and **Done** (tasks
+        ticked in the last 14 days, newest first, grouped by day). A
+        task ticked without a marker (typed `[x]`) has no date and isn't
+        in Done.
+      - filter both lists by the shared tag selection (chips with
+        Clear, the same selection as the front page and the search box),
+        a folder (subfolders included) and words in the task text; all
+        applied in the browser.
+      - read the task text as inline markdown, and open a task at its
+        line: `/notes/<path>?line=N` scrolls the preview to it and
+        highlights it while that line still holds a task, and otherwise
+        opens the note at the top with a notice.
+      The add box and checkboxes are disabled offline and hidden on a
+      read-only vault; the last loaded lists stay readable offline (the
+      vault sync caches both). The lists refetch when the window returns
+      to the foreground. Checkboxes in a note's preview tick and untick
+      the same way, while the note has no unsaved edits ("Save first"
+      otherwise).
 - **Not built:** AI-assisted features -- auto-linking, semantic search, or Q&A over
       the vault. The clearest 2026 industry differentiator (Tana, Mem,
       Reflect), but a materially bigger strategic bet than the three
@@ -841,18 +897,14 @@ how consistently each was cited as high-value across that research.
 - **`npm audit` flags a high-severity advisory in `react-router`** (RSC-mode
   CSRF bypass). Not applicable here — this app uses plain client-side
   routing, not React Router's RSC/framework mode. Revisit if that changes.
-- **The cross-vault task view (`/tasks`) is deliberately narrow.** No
-  toggle-from-the-list (checking a task off still requires editing its
-  note), no jump-to-the-exact-line (clicking opens the whole note), no
-  hierarchical/nested sub-task grouping by indentation, no filtering or
-  sorting by tag/folder/due date (no due-date syntax exists in this
-  product yet), and no "recently completed" view (checked tasks are
-  captured in the index for a future pass, but nothing surfaces them
-  today). Template notes (see above) commonly document example checkbox
-  syntax, which appears in `/tasks` indistinguishably from a real task
-  unless it's fenced as a code block — the same appears-everywhere
-  trade-off already noted for templates, extended here rather than
-  given its own exclusion mechanism.
+- **The task list (`/tasks`) has no due dates, priorities or repeating
+  tasks**; that is a later area, not this one. Sub-tasks are listed one by
+  one, not grouped under their parent by indentation. Adding and ticking
+  need a connection to the server (offline, the lists are read-only). A task
+  ticked by typing `[x]` without a done marker has no date, so the Done tab
+  doesn't list it. Notes under the templates folder are left out of both
+  lists, but example checkboxes written outside it and outside a code block
+  still show up as tasks.
 - **The desktop app (`desktop/`) is personal-use scope.** The release
   workflow builds a `.deb`, an `.rpm`, a universal `.dmg` and a Windows
   setup `.exe` and attaches them to each GitHub Release, with build

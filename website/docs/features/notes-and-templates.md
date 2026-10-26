@@ -8,6 +8,12 @@ A note opens as a rendered preview. Choose **Edit** to change it, then
 **Save**, or press ++ctrl+s++ (++cmd+s++ on a Mac) from anywhere on the page.
 "Unsaved changes" under the editor tells you when there is something to save.
 
+If the note was changed somewhere else while you were editing, on another
+device or by an assistant, saving keeps both: changes to other lines are
+merged in. When both touched the same lines, Cerebrum asks. **Reload** opens
+the note as it is now and leaves your text on screen to copy; **Keep mine**
+saves your version over it.
+
 The preview understands standard markdown with tables, task lists and
 strikethrough, plus:
 
@@ -66,5 +72,5 @@ start: every note in it becomes a template.
 
 - Template placeholders such as `{{date}}` are not filled in; the text is
   copied as it is.
-- Templates are normal notes, so they also show up in search, tags, the graph
-  and tasks.
+- Templates are normal notes, so they also show up in search, tags and the
+  graph. Their checkboxes are left out of [Tasks](tasks.md).

@@ -1,8 +1,11 @@
 """Write the demo vault the documentation's screenshots are taken from.
 
 Every note is invented for the docs: generic topics, no real people, no
-quoted or copied text. The output is identical on every run, so screenshots
-can be regenerated after a UI change without the content shifting.
+quoted or copied text. The output is identical on every run on the same day,
+so screenshots can be regenerated after a UI change without the content
+shifting. Only the done dates of ticked tasks follow the day it runs (see
+`_done`), so the Tasks page's Done tab, which lists the last 14 days, always
+has something to show.
 
 Never point this at a real vault: it refuses a folder that is not empty.
 
@@ -11,14 +14,26 @@ Usage: make_demo_vault.py <empty-or-missing-folder>
 
 from __future__ import annotations
 
+import re
 import struct
 import sys
 import zlib
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 
 # Its presence tells the screenshot script it is looking at this vault.
 SENTINEL_PATH = "about-this-demo-vault.md"
+
+# Stands for a day counted back from the day the vault is built, filled in
+# when a note is written.
+_DAYS_AGO = re.compile(r"<days-ago:(\d+)>")
+
+
+def _done(days_ago: int) -> str:
+    """A done marker, as the Tasks page writes one when a task is ticked,
+    dated `days_ago` days before the day the vault is built."""
+    return f"✅ <days-ago:{days_ago}>"
 
 
 @dataclass(frozen=True)
@@ -223,7 +238,7 @@ NOTES: tuple[Note, ...] = (
         "Reading list",
         ("reading",),
         "2026-10-23",
-        "# Reading list\n\n- [x] [[the-quiet-orchard]]\n"
+        f"# Reading list\n\n- [x] [[the-quiet-orchard]] {_done(1)}\n"
         "- [x] [[maps-of-small-rivers]]\n"
         "- [ ] [[a-year-of-bread]]\n- [ ] [[the-lighthouse-keepers-garden]]\n"
         "- [ ] [[notes-on-slow-travel]]\n",
@@ -283,7 +298,7 @@ NOTES: tuple[Note, ...] = (
         ("travel", "travel/2026"),
         "2026-10-22",
         "# Coast trip\n\nThree days by the sea in November.\n\n## Packing\n\n"
-        "- [x] Rain jacket\n- [ ] Walking boots\n"
+        f"- [x] Rain jacket {_done(1)}\n- [ ] Walking boots\n"
         "- [ ] Book: [[notes-on-slow-travel]]\n",
     ),
     Note(
@@ -309,7 +324,8 @@ NOTES: tuple[Note, ...] = (
         ("learning/languages", "spanish"),
         "2026-10-24",
         "# Spanish verbs\n\n| Verb | Meaning |\n|---|---|\n| hablar | to speak |\n"
-        "| comer | to eat |\n| vivir | to live |\n\n- [ ] Practise ten minutes a day\n",
+        "| comer | to eat |\n| vivir | to live |\n\n- [ ] Practise ten minutes a day\n"
+        f"- [x] Learn the present tense endings {_done(0)}\n",
     ),
     Note(
         "learning/docker-notes.md",
@@ -343,7 +359,7 @@ NOTES: tuple[Note, ...] = (
         "2026-10-21T15:00:00+00:00",
         "# Q4 planning\n\n## Decisions\n\n- Redesign the website: "
         "[[website-redesign]]\n- Move the weekly review to Fridays\n\n## Actions\n\n"
-        "- [ ] Share the plan with the team\n- [x] Book the next meeting\n",
+        f"- [ ] Share the plan with the team\n- [x] Book the next meeting {_done(6)}\n",
     ),
     Note(
         "work/weekly-review.md",
@@ -358,7 +374,8 @@ NOTES: tuple[Note, ...] = (
         "Onboarding checklist",
         ("work", "work/planning"),
         "2026-09-12",
-        "# Onboarding checklist\n\n- [x] Laptop ready\n- [x] Accounts created\n"
+        "# Onboarding checklist\n\n- [x] Laptop ready\n"
+        f"- [x] Accounts created {_done(9)}\n"
         "- [ ] Walk through the [[ideas-backlog]]\n",
     ),
     Note(
@@ -376,7 +393,7 @@ NOTES: tuple[Note, ...] = (
         ("garden",),
         "2026-08-30",
         "# Tomatoes\n\nSix plants this year; the cherry variety did best.\n\n"
-        "- [x] Save seeds\n- [ ] Clear the bed before winter\n",
+        f"- [x] Save seeds {_done(5)}\n- [ ] Clear the bed before winter\n",
     ),
     Note(
         "garden/herbs.md",
@@ -391,14 +408,16 @@ NOTES: tuple[Note, ...] = (
         "Compost",
         ("garden", "project/garden"),
         "2026-10-02",
-        "# Compost\n\nTurn the heap every two weeks. Next to the [[garden-shed]].\n",
+        "# Compost\n\nTurn the heap every two weeks. Next to the [[garden-shed]].\n\n"
+        "- [ ] Turn the heap on Saturday\n- [ ] Buy a second bin\n",
     ),
     Note(
         "home/repairs.md",
         "Repairs",
         ("home",),
         "2026-10-13",
-        "# Repairs\n\n- [ ] Fix the dripping tap\n- [x] Replace the hall light\n"
+        "# Repairs\n\n- [ ] Fix the dripping tap\n"
+        f"- [x] Replace the hall light {_done(2)}\n"
         "- [ ] Oil the gate\n",
     ),
     # Health, finance, music, inbox
@@ -423,7 +442,7 @@ NOTES: tuple[Note, ...] = (
         "Budget 2026",
         ("finance", "finance/planning"),
         "2026-10-01",
-        "# Budget 2026\n\n- [x] Set the monthly savings goal\n- [ ] Review "
+        f"# Budget 2026\n\n- [x] Set the monthly savings goal {_done(3)}\n- [ ] Review "
         "subscriptions\n\nTrip money for the [[coast-trip]].\n",
     ),
     Note(
@@ -431,7 +450,8 @@ NOTES: tuple[Note, ...] = (
         "Guitar practice",
         ("music",),
         "2026-10-17",
-        "# Guitar practice\n\n- [x] Chord changes, five minutes\n- [ ] Learn a new "
+        f"# Guitar practice\n\n- [x] Chord changes, five minutes {_done(0)}\n"
+        "- [ ] Learn a new "
         "strumming pattern\n",
     ),
     Note(
@@ -476,7 +496,7 @@ NOTES: tuple[Note, ...] = (
         ("inbox",),
         "2026-09-20",
         "# Movies to watch\n\n- [ ] Something with mountains\n- [x] A comedy for "
-        "Friday night\n",
+        f"Friday night {_done(3)}\n",
     ),
     # Daily notes
     _daily(
@@ -489,10 +509,10 @@ NOTES: tuple[Note, ...] = (
         "Updated [[coast-trip]].",
     ),
     _daily(23, "- [ ] Finish [[the-quiet-orchard]]", "Quiet day."),
-    _daily(24, "- [x] Weekly review", "See [[weekly-review]]."),
+    _daily(24, f"- [x] Weekly review {_done(2)}", "See [[weekly-review]]."),
     _daily(
         25,
-        "- [x] Long run, 8 km\n- [ ] Order timber for the shed",
+        f"- [x] Long run, 8 km {_done(1)}\n- [ ] Order timber for the shed",
         "Logged in [[running-log]].",
     ),
     _daily(
@@ -525,8 +545,10 @@ NOTES: tuple[Note, ...] = (
 )
 
 
-def _render(note: Note) -> str:
-    body = note.body
+def _render(note: Note, today: date) -> str:
+    body = _DAYS_AGO.sub(
+        lambda days: (today - timedelta(days=int(days[1]))).isoformat(), note.body
+    )
     extra = ""
     if body.startswith("---DEMO---\n"):
         body = body.removeprefix("---DEMO---\n")
@@ -538,13 +560,16 @@ def _render(note: Note) -> str:
     )
 
 
-def build_vault(target: Path) -> None:
+def build_vault(target: Path, today: date | None = None) -> None:
+    """Write the vault into `target`, with done dates counted back from
+    `today` (the local date when not given)."""
     if target.exists() and any(target.iterdir()):
         raise SystemExit(f"refusing to write into {target}: it is not empty")
+    day = today or date.today()
     for note in NOTES:
         path = target / note.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_render(note), encoding="utf-8")
+        path.write_text(_render(note, day), encoding="utf-8")
         for image in note.images:
             image_path = path.parent / image
             image_path.parent.mkdir(parents=True, exist_ok=True)

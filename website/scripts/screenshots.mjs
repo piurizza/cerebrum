@@ -64,6 +64,16 @@ const SHOTS = [
   },
   { name: "graph", path: "/graph" },
   { name: "tasks", path: "/tasks" },
+  {
+    name: "tasks-done",
+    path: "/tasks",
+    prepare: async (page) => {
+      // The demo vault dates its ticked tasks back from the day it was
+      // built, so the Done tab opens on today's.
+      await page.getByRole("tab", { name: "Done" }).click();
+      await page.getByRole("heading", { name: "Today" }).waitFor();
+    },
+  },
   { name: "phone-note", path: "/notes/recipes/lentil-soup.md", phone: true },
   {
     name: "phone-drawer",

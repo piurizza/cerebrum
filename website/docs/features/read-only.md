@@ -9,7 +9,8 @@ browse it.
 What you see:
 
 - a "This vault is read-only" banner;
-- no **Today**, **+ New note**, **Edit**, **Rename** or **Delete**;
+- no **Today**, **+ New note**, **Edit**, **Rename** or **Delete**, and no
+  way to add or tick tasks;
 - search, tags, the graph, tasks and backlinks work as usual;
 - your account, password and API tokens work as usual.
 

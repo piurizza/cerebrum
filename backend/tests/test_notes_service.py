@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -10,8 +11,10 @@ from cerebrum.notes.service import (
     InvalidNotePathError,
     NoteAlreadyExistsError,
     NoteNotFoundError,
+    NoteVersionConflictError,
     delete_note,
     iter_note_paths,
+    modify_note,
     move_note,
     read_note,
     retarget_note_links,
@@ -717,3 +720,92 @@ def test_rewrite_never_writes_a_target_a_wikilink_cannot_hold(vault: Path) -> No
     move_note(vault, "A/Spec.md", "C#/Spec.md")
 
     assert "See [[A/Spec]]." in read_note(vault, "Index.md").content
+
+
+def _disk_version(vault: Path, path: str) -> str:
+    return hashlib.sha256((vault / path).read_bytes()).hexdigest()
+
+
+def test_read_note_version_is_the_sha256_of_the_raw_file(vault: Path) -> None:
+    (vault / "note.md").write_bytes(b"---\ntitle: A\n---\nBody.\n")
+
+    note = read_note(vault, "note.md")
+
+    assert note.version == _disk_version(vault, "note.md")
+
+
+def test_read_note_version_hashes_crlf_and_lone_cr_bytes_as_they_are(
+    vault: Path,
+) -> None:
+    # The content still reads with universal newlines, as before; only the
+    # version sees the bytes exactly as they sit on disk.
+    (vault / "note.md").write_bytes(b"line one\r\nline two\rline three\n")
+
+    note = read_note(vault, "note.md")
+
+    assert note.content == "line one\nline two\nline three\n"
+    assert note.version == _disk_version(vault, "note.md")
+    assert note.version != hashlib.sha256(note.content.encode()).hexdigest()
+
+
+def test_read_note_version_changes_when_the_file_changes(vault: Path) -> None:
+    (vault / "note.md").write_text("first", encoding="utf-8")
+    before = read_note(vault, "note.md").version
+
+    (vault / "note.md").write_text("second", encoding="utf-8")
+
+    assert read_note(vault, "note.md").version != before
+
+
+def test_every_returned_note_carries_the_version_of_its_file(vault: Path) -> None:
+    written = write_note(vault, "a.md", "See [B](b.md).")
+    assert written.version == _disk_version(vault, "a.md")
+    write_note(vault, "b.md", "bravo")
+
+    modified = modify_note(vault, "a.md", lambda raw: raw + "\nMore.\n")
+    assert modified.version == _disk_version(vault, "a.md")
+
+    moved, _ = move_note(vault, "a.md", "folder/a.md")
+    assert moved.version == _disk_version(vault, "folder/a.md")
+
+    retitled, _ = move_note(vault, "folder/a.md", "folder/a.md", title="Renamed")
+    assert retitled.version == _disk_version(vault, "folder/a.md")
+
+    (vault / "folder" / "a.md").rename(vault / "a.md")
+    retargeted, _ = retarget_note_links(vault, "folder/a.md", "a.md")
+    assert retargeted.version == _disk_version(vault, "a.md")
+
+
+def test_write_note_with_the_current_version_saves(vault: Path) -> None:
+    loaded = write_note(vault, "note.md", "first")
+
+    saved = write_note(vault, "note.md", "second", expected_version=loaded.version)
+
+    assert "second" in read_note(vault, "note.md").content
+    assert saved.version != loaded.version
+    assert saved.version == _disk_version(vault, "note.md")
+
+
+def test_write_note_with_a_stale_version_raises_and_leaves_the_file(
+    vault: Path,
+) -> None:
+    loaded = write_note(vault, "note.md", "first")
+    write_note(vault, "note.md", "changed elsewhere")
+    on_disk = (vault / "note.md").read_bytes()
+
+    with pytest.raises(NoteVersionConflictError):
+        write_note(vault, "note.md", "mine", expected_version=loaded.version)
+
+    assert (vault / "note.md").read_bytes() == on_disk
+
+
+def test_write_note_with_a_version_for_a_missing_note_raises_without_creating(
+    vault: Path,
+) -> None:
+    loaded = write_note(vault, "note.md", "first")
+    delete_note(vault, "note.md")
+
+    with pytest.raises(NoteVersionConflictError):
+        write_note(vault, "note.md", "mine", expected_version=loaded.version)
+
+    assert not (vault / "note.md").exists()

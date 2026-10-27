@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 import frontmatter
 import yaml
 
-from cerebrum.notes.code_regions import code_ranges, iter_lines_with_fence_state
+from cerebrum.notes.code_regions import code_ranges, fence_states
 from cerebrum.notes.models import (
     ParsedLink,
     ParsedNote,
@@ -175,19 +175,57 @@ def extract_note_wikilinks(body: str) -> list[ParsedWikilink]:
     ]
 
 
-def extract_tasks(body: str) -> list[ParsedTask]:
-    """Extract every open/closed markdown checkbox line from `body`,
-    skipping any that fall inside a fenced (```/~~~) code block -- a note
-    can legitimately document checkbox syntax as an example, and that
-    example text is not a real task. See `iter_lines_with_fence_state`
-    for the fence-matching rules.
+def _first_body_line(raw_content: str) -> int:
+    """The 1-based file line the body starts on: 1 without frontmatter,
+    else the line after the frontmatter's closing boundary.
+
+    Finds the block exactly as python-frontmatter does when `parse_note`
+    loads the note -- same handlers, same boundary patterns, on the same
+    normalized and stripped text -- so the lines skipped here are the
+    ones `parse_note` reads as metadata. Its normalizing turns `\r\n`
+    into `\n` and its strip drops leading blank lines, so the count adds
+    back the line breaks that strip removed.
     """
+    normalized = raw_content.replace("\r\n", "\n")
+    text = normalized.strip()
+    handler = frontmatter.detect_format(text, frontmatter.handlers)
+    if handler is None or handler.FM_BOUNDARY is None:
+        return 1
+    boundaries = handler.FM_BOUNDARY.finditer(text)
+    next(boundaries)  # the opening boundary, which detection matched
+    closing = next(boundaries, None)
+    if closing is None:
+        # python-frontmatter reads a lone opening boundary as body text.
+        return 1
+    stripped_breaks = normalized[: len(normalized) - len(normalized.lstrip())].count(
+        "\n"
+    )
+    return stripped_breaks + text.count("\n", 0, closing.end()) + 2
+
+
+def extract_tasks(raw_content: str) -> list[ParsedTask]:
+    """Extract every open/closed markdown checkbox line from a note's raw
+    file content, skipping the frontmatter and any line inside a fenced
+    (```/~~~) code block -- a note can legitimately document checkbox
+    syntax as an example, and that example text is not a real task. See
+    `fence_states` for the fence-matching rules.
+
+    A task's line is its 1-based line in the file, frontmatter included,
+    which is how a tick or untick finds it again. A line is the text
+    between `\n` characters, so a `\r` before the `\n` stays part of it;
+    `str.splitlines` isn't used, as it also splits on characters such as
+    U+2028 and form feed that the editor and the line writer don't.
+    """
+    lines = raw_content.split("\n")
+    first_body_line = _first_body_line(raw_content)
+    body_lines = lines[first_body_line - 1 :]
     tasks: list[ParsedTask] = []
-    lines = iter_lines_with_fence_state(body)
-    for line_number, (_, line, fenced) in enumerate(lines, start=1):
+    for line_number, (line, fenced) in enumerate(
+        zip(body_lines, fence_states(body_lines), strict=True), start=first_body_line
+    ):
         if fenced:
             continue
-        match = _TASK_LINE_PATTERN.match(line.splitlines()[0])
+        match = _TASK_LINE_PATTERN.match(line)
         if match:
             tasks.append(
                 ParsedTask(
@@ -358,7 +396,7 @@ def parse_note(path: str, raw_content: str) -> ParsedNote:
         updated=_parse_datetime(metadata.get("updated")),
         body=post.content,
         links=extract_links(path, post.content),
-        tasks=extract_tasks(post.content),
+        tasks=extract_tasks(raw_content),
         wikilinks=extract_note_wikilinks(post.content),
         extra_metadata={
             key: value

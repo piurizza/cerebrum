@@ -4,6 +4,7 @@ import {
   encodeNotePath,
   errorMessage,
   getNote,
+  NoteConflictError,
   putNote,
   searchNotes,
 } from "../../api/client";
@@ -276,7 +277,15 @@ export function NoteBrowser() {
     setTodayError(null);
     setIsOpeningToday(true);
     try {
-      await putNote(path, getDailyNoteDefaultBody(now));
+      try {
+        // Create-only: the notes list can be stale (today's note made on
+        // the phone since it loaded), and the server, not the list, has
+        // the last word on whether the file exists.
+        await putNote(path, getDailyNoteDefaultBody(now), { createOnly: true });
+      } catch (err) {
+        // It exists after all: open it, as if the list had known.
+        if (!(err instanceof NoteConflictError)) throw err;
+      }
       // Awaited, not fire-and-forget: the button re-enables in `finally`
       // below right after this resolves, and the sidebar never unmounts
       // on navigate (it's outside <Routes>) -- without awaiting, a

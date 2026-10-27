@@ -18,7 +18,10 @@ export type _PinNoteMeta = Expect<
 
 export type Note = components["schemas"]["Note"];
 export type _PinNote = Expect<
-  EqualKeys<Note, "path" | "title" | "tags" | "created" | "updated" | "content">
+  EqualKeys<
+    Note,
+    "path" | "title" | "tags" | "created" | "updated" | "content" | "version"
+  >
 >;
 
 export type GraphNode = components["schemas"]["GraphNode"];
@@ -40,5 +43,21 @@ export type _PinAttachmentLocation = Expect<EqualKeys<AttachmentLocation, "path"
 
 export type TaskItem = components["schemas"]["TaskItem"];
 export type _PinTaskItem = Expect<
-  EqualKeys<TaskItem, "path" | "title" | "line" | "text">
+  EqualKeys<
+    TaskItem,
+    "path" | "title" | "line" | "text" | "tags" | "done" | "done_date"
+  >
 >;
+
+export type SetTaskDoneRequest = components["schemas"]["SetTaskDoneRequest"];
+export type _PinSetTaskDoneRequest = Expect<
+  EqualKeys<SetTaskDoneRequest, "path" | "line" | "text" | "done" | "date">
+>;
+
+export type AddTaskRequest = components["schemas"]["AddTaskRequest"];
+export type _PinAddTaskRequest = Expect<
+  EqualKeys<AddTaskRequest, "text" | "date" | "heading">
+>;
+
+export type TaskWriteResult = components["schemas"]["TaskWriteResponse"];
+export type _PinTaskWriteResult = Expect<EqualKeys<TaskWriteResult, "note" | "task">>;

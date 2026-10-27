@@ -35,6 +35,9 @@ services:
       # `markdown` or `wikilink`: the link form the editor's `[[` picker
       # inserts and MCP tools ask agents to write. Both are always read.
       CEREBRUM_LINK_FORMAT: ${CEREBRUM_LINK_FORMAT:-markdown}
+      # IANA time zone (e.g. Europe/Rome) whose today the MCP task tools use
+      # when an agent gives no date. Empty means the container's zone, UTC.
+      CEREBRUM_TIMEZONE: ${CEREBRUM_TIMEZONE:-}
       # Where the index and the accounts database live. Empty means inside
       # the vault (`<vault>/.cerebrum/`). To keep them out of the vault, set
       # both to paths under /data/cerebrum and enable the data mount below

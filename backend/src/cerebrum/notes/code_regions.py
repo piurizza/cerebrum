@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import bisect
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 _FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 _BACKTICK_RUN = re.compile(r"`+")
@@ -19,6 +19,19 @@ def iter_lines_with_fence_state(body: str) -> Iterator[tuple[int, str, bool]]:
     """Yield `(offset, line, fenced)` for every line of `body`, where
     `fenced` is True for fence marker lines and the lines between them.
     `line` keeps its line ending, so offsets add up to positions in `body`.
+    See `fence_states` for the fence-matching rules.
+    """
+    lines = body.splitlines(keepends=True)
+    offset = 0
+    for line, fenced in zip(lines, fence_states(lines), strict=True):
+        yield offset, line, fenced
+        offset += len(line)
+
+
+def fence_states(lines: Iterable[str]) -> Iterator[bool]:
+    """Yield, for each of `lines`, whether it is a fence marker line or a
+    line between two. The caller decides what a line is, so task
+    extraction can number lines its own way.
 
     Tracks the opening fence's character (backtick or tilde) *and* run
     length, not just whether one is open, mirroring CommonMark's own
@@ -36,8 +49,7 @@ def iter_lines_with_fence_state(body: str) -> Iterator[tuple[int, str, bool]]:
     """
     fence_char: str | None = None
     fence_length = 0
-    offset = 0
-    for line in body.splitlines(keepends=True):
+    for line in lines:
         fence_match = _FENCE_PATTERN.match(line)
         if fence_match:
             marker = fence_match.group(1)
@@ -49,10 +61,9 @@ def iter_lines_with_fence_state(body: str) -> Iterator[tuple[int, str, bool]]:
             # Any other fence-looking line (different character, or the
             # same character but a shorter run) doesn't close the open
             # fence -- it's just content, per CommonMark.
-            yield offset, line, True
+            yield True
         else:
-            yield offset, line, fence_char is not None
-        offset += len(line)
+            yield fence_char is not None
 
 
 def code_ranges(body: str) -> list[tuple[int, int]]:

@@ -1,7 +1,13 @@
 // @vitest-environment node
 // Pure functions, no DOM -- skip jsdom's window/document bootstrap cost.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDailyNoteDefaultBody, getTodayNotePath } from "./dailyNote";
+import {
+  getDailyNoteDefaultBody,
+  getDailyNoteHeading,
+  getTodayNotePath,
+  localDateFromIso,
+  localIsoDate,
+} from "./dailyNote";
 
 // The folder comes from the server via `vaultSettings.ts` (its own tests
 // cover loading, storage and normalization); here it's just a value.
@@ -47,10 +53,38 @@ describe("getTodayNotePath", () => {
   });
 });
 
+describe("localIsoDate", () => {
+  it("is the local calendar day as YYYY-MM-DD, the day a tick records", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    expect(localIsoDate(new Date("2026-01-01T02:00:00Z"))).toBe("2025-12-31");
+    expect(localIsoDate(new Date(2026, 0, 5))).toBe("2026-01-05");
+  });
+});
+
+describe("localDateFromIso", () => {
+  it("is the start of that local calendar day, the inverse of localIsoDate", () => {
+    vi.stubEnv("TZ", "America/New_York");
+    const date = localDateFromIso("2026-01-05");
+    expect(date).toEqual(new Date(2026, 0, 5));
+    expect(localIsoDate(date)).toBe("2026-01-05");
+    expect(localDateFromIso(localIsoDate(new Date(2026, 9, 26, 23, 30)))).toEqual(
+      new Date(2026, 9, 26),
+    );
+  });
+});
+
 describe("getDailyNoteDefaultBody", () => {
   it("returns an H1 heading with the formatted date and a trailing blank line", () => {
     const body = getDailyNoteDefaultBody(new Date(2026, 7, 11));
     expect(body.startsWith("# ")).toBe(true);
     expect(body.endsWith("\n\n")).toBe(true);
+  });
+});
+
+describe("getDailyNoteHeading", () => {
+  it("is the default body's heading text, without the `# `", () => {
+    const date = new Date(2026, 9, 26);
+    expect(getDailyNoteDefaultBody(date)).toBe(`# ${getDailyNoteHeading(date)}\n\n`);
+    expect(getDailyNoteHeading(date)).toMatch(/2026/);
   });
 });

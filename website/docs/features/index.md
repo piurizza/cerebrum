@@ -11,7 +11,7 @@ from those files: links, backlinks, the graph, tags, search and the task list.
 | [Tags and search](tags-and-search.md) | Full-text search with `#tag` filters. |
 | [Tag front page](tag-front-page.md) | Browse the vault by tag. |
 | [Graph](graph.md) | See how notes connect, and jump between them. |
-| [Tasks](tasks.md) | Every open checkbox in the vault, in one list. |
+| [Tasks](tasks.md) | Add, tick and find the tasks in every note. |
 | [Offline use](offline.md) | Read your notes without a connection. |
 | [Read-only vault](read-only.md) | What changes when the vault can't be edited. |
 

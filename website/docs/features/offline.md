@@ -7,11 +7,11 @@ and read every note, with a banner that says how old the copy is.
 ![A note opened offline on a phone](../assets/screenshots/phone-offline.webp){ width="320" }
 
 - The copy refreshes each time you open Cerebrum with a connection.
-- Offline, you can read notes, browse the folder tree and filter by
-  [tag](tags-and-search.md#filtering-by-tag). Searching for words needs the
-  server.
-- You can't edit offline: **Edit**, **Rename**, **Delete** and **+ New note**
-  are disabled until the server is back.
+- Offline, you can read notes, browse the folder tree, filter by
+  [tag](tags-and-search.md#filtering-by-tag) and see the [task](tasks.md)
+  lists. Searching for words needs the server.
+- You can't edit offline: **Edit**, **Rename**, **Delete**, **+ New note**
+  and adding or ticking tasks are disabled until the server is back.
 - Mermaid diagrams show offline only if you've viewed a diagram online
   before.
 

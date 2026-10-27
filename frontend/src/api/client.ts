@@ -10,12 +10,15 @@ import type {
   OidcStartResult,
 } from "../types/auth";
 import type {
+  AddTaskRequest,
   AttachmentLocation,
   AttachmentUploadResult,
   GraphResponse,
   Note,
   NoteMeta,
+  SetTaskDoneRequest,
   TaskItem,
+  TaskWriteResult,
 } from "../types/note";
 import type { VaultSettings } from "../types/vault";
 
@@ -170,6 +173,17 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
     this.status = status;
+  }
+}
+
+// A conditional `putNote()` refused with 412: the note changed or was
+// deleted since it was loaded (`baseVersion`), or already exists
+// (`createOnly`). Still an `ApiError` with `status` 412, so callers that
+// only show the message need no change.
+export class NoteConflictError extends ApiError {
+  constructor(message: string) {
+    super(message, 412);
+    this.name = "NoteConflictError";
   }
 }
 
@@ -423,12 +437,62 @@ export function getNote(path: string): Promise<Note> {
   return request<Note>(`/notes/${encodeNotePath(path)}`);
 }
 
-export function putNote(path: string, content: string): Promise<Note> {
-  return request<Note>(`/notes/${encodeNotePath(path)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "text/markdown" },
-    body: content,
-  });
+// Rejected by getLiveNote() and the live task lists when the service
+// worker answered from its cache because the server couldn't be reached
+// (`X-SW-Cache-Fallback`).
+export class CachedNoteError extends Error {
+  constructor() {
+    super("The server can't be reached right now.");
+    this.name = "CachedNoteError";
+  }
+}
+
+// A GET that refuses the service worker's cached answer.
+// fetchWithToken() has already reported the outage either way.
+async function liveRequest<T>(path: string): Promise<T> {
+  const response = await fetchWithRetry(path);
+  if (response.headers.get("X-SW-Cache-Fallback")) {
+    throw new CachedNoteError();
+  }
+  return toResult<T>(response, path);
+}
+
+// getNote() for when only the file as it is now will do, such as merging a
+// save the server refused: a cached copy may be older than the file that
+// refused it.
+export function getLiveNote(path: string): Promise<Note> {
+  return liveRequest<Note>(`/notes/${encodeNotePath(path)}`);
+}
+
+// Without options the save is unconditional. `baseVersion` is the `version`
+// the note had when it was loaded, so a note changed elsewhere since is
+// refused instead of overwritten; `createOnly` refuses the save if a note
+// already exists. Either refusal rejects with a `NoteConflictError`. Custom
+// headers rather than If-Match/If-None-Match, which nginx evaluates itself.
+export async function putNote(
+  path: string,
+  content: string,
+  options: { baseVersion?: string; createOnly?: boolean } = {},
+): Promise<Note> {
+  const headers: Record<string, string> = { "Content-Type": "text/markdown" };
+  if (options.baseVersion !== undefined) {
+    headers["X-Base-Version"] = options.baseVersion;
+  }
+  if (options.createOnly) {
+    headers["X-Create-Only"] = "1";
+  }
+  try {
+    return await request<Note>(`/notes/${encodeNotePath(path)}`, {
+      method: "PUT",
+      headers,
+      body: content,
+    });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 412) {
+      throw new NoteConflictError(err.message);
+    }
+    throw err;
+  }
 }
 
 export function deleteNote(path: string): Promise<void> {
@@ -449,6 +513,47 @@ export function getGraph(): Promise<GraphResponse> {
 
 export function getTasks(): Promise<TaskItem[]> {
   return request<TaskItem[]>("/tasks");
+}
+
+// Tasks ticked with a done date on or after `since` (YYYY-MM-DD), newest
+// first. A task ticked without a date isn't listed.
+export function getDoneTasks(since: string): Promise<TaskItem[]> {
+  return request<TaskItem[]>(`/tasks/done?since=${encodeURIComponent(since)}`);
+}
+
+// The task lists for right after a write: the service worker's cache may
+// still hold the lists from before it, so a cached answer is refused with
+// a CachedNoteError rather than shown.
+export function getLiveTasks(): Promise<TaskItem[]> {
+  return liveRequest<TaskItem[]>("/tasks");
+}
+
+export function getLiveDoneTasks(since: string): Promise<TaskItem[]> {
+  return liveRequest<TaskItem[]>(`/tasks/done?since=${encodeURIComponent(since)}`);
+}
+
+// Appends `- [ ] <text>` to the daily note for `date`, which the server
+// creates first, headed `heading`, when it doesn't exist. Rejects with an
+// ApiError: 422 for text that is empty once trimmed.
+export function addTask(body: AddTaskRequest): Promise<TaskWriteResult> {
+  return request<TaskWriteResult>("/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// Ticks (`done` with the local `date`) or unticks the task on `line` of
+// `path`, a 1-based line of the raw file. Rejects with an ApiError: 409 when
+// that line no longer holds a task with this text, 404 when the note is
+// gone. Resolves with the note as written, whose content and version
+// replace any copy the caller holds.
+export function setTaskDone(body: SetTaskDoneRequest): Promise<TaskWriteResult> {
+  return request<TaskWriteResult>("/tasks/done", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export function getBacklinks(path: string): Promise<NoteMeta[]> {

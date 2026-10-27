@@ -115,6 +115,15 @@ export function stripFrontmatter(rawContent: string): string {
   return rawContent.replace(FRONTMATTER_PATTERN, "");
 }
 
+/** How many lines `stripFrontmatter` removes from the top of
+ * `rawContent`, so that line N of the body is line N + this of the file.
+ * The block it removes always ends with a line break, so counting `\n`
+ * counts its lines, a CRLF once. */
+export function frontmatterLineCount(rawContent: string): number {
+  const match = rawContent.match(FRONTMATTER_PATTERN);
+  return match ? match[0].split("\n").length - 1 : 0;
+}
+
 const IDENTITY_FIELD_LINE = /^(?:title|created):.*\r?\n?/gm;
 
 /** True when a matched `title:`/`created:` line's value is genuinely

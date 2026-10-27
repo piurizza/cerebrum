@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -516,3 +518,50 @@ def test_create_app_sets_cerebrum_logging_to_log_level(
     finally:
         package_logger.setLevel(previous)
         get_settings.cache_clear()
+
+
+def _timezone_settings(monkeypatch: pytest.MonkeyPatch, raw: str) -> Settings:
+    monkeypatch.setenv("CEREBRUM_TIMEZONE", raw)
+    _set_valid_auth_env(monkeypatch)
+    get_settings.cache_clear()
+    try:
+        return get_settings()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_vault_date_follows_the_configured_time_zone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _timezone_settings(monkeypatch, " Europe/Rome ")
+
+    assert settings.cerebrum_timezone == "Europe/Rome"
+    # 23:30 UTC is already half past midnight in Rome (UTC+1 once summer
+    # time ended on 25 October).
+    assert settings.vault_date(datetime(2026, 10, 26, 23, 30, tzinfo=UTC)) == date(
+        2026, 10, 27
+    )
+
+
+def test_blank_time_zone_means_the_servers_local_zone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _timezone_settings(monkeypatch, "  ")
+    assert settings.cerebrum_timezone == ""
+    try:
+        with monkeypatch.context() as patch:
+            patch.setenv("TZ", "America/New_York")
+            time.tzset()
+            # 02:00 UTC is still the evening before in New York.
+            moment = datetime(2026, 10, 27, 2, 0, tzinfo=UTC)
+            assert settings.vault_date(moment) == date(2026, 10, 26)
+    finally:
+        time.tzset()
+
+
+@pytest.mark.parametrize("raw", ["Mars/Olympus_Mons", "../etc/passwd", "Rome"])
+def test_unknown_time_zone_fails_startup(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    with pytest.raises(ValidationError, match="CEREBRUM_TIMEZONE must be an IANA"):
+        _timezone_settings(monkeypatch, raw)

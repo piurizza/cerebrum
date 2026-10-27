@@ -1113,6 +1113,259 @@ a {
   cursor: help;
 }
 
+/* Task items in the preview: the checkbox sized for a finger and set
+   apart from links in the task's text, so a tap on one isn't a tap on
+   the other. A task's bullet is dropped, as the checkbox marks the item;
+   a plain item in the same list keeps its own. */
+.markdown-preview .task-list-item {
+  list-style: none;
+  border-radius: 4px;
+  transition: background-color var(--transition);
+}
+
+.task-checkbox {
+  width: 1.15em;
+  height: 1.15em;
+  margin: 0 0.6em 0 0;
+  vertical-align: -0.15em;
+  accent-color: var(--accent);
+}
+
+.task-checkbox:enabled {
+  cursor: pointer;
+}
+
+/* A task opened from the list, for the moment it takes to spot it. */
+.markdown-preview .task-list-item--highlight {
+  background: var(--highlight-bg);
+}
+
+/* Tasks page (TasksPage): the add box, the shared tag chips, the folder
+   and word filters, then the Open and Done tabs. Each row keeps its
+   checkbox in a finger-sized box of its own, apart from the links in the
+   task's text and the row's Open link. */
+.tasks-page {
+  max-width: 760px;
+}
+
+.task-add {
+  margin-bottom: 1rem;
+}
+
+.task-add-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.task-add-input,
+.task-filter-folder,
+.task-filter-words {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.task-add-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.task-add-input:focus-visible,
+.task-filter-folder:focus-visible,
+.task-filter-words:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.task-add-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.task-add-error {
+  margin: 0.5rem 0 0;
+}
+
+.task-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.task-filter-folder {
+  flex: 0 1 14rem;
+  min-width: 0;
+}
+
+.task-filter-words {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.task-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-tab {
+  margin-bottom: -1px;
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.task-tab:hover {
+  color: var(--text);
+}
+
+.task-tab.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.task-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.task-notice {
+  margin: 0 0 1rem;
+}
+
+.task-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.task-group {
+  margin-bottom: 1.25rem;
+}
+
+.task-group-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.task-group-path {
+  color: var(--text-faint);
+  font-size: 0.85rem;
+  font-weight: normal;
+}
+
+.task-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  border-radius: 4px;
+  transition: background-color var(--transition);
+}
+
+/* A 44px box around the checkbox: the whole box ticks it. */
+.task-row-check {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  cursor: pointer;
+}
+
+.task-row .task-checkbox {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+}
+
+/* Padded so the first line of text sits level with the checkbox. */
+.task-row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.6rem 0.25rem 0.6rem 0;
+  overflow-wrap: anywhere;
+}
+
+.task-row-text code {
+  font-size: 0.9em;
+}
+
+.task-row.is-struck .task-row-text {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.task-row.is-pending {
+  background: var(--bg-subtle);
+}
+
+.task-row-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  margin-left: 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  vertical-align: baseline;
+}
+
+.task-row-date {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-row-flag {
+  padding: 0 0.45rem;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+}
+
+.task-row-open {
+  color: var(--accent);
+}
+
+.markdown-preview__task-hint,
+.note-notice {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Read by screen readers, not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .note-editor-actions {
   display: flex;
   align-items: center;
@@ -1125,6 +1378,51 @@ a {
 .save-status {
   font-size: 0.85rem;
   color: var(--text-faint);
+}
+
+.save-conflict-choices {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* The edits a conflict Reload took out of the editor. Quiet, like the
+   offline banner: nothing failed, the text is just waiting to be copied. */
+.unsaved-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+
+.unsaved-text-title {
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.unsaved-text p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.unsaved-text-body {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85rem;
 }
 
 .shortcut-hint {
@@ -1196,6 +1494,12 @@ a {
   padding: 0.5rem 0.6rem;
   border-radius: var(--radius);
   font-size: 0.9rem;
+}
+
+/* A failed copy in the unsaved-text panel, whose muted paragraph color
+   would otherwise win. */
+.unsaved-text p.error-text {
+  color: var(--danger);
 }
 
 /* R5: always-visible while offline, distinct from `.error-text` -- this
@@ -1586,8 +1890,26 @@ a {
   .tag-result,
   .note-link,
   .note-folder,
-  .app-nav a {
+  .app-nav a,
+  .task-add-input,
+  .task-filter-folder,
+  .task-filter-words,
+  .task-tab,
+  .task-row-open {
     min-height: 44px;
+  }
+
+  /* 16px keeps iOS Safari from zooming in on focus (as below). */
+  .task-add-input,
+  .task-filter-folder,
+  .task-filter-words {
+    font-size: 16px;
+  }
+
+  .task-row-open {
+    display: inline-flex;
+    align-items: center;
+    padding-inline: 0.5rem;
   }
 
   .btn-sm {

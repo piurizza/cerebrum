@@ -195,6 +195,8 @@ Put note
 | Parameter | In | Required | Type |
 |---|---|---|---|
 | `path` | path | yes | string |
+| `X-Base-Version` | header | no | string or null |
+| `X-Create-Only` | header | no | string or null |
 
 Returns: [`Note`](#note)
 
@@ -252,6 +254,32 @@ Tasks
 
 Returns: array of [`TaskItem`](#taskitem)
 
+### `POST /api/tasks`
+
+Add task
+
+Request body: `application/json` ([`AddTaskRequest`](#addtaskrequest))
+
+Returns: [`TaskWriteResponse`](#taskwriteresponse)
+
+### `GET /api/tasks/done`
+
+Done tasks
+
+| Parameter | In | Required | Type |
+|---|---|---|---|
+| `since` | query | yes | string |
+
+Returns: array of [`TaskItem`](#taskitem)
+
+### `POST /api/tasks/done`
+
+Set task done
+
+Request body: `application/json` ([`SetTaskDoneRequest`](#settaskdonerequest))
+
+Returns: [`TaskWriteResponse`](#taskwriteresponse)
+
 ## Tokens
 
 Personal API tokens for scripts and MCP clients.
@@ -308,6 +336,14 @@ Returns: [`VaultSettings`](#vaultsettings)
 | `username` | string | yes |
 | `is_admin` | boolean | yes |
 | `is_active` | boolean | yes |
+
+### AddTaskRequest
+
+| Field | Type | Required |
+|---|---|---|
+| `text` | string | yes |
+| `date` | string | yes |
+| `heading` | string or null | no |
 
 ### ApiTokenMeta
 
@@ -427,6 +463,7 @@ Returns: [`VaultSettings`](#vaultsettings)
 | `created` | string or null | yes |
 | `updated` | string or null | yes |
 | `content` | string | yes |
+| `version` | string | yes |
 
 ### NoteMeta
 
@@ -467,6 +504,16 @@ Returns: [`VaultSettings`](#vaultsettings)
 | `password` | string | yes |
 | `token` | string | yes |
 
+### SetTaskDoneRequest
+
+| Field | Type | Required |
+|---|---|---|
+| `path` | string | yes |
+| `line` | integer | yes |
+| `text` | string | yes |
+| `done` | boolean | yes |
+| `date` | string or null | no |
+
 ### TaskItem
 
 | Field | Type | Required |
@@ -475,6 +522,16 @@ Returns: [`VaultSettings`](#vaultsettings)
 | `title` | string | yes |
 | `line` | integer | yes |
 | `text` | string | yes |
+| `tags` | array of string | yes |
+| `done` | boolean | yes |
+| `done_date` | string or null | yes |
+
+### TaskWriteResponse
+
+| Field | Type | Required |
+|---|---|---|
+| `note` | [`Note`](#note) | yes |
+| `task` | [`TaskItem`](#taskitem) | yes |
 
 ### User
 

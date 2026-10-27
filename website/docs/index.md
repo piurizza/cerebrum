@@ -20,7 +20,8 @@ using Cerebrum and your notes are still just files.
   Backlinks and a graph show how everything connects, and renaming a note keeps
   its links working.
 - **Tags, search and tasks.** Full-text search with `#tag` filters, a front page
-  that browses by tag, and one list of every open checkbox in the vault.
+  that browses by tag, and a task list where you add and tick off the
+  checkboxes in every note.
 - **On your phone, even offline.** Install it to your home screen; the last
   synced vault stays readable without a connection.
 - **Your AI tools can use it.** A built-in MCP server lets assistants such as

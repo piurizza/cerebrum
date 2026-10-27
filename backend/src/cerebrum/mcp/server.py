@@ -6,6 +6,7 @@ from fastmcp import FastMCP
 from cerebrum.mcp.auth import SharedFunctionTokenVerifier
 from cerebrum.mcp.graph_tools import register_graph_tools
 from cerebrum.mcp.notes_tools import register_notes_tools
+from cerebrum.mcp.task_tools import register_task_tools
 from cerebrum.settings import get_settings
 
 
@@ -23,4 +24,5 @@ def create_mcp_server(app: FastAPI) -> FastMCP:
     mcp = FastMCP(name=settings.app_name, auth=verifier)
     register_notes_tools(mcp, app)
     register_graph_tools(mcp, app)
+    register_task_tools(mcp, app)
     return mcp

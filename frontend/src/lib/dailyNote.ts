@@ -17,10 +17,24 @@ function dailyNoteFolder(): string {
  * the user is actually looking at. Accepts an optional `date` so tests
  * can inject a fixed value instead of depending on wall-clock time. */
 export function getTodayNotePath(date: Date = new Date()): string {
+  return `${dailyNoteFolder()}/${localIsoDate(date)}.md`;
+}
+
+/** The browser's local calendar day as YYYY-MM-DD, never the UTC one (see
+ * `getTodayNotePath`): the day a task ticked now is recorded as done. */
+export function localIsoDate(date: Date = new Date()): string {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
-  return `${dailyNoteFolder()}/${yyyy}-${mm}-${dd}.md`;
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** The start of the local calendar day `isoDay` (YYYY-MM-DD) names: the
+ * inverse of `localIsoDate`, never parsed as UTC as `new Date(isoDay)`
+ * would be. */
+export function localDateFromIso(isoDay: string): Date {
+  const [year, month, day] = isoDay.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 /** Default body for a newly-created daily note: just a date heading, not
@@ -29,5 +43,12 @@ export function getTodayNotePath(date: Date = new Date()): string {
  * which daily notes deliberately don't go through (see that plan's
  * Scope Boundaries). */
 export function getDailyNoteDefaultBody(date: Date = new Date()): string {
-  return `# ${headingFormatter.format(date)}\n\n`;
+  return `# ${getDailyNoteHeading(date)}\n\n`;
+}
+
+/** The text of a new daily note's heading, without the `# `: the long
+ * local date. A task added from the Tasks page sends it, so a daily note
+ * the server creates for the task reads like one the Today button made. */
+export function getDailyNoteHeading(date: Date = new Date()): string {
+  return headingFormatter.format(date);
 }

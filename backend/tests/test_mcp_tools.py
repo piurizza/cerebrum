@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -561,7 +562,7 @@ def mcp_with_vault(
 
 
 def _call(
-    mcp: FastMCP, tool: str, args: dict[str, str], *, raise_on_error: bool = True
+    mcp: FastMCP, tool: str, args: dict[str, object], *, raise_on_error: bool = True
 ) -> CallToolResult:
     async def run() -> CallToolResult:
         async with Client(mcp) as client:
@@ -594,6 +595,23 @@ def test_append_to_note_adds_text_at_the_end_and_keeps_frontmatter(
     assert result.data.tags == ["kept"]
     assert result.data.content.endswith("first\n\n## Log\nsecond\n")
     assert (vault / "a.md").read_text(encoding="utf-8") == result.data.content
+
+
+def test_note_tools_return_the_version_of_the_file_they_leave(
+    vault: Path, mcp_with_vault: FastMCP
+) -> None:
+    def disk_version() -> str:
+        return hashlib.sha256((vault / "a.md").read_bytes()).hexdigest()
+
+    calls: list[tuple[str, dict[str, object]]] = [
+        ("create-note", {"path": "a.md", "content": "first"}),
+        ("get-note", {"path": "a.md"}),
+        ("update-note", {"path": "a.md", "content": "second"}),
+        ("append-to-note", {"path": "a.md", "content": "third"}),
+        ("edit-note", {"path": "a.md", "old_text": "third", "new_text": "fourth"}),
+    ]
+    for tool, args in calls:
+        assert _call(mcp_with_vault, tool, args).data.version == disk_version(), tool
 
 
 def test_append_to_note_on_missing_note_fails_without_creating_it(
@@ -857,6 +875,7 @@ def test_read_only_vault_offers_only_the_read_tools(
                 "get-graph",
                 "get-note",
                 "list-notes",
+                "list-tasks",
                 "search-notes",
             ]
             assert all(
@@ -867,6 +886,9 @@ def test_read_only_vault_offers_only_the_read_tools(
                 await client.call_tool("create-note", {"path": "b.md", "content": "x"})
             result = await client.call_tool("get-note", {"path": "a.md"})
             assert "hello world" in result.data.content
+            with pytest.raises(ToolError, match="Unknown tool"):
+                await client.call_tool("add-task", {"text": "x"})
 
     asyncio.run(run())
     assert not (vault / "b.md").exists()
+    assert not (vault / "daily").exists()

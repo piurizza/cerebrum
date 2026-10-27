@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 
@@ -153,3 +156,139 @@ def test_put_note_in_a_hidden_folder_is_not_listed(
 
     list_response = authenticated_client.get("/api/notes")
     assert list_response.json() == []
+
+
+def test_get_note_version_changes_when_the_file_changes(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    authenticated_client.put("/api/notes/a.md", content="first")
+    before = authenticated_client.get("/api/notes/a.md").json()["version"]
+    assert before == hashlib.sha256((vault / "a.md").read_bytes()).hexdigest()
+
+    (vault / "a.md").write_text("changed on disk", encoding="utf-8")
+
+    after = authenticated_client.get("/api/notes/a.md").json()["version"]
+    assert after != before
+    assert after == hashlib.sha256((vault / "a.md").read_bytes()).hexdigest()
+
+
+def test_put_with_the_current_base_version_saves_and_returns_a_new_version(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    loaded = authenticated_client.put("/api/notes/a.md", content="first").json()
+
+    response = authenticated_client.put(
+        "/api/notes/a.md",
+        content="second",
+        headers={"X-Base-Version": loaded["version"]},
+    )
+
+    assert response.status_code == 200
+    assert "second" in response.json()["content"]
+    assert response.json()["version"] != loaded["version"]
+    assert (
+        response.json()["version"]
+        == hashlib.sha256((vault / "a.md").read_bytes()).hexdigest()
+    )
+
+
+def test_put_with_a_stale_base_version_returns_412_and_leaves_the_file(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    loaded = authenticated_client.put("/api/notes/a.md", content="first").json()
+    authenticated_client.put("/api/notes/a.md", content="changed elsewhere")
+    on_disk = (vault / "a.md").read_bytes()
+
+    response = authenticated_client.put(
+        "/api/notes/a.md",
+        content="mine",
+        headers={"X-Base-Version": loaded["version"]},
+    )
+
+    assert response.status_code == 412
+    assert response.json() == {"detail": "The note changed since it was loaded"}
+    assert (vault / "a.md").read_bytes() == on_disk
+
+
+def test_put_with_a_base_version_for_a_deleted_note_returns_412_not_404(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    loaded = authenticated_client.put("/api/notes/a.md", content="first").json()
+    authenticated_client.delete("/api/notes/a.md")
+
+    response = authenticated_client.put(
+        "/api/notes/a.md",
+        content="mine",
+        headers={"X-Base-Version": loaded["version"]},
+    )
+
+    assert response.status_code == 412
+    assert not (vault / "a.md").exists()
+
+
+def test_put_create_only_on_an_existing_note_returns_412(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    authenticated_client.put("/api/notes/a.md", content="first")
+    on_disk = (vault / "a.md").read_bytes()
+
+    response = authenticated_client.put(
+        "/api/notes/a.md", content="mine", headers={"X-Create-Only": "1"}
+    )
+
+    assert response.status_code == 412
+    assert response.json() == {"detail": "A note already exists at a.md"}
+    assert (vault / "a.md").read_bytes() == on_disk
+
+
+def test_put_create_only_on_a_new_path_creates_the_note(
+    authenticated_client: TestClient,
+) -> None:
+    response = authenticated_client.put(
+        "/api/notes/new.md", content="fresh", headers={"X-Create-Only": "1"}
+    )
+
+    assert response.status_code == 200
+    assert "fresh" in authenticated_client.get("/api/notes/new.md").json()["content"]
+    assert [note["path"] for note in authenticated_client.get("/api/notes").json()] == [
+        "new.md"
+    ]
+
+
+def test_put_create_only_with_another_value_is_refused(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    authenticated_client.put("/api/notes/a.md", content="first")
+
+    response = authenticated_client.put(
+        "/api/notes/a.md", content="mine", headers={"X-Create-Only": "true"}
+    )
+
+    assert response.status_code == 400
+    assert "first" in (vault / "a.md").read_text(encoding="utf-8")
+
+
+def test_put_without_precondition_headers_overwrites(
+    authenticated_client: TestClient,
+) -> None:
+    authenticated_client.put("/api/notes/a.md", content="first")
+
+    response = authenticated_client.put("/api/notes/a.md", content="second")
+
+    assert response.status_code == 200
+    assert "second" in authenticated_client.get("/api/notes/a.md").json()["content"]
+
+
+def test_move_note_returns_the_moved_files_version(
+    authenticated_client: TestClient, vault: Path
+) -> None:
+    authenticated_client.put("/api/notes/a.md", content="---\ntitle: A\n---\nBody.\n")
+
+    response = authenticated_client.post(
+        "/api/notes/a.md/move", json={"new_path": "b.md", "title": "B"}
+    )
+
+    assert (
+        response.json()["version"]
+        == hashlib.sha256((vault / "b.md").read_bytes()).hexdigest()
+    )

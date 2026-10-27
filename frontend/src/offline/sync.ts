@@ -1,4 +1,5 @@
-import { getNote, listNotes } from "../api/client";
+import { getDoneTasks, getNote, getTasks, listNotes } from "../api/client";
+import { doneListSince } from "../lib/taskList";
 
 /** localStorage key this module owns -- read at mount by U4's offline
  * banner as its initial "last known good" timestamp, which is why this
@@ -49,6 +50,10 @@ export async function syncVault(): Promise<void> {
     return;
   }
 
+  // Alongside the notes rather than after them: it never throws, so it is
+  // only awaited before the sync counts as done.
+  const taskLists = syncTaskLists();
+
   await runWithConcurrency(notePaths, SYNC_CONCURRENCY, async (path) => {
     try {
       await getNote(path);
@@ -61,7 +66,21 @@ export async function syncVault(): Promise<void> {
     }
   });
 
+  await taskLists;
+
   persistLastSyncedAt();
+}
+
+/** Fetches the open and done task lists so the Tasks page opens offline
+ * too, cached the same way as the notes above. A failure here doesn't
+ * fail the sync: the notes are what the offline snapshot is for. */
+async function syncTaskLists(): Promise<void> {
+  const results = await Promise.allSettled([getTasks(), getDoneTasks(doneListSince())]);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.warn("Vault sync: could not cache the task lists", result.reason);
+    }
+  }
 }
 
 function persistLastSyncedAt(): void {

@@ -500,3 +500,261 @@ describe("OIDC sign-in helpers", () => {
     );
   });
 });
+
+describe("putNote() conditional saves", () => {
+  const savedNote = {
+    path: "note.md",
+    title: "note",
+    tags: [],
+    created: null,
+    updated: null,
+    content: "body",
+    version: "new-version",
+  };
+
+  function sentHeaders(fetchMock: ReturnType<typeof vi.fn>): Headers {
+    const call = fetchMock.mock.calls.at(-1);
+    if (!call) throw new Error("fetch was not called");
+    return new Headers((call[1] as RequestInit).headers);
+  }
+
+  it("sends no precondition headers by default, so the save stays unconditional", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(savedNote));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.putNote("note.md", "body")).resolves.toEqual(savedNote);
+
+    const headers = sentHeaders(fetchMock);
+    expect(headers.get("Content-Type")).toBe("text/markdown");
+    expect(headers.has("X-Base-Version")).toBe(false);
+    expect(headers.has("X-Create-Only")).toBe(false);
+  });
+
+  it("sends the loaded version as X-Base-Version", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(savedNote));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client.putNote("note.md", "body", { baseVersion: "loaded-version" });
+
+    expect(sentHeaders(fetchMock).get("X-Base-Version")).toBe("loaded-version");
+  });
+
+  it("sends X-Create-Only: 1 for a create-only save", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(savedNote));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client.putNote("note.md", "body", { createOnly: true });
+
+    expect(sentHeaders(fetchMock).get("X-Create-Only")).toBe("1");
+  });
+
+  it("rejects a 412 with a NoteConflictError that is still an ApiError", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(
+            { detail: "The note changed since it was loaded" },
+            { status: 412 },
+          ),
+        ),
+    );
+
+    const failure = client.putNote("note.md", "body", { baseVersion: "stale" });
+
+    await expect(failure).rejects.toBeInstanceOf(client.NoteConflictError);
+    await expect(failure).rejects.toBeInstanceOf(client.ApiError);
+    await expect(failure).rejects.toMatchObject({
+      status: 412,
+      message: "The note changed since it was loaded",
+    });
+  });
+
+  it("leaves other failures as a plain ApiError", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ detail: "Invalid note path" }, { status: 400 }),
+        ),
+    );
+
+    const failure = client.putNote("note.txt", "body", { baseVersion: "v" });
+
+    await expect(failure).rejects.toBeInstanceOf(client.ApiError);
+    await expect(failure).rejects.not.toBeInstanceOf(client.NoteConflictError);
+  });
+});
+
+describe("getLiveNote()", () => {
+  const note = {
+    path: "note.md",
+    title: "note",
+    tags: [],
+    created: null,
+    updated: null,
+    content: "body",
+    version: "server-version",
+  };
+
+  it("returns the note the server sent", async () => {
+    const client = await freshClient();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(note)));
+
+    await expect(client.getLiveNote("note.md")).resolves.toEqual(note);
+  });
+
+  it("refuses the service worker's cached copy, which may be older than the file", async () => {
+    const client = await freshClient();
+    const onFailure = vi.fn();
+    client.setOnNetworkStatusChange({ onFailure, onRecovery: vi.fn() });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(note, { headers: { "X-SW-Cache-Fallback": "1" } }),
+        ),
+    );
+
+    await expect(client.getLiveNote("note.md")).rejects.toBeInstanceOf(
+      client.CachedNoteError,
+    );
+    // Still reported as offline, like every other cache-served answer.
+    expect(onFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes a server error through as an ApiError", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ detail: "Note not found" }, { status: 404 })),
+    );
+
+    await expect(client.getLiveNote("note.md")).rejects.toMatchObject({
+      status: 404,
+      message: "Note not found",
+    });
+  });
+});
+
+describe("setTaskDone()", () => {
+  it("posts the task's path, file line, text and change as JSON", async () => {
+    const client = await freshClient();
+    const written = { note: { path: "a.md" }, task: { path: "a.md", line: 3 } };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(written));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = {
+      path: "a.md",
+      line: 3,
+      text: "Water the herbs",
+      done: true,
+      date: "2026-10-26",
+    };
+
+    await expect(client.setTaskDone(body)).resolves.toEqual(written);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/tasks\/done$/);
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it("rejects a 409 as an ApiError with that status", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(
+            { detail: "The note changed since the task was loaded" },
+            { status: 409 },
+          ),
+        ),
+    );
+
+    await expect(
+      client.setTaskDone({ path: "a.md", line: 1, text: "x", done: false }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+describe("getDoneTasks()", () => {
+  it("asks for the tasks done since the given day", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.getDoneTasks("2026-10-13")).resolves.toEqual([]);
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/tasks\/done\?since=2026-10-13$/);
+  });
+});
+
+describe("getLiveTasks() and getLiveDoneTasks()", () => {
+  const listed = [{ path: "a.md", line: 1, text: "Rake the leaves" }];
+
+  it("return the lists the server sent", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(listed));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.getLiveTasks()).resolves.toEqual(listed);
+    await expect(client.getLiveDoneTasks("2026-10-13")).resolves.toEqual(listed);
+
+    const urls = fetchMock.mock.calls.map(([url]) => url as string);
+    expect(urls[0]).toMatch(/\/api\/tasks$/);
+    expect(urls[1]).toMatch(/\/api\/tasks\/done\?since=2026-10-13$/);
+  });
+
+  it("refuse the service worker's cached lists, which may predate a write", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation(async () =>
+          jsonResponse(listed, { headers: { "X-SW-Cache-Fallback": "1" } }),
+        ),
+    );
+
+    await expect(client.getLiveTasks()).rejects.toBeInstanceOf(client.CachedNoteError);
+    await expect(client.getLiveDoneTasks("2026-10-13")).rejects.toBeInstanceOf(
+      client.CachedNoteError,
+    );
+  });
+});
+
+describe("addTask()", () => {
+  it("posts the text, the local day and the daily note heading as JSON", async () => {
+    const client = await freshClient();
+    const written = { note: { path: "daily/2026-10-26.md" }, task: { line: 3 } };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(written, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = {
+      text: "Order timber for the shed",
+      date: "2026-10-26",
+      heading: "Monday, October 26, 2026",
+    };
+
+    await expect(client.addTask(body)).resolves.toEqual(written);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/tasks$/);
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+});

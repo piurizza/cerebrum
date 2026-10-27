@@ -37,9 +37,8 @@ image is saved next to the note in a folder named `<note name>.attachments/`,
 so `garden-shed.md` keeps its images in `garden-shed.attachments/`. The folder
 moves with the note and is deleted with it.
 
-Images are limited to 10 MB each (`MAX_ATTACHMENT_SIZE_BYTES`). In Docker,
-the bundled web server also caps uploads at 10 MB, so the setting can lower
-the limit but not raise it.
+Images are limited to 10 MB each. To change the limit, set
+`MAX_ATTACHMENT_SIZE_BYTES`; in Docker the bundled web server follows it.
 
 ## Renaming, moving and deleting
 

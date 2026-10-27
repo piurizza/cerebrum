@@ -18,7 +18,10 @@ One provider at a time is supported.
     ```
 
     For example `https://192.0.2.10:7812/api/auth/oidc/callback` and
-    `https://<machine>.<tailnet>.ts.net:7812/api/auth/oidc/callback`.
+    `https://<machine>.<tailnet>.ts.net:7812/api/auth/oidc/callback`. Behind
+    [Tailscale serve](https.md#tailscale-serve) or a reverse proxy, register
+    the address you open, without Cerebrum's port, such as
+    `https://<machine>.<tailnet>.ts.net/api/auth/oidc/callback`.
 
 2. **In `.env`,** set:
 
@@ -76,11 +79,6 @@ way to give them one.
 
 ## Known limits
 
-- **Behind a proxy that handles HTTPS,** such as
-  [Tailscale serve](https.md#tailscale-serve) or a reverse proxy, provider
-  sign-in doesn't work: Cerebrum builds the return address with `http://`.
-  Use Cerebrum's own HTTPS port with a trusted certificate instead, as in
-  [Tailscale certificate on the built-in HTTPS port](https.md#tailscale-certificate-on-the-built-in-https-port).
 - **iPhone home-screen app:** provider sign-in opens in Safari and finishes
   there, not in the app. Sign in from Safari instead.
 - **Google** refuses sign-in from embedded browsers, which includes the

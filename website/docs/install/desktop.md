@@ -58,18 +58,22 @@ Windows support is new; please
 
 ## Connect to a different server
 
-The app remembers the first server it connects to. To switch, quit the app,
-delete its saved settings, and start it again; it then asks for an address.
-The file is `settings.json` in:
+The app remembers the server it connects to. To switch, choose
+**Cerebrum > Change server…** in the menu bar. The address form opens with the
+current server filled in; enter the new one and the app checks it before
+connecting.
+
+If the app can't reach an address it has never connected to, it shows
+**Change server URL** there and then.
+
+To start over completely, quit the app and delete its saved settings,
+`settings.json`, in:
 
 | System | Folder |
 |---|---|
 | Linux | `~/.local/share/com.piurizza.cerebrum/` |
 | macOS | `~/Library/Application Support/com.piurizza.cerebrum/` |
 | Windows | `%APPDATA%\com.piurizza.cerebrum\` |
-
-If the app can't reach an address it has never connected to, it shows
-**Change server URL** there and then.
 
 ## Known limits
 

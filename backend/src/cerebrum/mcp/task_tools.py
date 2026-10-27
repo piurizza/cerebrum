@@ -105,7 +105,8 @@ def _register_task_read_tools(mcp: FastMCP, app: FastAPI) -> None:
     # The arguments are the filters the tool offers, each optional.
     def list_tasks(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         status: Literal["open", "done"] = "open",
-        days: Annotated[int, Field(ge=1)] = 14,
+        # Ten years at most, which also keeps the window's first day a date.
+        days: Annotated[int, Field(ge=1, le=3650)] = 14,
         tags: list[str] | None = None,
         folder: str = "",
         text: str = "",

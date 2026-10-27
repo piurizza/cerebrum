@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from cerebrum.notes.file_lock import file_lock
+from cerebrum.notes.parser import InvalidNoteContentError
 from cerebrum.notes.service import (
     InvalidNotePathError,
     NoteNotFoundError,
@@ -31,6 +32,13 @@ _FRONTMATTER = (
     "updated: '2026-10-02T09:00:00+00:00'\n"
     "---\n"
 )
+
+
+# Notes a task write must refuse to change: one that isn't UTF-8, with
+# its task on line 1, and one whose frontmatter isn't YAML, on line 4.
+NOT_UTF_8 = b"- [ ] Water\n\xff\n"
+BAD_FRONTMATTER = b"---\ntags: [unclosed\n---\n- [ ] Water\n"
+UNREADABLE_IDS = ["not-utf-8", "bad-frontmatter"]
 
 
 def _write(vault: Path, path: str, content: bytes) -> Path:
@@ -233,6 +241,20 @@ def test_tick_needs_a_date(vault: Path) -> None:
         set_task_done(vault, "a.md", 1, "Water", done=True, day=None)
 
 
+@pytest.mark.parametrize(
+    ("content", "line"), [(NOT_UTF_8, 1), (BAD_FRONTMATTER, 4)], ids=UNREADABLE_IDS
+)
+def test_ticking_in_an_unreadable_note_is_refused_and_writes_nothing(
+    vault: Path, content: bytes, line: int
+) -> None:
+    file_path = _write(vault, "a.md", content)
+
+    with pytest.raises(InvalidNoteContentError):
+        set_task_done(vault, "a.md", line, "Water", done=True, day=_DAY)
+
+    assert file_path.read_bytes() == content
+
+
 # -- adding --------------------------------------------------------------------
 
 
@@ -399,6 +421,18 @@ def test_add_after_an_unclosed_code_block_is_refused(vault: Path) -> None:
     file_path = _write(vault, "daily/2026-10-26.md", content)
 
     with pytest.raises(TaskConflictError):
+        add_task(vault, "daily", _DAY, "New", "Heading")
+
+    assert file_path.read_bytes() == content
+
+
+@pytest.mark.parametrize("content", [NOT_UTF_8, BAD_FRONTMATTER], ids=UNREADABLE_IDS)
+def test_add_to_an_unreadable_note_is_refused_and_writes_nothing(
+    vault: Path, content: bytes
+) -> None:
+    file_path = _write(vault, "daily/2026-10-26.md", content)
+
+    with pytest.raises(InvalidNoteContentError):
         add_task(vault, "daily", _DAY, "New", "Heading")
 
     assert file_path.read_bytes() == content

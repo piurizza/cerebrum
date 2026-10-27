@@ -16,6 +16,7 @@ from cerebrum.index.indexer import upsert_note
 from cerebrum.mcp import task_tools
 from cerebrum.settings import get_settings
 from tests.test_mcp_tools import _call, _mcp_server, _write_note
+from tests.test_tasks_service import BAD_FRONTMATTER, NOT_UTF_8, UNREADABLE_IDS
 
 
 def test_read_only_vault_still_lists_tasks(
@@ -220,6 +221,57 @@ def test_set_task_done_on_a_deleted_note_fails_and_drops_its_tasks(
     assert _tasks(_call(task_mcp, "list-tasks", {})) == []
 
 
+@pytest.mark.parametrize(
+    ("content", "line", "expected_error"),
+    [
+        (NOT_UTF_8, 1, "invalid UTF-8 at byte 12"),
+        (BAD_FRONTMATTER, 4, "malformed frontmatter"),
+    ],
+    ids=UNREADABLE_IDS,
+)
+def test_set_task_done_in_an_unreadable_note_fails_without_writing(
+    vault: Path, task_mcp: FastMCP, content: bytes, line: int, expected_error: str
+) -> None:
+    (vault / "a.md").write_bytes(content)
+
+    result = _call(
+        task_mcp,
+        "set-task-done",
+        {"path": "a.md", "line": line, "text": "Water", "done": True},
+        raise_on_error=False,
+    )
+
+    assert result.is_error
+    assert result.content[0].text.startswith(expected_error)
+    assert (vault / "a.md").read_bytes() == content
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_error"),
+    [
+        (NOT_UTF_8, "invalid UTF-8 at byte 12"),
+        (BAD_FRONTMATTER, "malformed frontmatter"),
+    ],
+    ids=UNREADABLE_IDS,
+)
+def test_add_task_to_an_unreadable_note_fails_without_writing(
+    vault: Path, task_mcp: FastMCP, content: bytes, expected_error: str
+) -> None:
+    (vault / "daily").mkdir()
+    (vault / "daily" / "2026-10-26.md").write_bytes(content)
+
+    result = _call(
+        task_mcp,
+        "add-task",
+        {"text": "Buy", "date": "2026-10-26"},
+        raise_on_error=False,
+    )
+
+    assert result.is_error
+    assert result.content[0].text.startswith(expected_error)
+    assert (vault / "daily" / "2026-10-26.md").read_bytes() == content
+
+
 def test_list_done_tasks_covers_today_and_the_days_before_it(
     vault: Path, db: sqlite3.Connection, task_mcp: FastMCP
 ) -> None:
@@ -339,13 +391,36 @@ def test_list_tasks_limit_keeps_the_first_and_reports_the_total(
     assert result.structured_content["total"] == 3
 
 
-@pytest.mark.parametrize("args", [{"limit": 0}, {"days": 0}, {"status": "all"}])
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"limit": 0},
+        {"days": 0},
+        {"status": "done", "days": 3651},
+        {"status": "all"},
+    ],
+)
 def test_list_tasks_refuses_out_of_range_arguments(
     task_mcp: FastMCP, args: dict[str, object]
 ) -> None:
     result = _call(task_mcp, "list-tasks", args, raise_on_error=False)
 
     assert result.is_error
+
+
+def test_list_tasks_refuses_a_window_past_any_date_before_using_it(
+    task_mcp: FastMCP,
+) -> None:
+    # A window this long would reach back before the year 1.
+    result = _call(
+        task_mcp,
+        "list-tasks",
+        {"status": "done", "days": 1_000_000},
+        raise_on_error=False,
+    )
+
+    assert result.is_error
+    assert "less than or equal to 3650" in result.content[0].text
 
 
 def test_task_writing_tools_say_to_take_the_locator_from_list_tasks(

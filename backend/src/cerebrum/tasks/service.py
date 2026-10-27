@@ -31,7 +31,9 @@ class EmptyTaskTextError(ValueError):
 
 class TaskConflictError(Exception):
     """The task isn't where the caller said it was, or can't be written
-    there: the note changed since the task was listed."""
+    there: the note changed since the task was listed. `add_task` raises
+    it too when the daily note ends inside an unclosed code block, where
+    an appended line wouldn't be a task."""
 
 
 def list_open_tasks(conn: sqlite3.Connection, templates_folder: str) -> list[TaskItem]:
@@ -62,8 +64,9 @@ def _list_tasks(
     min_done: date | None = None,
 ) -> list[TaskItem]:
     """The tasks the index holds in state `checked`, by note path and line,
-    leaving out notes under `templates_folder`. With `min_done`, only tasks
-    done on that day or later: a task without a done date is left out."""
+    leaving out notes under `templates_folder`. `min_done` is for ticked
+    tasks: with it, only those done on that day or later, so a task
+    without a done marker is left out."""
     # write_lock: this read races the filesystem watcher/backstop rescan's
     # sustained writes against the same shared connection -- see
     # index/db.py's write_lock docstring for the exact hazard
@@ -88,18 +91,17 @@ def _list_tasks(
         if row["source_path"].startswith(templates_prefix):
             continue
         text, marker_date = split_done_marker(row["text"])
-        done_date = marker_date if checked else None
-        if min_done is not None and (done_date is None or done_date < min_done):
+        if min_done is not None and (marker_date is None or marker_date < min_done):
             continue
         tasks.append(
-            TaskItem(
+            _task_item(
                 path=row["source_path"],
                 title=row["title"],
                 tags=json.loads(row["tags"]),
                 line=row["line"],
+                checked=checked,
                 text=text,
-                done=checked,
-                done_date=done_date,
+                marker_date=marker_date,
             )
         )
     return tasks
@@ -113,13 +115,14 @@ def _task_item(  # pylint: disable=too-many-arguments
     tags: list[str],
     line: int,
     checked: bool,
-    stored_text: str,
+    text: str,
+    marker_date: date | None,
 ) -> TaskItem:
     """A task as the lists return it, from its text as the index stores
-    it: with its done marker, which becomes `done_date`. Only a ticked
-    task has a done date; a marker left on an open one is still dropped
-    from the text, as a tick replaces it anyway."""
-    text, done_date = split_done_marker(stored_text)
+    it split by `split_done_marker`: `text` without the done marker and
+    `marker_date` the marker's date. Only a ticked task has a done date; a
+    marker left on an open one is still dropped from the text, as a tick
+    replaces it anyway."""
     return TaskItem(
         path=path,
         title=title,
@@ -127,7 +130,7 @@ def _task_item(  # pylint: disable=too-many-arguments
         line=line,
         text=text,
         done=checked,
-        done_date=done_date if checked else None,
+        done_date=marker_date if checked else None,
     )
 
 
@@ -213,13 +216,15 @@ def add_task(
         return new_content
 
     note = edit_note_text(vault_root, path, append, create_with=body)
+    listed_text, marker_date = split_done_marker(task_text)
     return note, _task_item(
         path=path,
         title=note.title,
         tags=note.tags,
         line=task_line,
         checked=False,
-        stored_text=task_text,
+        text=listed_text,
+        marker_date=marker_date,
     )
 
 
@@ -293,11 +298,13 @@ def set_task_done(  # pylint: disable=too-many-arguments
     note = edit_note_text(vault_root, path, change)
     task = parse_task_line(written)
     assert task is not None  # the line was checked to hold a task
+    listed_text, marker_date = split_done_marker(task.text)
     return note, _task_item(
         path=path,
         title=note.title,
         tags=note.tags,
         line=line,
         checked=task.checked,
-        stored_text=task.text,
+        text=listed_text,
+        marker_date=marker_date,
     )

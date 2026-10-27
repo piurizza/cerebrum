@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.test_tasks_service import BAD_FRONTMATTER, NOT_UTF_8, UNREADABLE_IDS
+
 
 def test_tasks_returns_open_tasks_with_joined_note_titles(
     authenticated_client: TestClient,
@@ -291,6 +293,29 @@ def test_tick_outside_the_vault_is_a_bad_request(
     assert response.status_code == 400
 
 
+@pytest.mark.parametrize(
+    ("content", "line"), [(NOT_UTF_8, 1), (BAD_FRONTMATTER, 4)], ids=UNREADABLE_IDS
+)
+def test_ticking_in_an_unreadable_note_is_a_bad_request_and_writes_nothing(
+    authenticated_client: TestClient, vault: Path, content: bytes, line: int
+) -> None:
+    (vault / "a.md").write_bytes(content)
+
+    response = authenticated_client.post(
+        "/api/tasks/done",
+        json={
+            "path": "a.md",
+            "line": line,
+            "text": "Water",
+            "done": True,
+            "date": "2026-10-26",
+        },
+    )
+
+    assert response.status_code == 400
+    assert (vault / "a.md").read_bytes() == content
+
+
 def test_add_creates_todays_note_and_lists_the_task(
     authenticated_client: TestClient, vault: Path
 ) -> None:
@@ -358,3 +383,19 @@ def test_a_malformed_add_is_unprocessable_and_writes_nothing(
 
     assert response.status_code == 422
     assert not any(path.suffix == ".md" for path in vault.rglob("*"))
+
+
+@pytest.mark.parametrize("content", [NOT_UTF_8, BAD_FRONTMATTER], ids=UNREADABLE_IDS)
+def test_add_to_an_unreadable_daily_note_is_a_bad_request_and_writes_nothing(
+    authenticated_client: TestClient, vault: Path, content: bytes
+) -> None:
+    (vault / "daily").mkdir()
+    (vault / "daily" / "2026-10-26.md").write_bytes(content)
+
+    response = authenticated_client.post(
+        "/api/tasks",
+        json={"text": "Buy", "date": "2026-10-26", "heading": "Monday"},
+    )
+
+    assert response.status_code == 400
+    assert (vault / "daily" / "2026-10-26.md").read_bytes() == content

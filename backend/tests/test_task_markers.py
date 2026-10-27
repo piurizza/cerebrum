@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from datetime import date
 
@@ -50,6 +51,19 @@ def test_split_done_marker_finds_the_marker(
 )
 def test_split_done_marker_leaves_text_without_a_valid_marker(text: str) -> None:
     assert split_done_marker(text) == (text, None)
+
+
+def test_a_long_whitespace_run_is_split_in_linear_time() -> None:
+    """A marker or block id can only start where a whitespace run starts,
+    so a long run that ends in text, which neither is, is scanned once
+    rather than once per space."""
+    text = "a" + " " * 200_000 + "b"
+    start = time.perf_counter()
+
+    assert split_done_marker(text) == (text, None)
+    assert tick_line(f"- [ ] {text}", _DAY) == f"- [x] {text} ✅ 2026-10-26"
+
+    assert time.perf_counter() - start < 0.5
 
 
 def test_parse_task_line_splits_the_parts_a_rewrite_keeps() -> None:

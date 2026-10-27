@@ -17,11 +17,15 @@ from datetime import date
 _TASK_LINE = re.compile(r"([ \t]*)([-*+]) \[([ xX])\] (.*)")
 # A `\r` before the `\n` belongs to the line, so a rewrite keeps it.
 _LINE_ENDING = re.compile(r"\r?\n?\Z")
-_BLOCK_ID = re.compile(r"[ \t]+(\^[A-Za-z0-9-]+)\Z")
+# The lookbehinds let a match start only where a whitespace run starts.
+# Without them, a search retries from every space of a long run that ends
+# in other text, and each try scans the rest of the run: quadratic time.
+# The leftmost match starts at the run's start either way.
+_BLOCK_ID = re.compile(r"(?<![ \t])[ \t]+(\^[A-Za-z0-9-]+)\Z")
 # `✅`, an optional emoji presentation selector, one or more spaces and a
 # date, at the very end of the text once any block id is set aside. Only
 # the last marker counts, and one followed by other text is just text.
-_DONE_MARKER = re.compile(r"[ \t]*✅️? +([0-9]{4}-[0-9]{2}-[0-9]{2})\Z")
+_DONE_MARKER = re.compile(r"(?<![ \t])[ \t]*✅️? +([0-9]{4}-[0-9]{2}-[0-9]{2})\Z")
 
 
 @dataclass(frozen=True)

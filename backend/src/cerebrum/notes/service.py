@@ -17,6 +17,7 @@ from cerebrum.attachments.service import (
 from cerebrum.notes.file_lock import file_lock
 from cerebrum.notes.models import Note
 from cerebrum.notes.parser import (
+    InvalidNoteContentError,
     format_link_target,
     parse_note,
     rebase_links,
@@ -213,7 +214,9 @@ def edit_note_text(
     frontmatter is added and `updated` isn't stamped, so everything
     `change` leaves alone stays byte for byte. `change` returns None to
     leave the file as it is. Exceptions it raises propagate unchanged and
-    leave the file untouched.
+    leave the file untouched. A note that isn't UTF-8, or whose
+    frontmatter can't be parsed, raises InvalidNoteContentError and is
+    left untouched too.
 
     A missing note is created first from `create_with`, rendered the way
     every other save is, when given; otherwise it raises
@@ -229,7 +232,11 @@ def edit_note_text(
                 raise NoteNotFoundError(path) from exc
             _render_and_write(file_path, path, create_with)
             raw_bytes = file_path.read_bytes()
-        new_text = change(raw_bytes.decode("utf-8"))
+        try:
+            text = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise InvalidNoteContentError(f"invalid UTF-8 at byte {exc.start}") from exc
+        new_text = change(text)
         if new_text is None:
             return note_from_bytes(path, raw_bytes)
         new_bytes = new_text.encode("utf-8")

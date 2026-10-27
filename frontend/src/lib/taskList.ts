@@ -54,10 +54,6 @@ export function taskFilter(filters: TaskFilterState): (task: TaskItem) => boolea
   };
 }
 
-export function taskMatchesFilters(task: TaskItem, filters: TaskFilterState): boolean {
-  return taskFilter(filters)(task);
-}
-
 export function hasActiveFilters(filters: TaskFilterState): boolean {
   return (
     filters.chips.length > 0 ||

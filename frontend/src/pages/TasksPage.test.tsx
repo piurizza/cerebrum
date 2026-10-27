@@ -9,7 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "../api/client";
+import { ApiError, CachedNoteError } from "../api/client";
 import { TagSelectionProvider, useTagSelection } from "../context/TagSelectionContext";
 import { getDailyNoteHeading } from "../lib/dailyNote";
 import { TASK_CHANGED_MESSAGE } from "../lib/tasks";
@@ -24,6 +24,9 @@ import type {
 
 const mockGetTasks = vi.fn<() => Promise<TaskItem[]>>();
 const mockGetDoneTasks = vi.fn<(since: string) => Promise<TaskItem[]>>();
+// The refetch after a write: by default answered as the plain fetch is.
+const mockGetLiveTasks = vi.fn<() => Promise<TaskItem[]>>();
+const mockGetLiveDoneTasks = vi.fn<(since: string) => Promise<TaskItem[]>>();
 const mockAddTask = vi.fn<(body: AddTaskRequest) => Promise<TaskWriteResult>>();
 const mockSetTaskDone = vi.fn<(body: SetTaskDoneRequest) => Promise<TaskWriteResult>>();
 // `encodeNotePath`/`errorMessage`/`ApiError` are real logic worth
@@ -35,6 +38,8 @@ vi.mock("../api/client", async () => {
     ...actual,
     getTasks: () => mockGetTasks(),
     getDoneTasks: (since: string) => mockGetDoneTasks(since),
+    getLiveTasks: () => mockGetLiveTasks(),
+    getLiveDoneTasks: (since: string) => mockGetLiveDoneTasks(since),
     addTask: (body: AddTaskRequest) => mockAddTask(body),
     setTaskDone: (body: SetTaskDoneRequest) => mockSetTaskDone(body),
   };
@@ -73,6 +78,17 @@ function task(path: string, line: number, text: string, extra: Partial<TaskItem>
     done_date: null,
     ...extra,
   } satisfies TaskItem;
+}
+
+// A promise settled by the test, for a request still in flight.
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function written(result: TaskItem): TaskWriteResult {
@@ -115,6 +131,10 @@ beforeEach(() => {
   mockGetTasks.mockReset();
   mockGetDoneTasks.mockReset();
   mockGetDoneTasks.mockResolvedValue([]);
+  mockGetLiveTasks.mockReset();
+  mockGetLiveTasks.mockImplementation(() => mockGetTasks());
+  mockGetLiveDoneTasks.mockReset();
+  mockGetLiveDoneTasks.mockImplementation((since) => mockGetDoneTasks(since));
   mockAddTask.mockReset();
   mockSetTaskDone.mockReset();
   mockRefreshNotes.mockReset();
@@ -417,7 +437,7 @@ describe("TasksPage ticking", () => {
     );
     expect(screen.getByRole("checkbox", { name: "Water the herbs" })).not.toBeChecked();
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
-    act(() => vi.advanceTimersByTime(6000));
+    await act(async () => vi.advanceTimersByTime(6000));
     expect(screen.getByText("Water the herbs")).toBeInTheDocument();
   });
 
@@ -430,10 +450,10 @@ describe("TasksPage ticking", () => {
     mockGetTasks.mockResolvedValue([]);
     await user.click(checkbox);
     await waitFor(() => expect(mockGetTasks).toHaveBeenCalledTimes(2));
-    act(() => vi.advanceTimersByTime(4000));
+    await act(async () => vi.advanceTimersByTime(4000));
     expect(screen.getByText("Water the herbs")).toBeInTheDocument();
 
-    act(() => vi.advanceTimersByTime(1100));
+    await act(async () => vi.advanceTimersByTime(1100));
 
     expect(shownRows()).toEqual([]);
     expect(screen.getByText("No open tasks in the vault.")).toBeInTheDocument();
@@ -485,6 +505,93 @@ describe("TasksPage ticking", () => {
     );
     expect(screen.getByRole("checkbox", { name: "Water the herbs" })).not.toBeChecked();
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+});
+
+describe("TasksPage writes in flight", () => {
+  const herbs = task("garden.md", 5, "Water the herbs");
+  const herbsDone = { ...herbs, done: true, done_date: "2026-10-26" };
+
+  it("keeps a tick when the refetch after it only reaches the offline cache", async () => {
+    // The service worker's cache still holds the list from before the tick.
+    mockGetTasks.mockResolvedValue([herbs]);
+    mockGetLiveTasks.mockRejectedValue(new CachedNoteError());
+    mockGetLiveDoneTasks.mockRejectedValue(new CachedNoteError());
+    mockSetTaskDone.mockResolvedValue(written(herbsDone));
+    const { user } = renderPage();
+
+    await user.click(await screen.findByRole("checkbox", { name: "Water the herbs" }));
+    await waitFor(() =>
+      expect(mockGetTasks.mock.calls.length + mockGetLiveTasks.mock.calls.length).toBe(
+        2,
+      ),
+    );
+    // Opening the page may use the cache: that is how it works offline.
+    expect(mockGetTasks).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTime(5100));
+
+    expect(shownRows()).toEqual([]);
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Done" }));
+    expect(screen.getByRole("checkbox", { name: "Water the herbs" })).toBeChecked();
+  });
+
+  it("still refetches through the cache when the window comes back", async () => {
+    mockGetTasks.mockResolvedValue([herbs]);
+    renderPage();
+    await screen.findByText("Water the herbs");
+
+    fireEvent.focus(window);
+
+    await waitFor(() => expect(mockGetTasks).toHaveBeenCalledTimes(2));
+    expect(mockGetLiveTasks).not.toHaveBeenCalled();
+  });
+
+  it("sends a tick, its Undo and a quick re-tick one after another, ending ticked", async () => {
+    mockGetTasks.mockResolvedValue([herbs]);
+    const tick = deferred<TaskWriteResult>();
+    const untick = deferred<TaskWriteResult>();
+    const retick = deferred<TaskWriteResult>();
+    mockSetTaskDone
+      .mockReturnValueOnce(tick.promise)
+      .mockReturnValueOnce(untick.promise)
+      .mockReturnValueOnce(retick.promise);
+    const { user } = renderPage();
+
+    await user.click(await screen.findByRole("checkbox", { name: "Water the herbs" }));
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    await user.click(screen.getByRole("checkbox", { name: "Water the herbs" }));
+
+    // The undo and the re-tick wait their turn.
+    expect(mockSetTaskDone).toHaveBeenCalledTimes(1);
+    await act(async () => tick.resolve(written(herbsDone)));
+    expect(mockSetTaskDone).toHaveBeenCalledTimes(2);
+    expect(mockSetTaskDone.mock.calls[1][0]).toMatchObject({ done: false });
+    await act(async () => untick.resolve(written(herbs)));
+    expect(mockSetTaskDone).toHaveBeenCalledTimes(3);
+    expect(mockSetTaskDone.mock.calls[2][0]).toMatchObject({ done: true });
+    await act(async () => retick.resolve(written(herbsDone)));
+
+    expect(screen.getByRole("checkbox", { name: "Water the herbs" })).toBeChecked();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a ticked row and its Undo past 5 seconds until its write lands", async () => {
+    mockGetTasks.mockResolvedValue([herbs]);
+    const tick = deferred<TaskWriteResult>();
+    mockSetTaskDone.mockReturnValueOnce(tick.promise);
+    const { user } = renderPage();
+
+    await user.click(await screen.findByRole("checkbox", { name: "Water the herbs" }));
+    await act(async () => vi.advanceTimersByTime(6000));
+
+    expect(screen.getByRole("checkbox", { name: "Water the herbs" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+
+    mockGetTasks.mockResolvedValue([]);
+    await act(async () => tick.resolve(written(herbsDone)));
+
+    await waitFor(() => expect(shownRows()).toEqual([]));
   });
 });
 
@@ -576,7 +683,7 @@ describe("TasksPage Done tab", () => {
     // Still shown, unticked, with Undo, until its 5 seconds are up.
     expect(screen.getByRole("checkbox", { name: "Water the herbs" })).not.toBeChecked();
     await waitFor(() => expect(mockGetTasks).toHaveBeenCalledTimes(2));
-    act(() => vi.advanceTimersByTime(5100));
+    await act(async () => vi.advanceTimersByTime(5100));
     expect(screen.getByText("Nothing ticked in the last 14 days.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /Open/ }));

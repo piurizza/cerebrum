@@ -703,6 +703,40 @@ describe("getDoneTasks()", () => {
   });
 });
 
+describe("getLiveTasks() and getLiveDoneTasks()", () => {
+  const listed = [{ path: "a.md", line: 1, text: "Rake the leaves" }];
+
+  it("return the lists the server sent", async () => {
+    const client = await freshClient();
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(listed));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.getLiveTasks()).resolves.toEqual(listed);
+    await expect(client.getLiveDoneTasks("2026-10-13")).resolves.toEqual(listed);
+
+    const urls = fetchMock.mock.calls.map(([url]) => url as string);
+    expect(urls[0]).toMatch(/\/api\/tasks$/);
+    expect(urls[1]).toMatch(/\/api\/tasks\/done\?since=2026-10-13$/);
+  });
+
+  it("refuse the service worker's cached lists, which may predate a write", async () => {
+    const client = await freshClient();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation(async () =>
+          jsonResponse(listed, { headers: { "X-SW-Cache-Fallback": "1" } }),
+        ),
+    );
+
+    await expect(client.getLiveTasks()).rejects.toBeInstanceOf(client.CachedNoteError);
+    await expect(client.getLiveDoneTasks("2026-10-13")).rejects.toBeInstanceOf(
+      client.CachedNoteError,
+    );
+  });
+});
+
 describe("addTask()", () => {
   it("posts the text, the local day and the daily note heading as JSON", async () => {
     const client = await freshClient();

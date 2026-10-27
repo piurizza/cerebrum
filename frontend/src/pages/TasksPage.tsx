@@ -13,6 +13,8 @@ import {
   encodeNotePath,
   errorMessage,
   getDoneTasks,
+  getLiveDoneTasks,
+  getLiveTasks,
   getTasks,
   setTaskDone,
 } from "../api/client";
@@ -158,6 +160,20 @@ export function TasksPage() {
     pendingRef.current,
   );
   const timers = useRef(new Map<string, number>());
+  // The last write sent for each task, settled or not: writes to one task
+  // go one after another, so a tick, its Undo and a quick re-tick reach
+  // the server in the order they were made.
+  const writes = useRef(new Map<string, Promise<unknown>>());
+
+  const queueWrite = useCallback(<T,>(key: string, send: () => Promise<T>) => {
+    const sent = (writes.current.get(key) ?? Promise.resolve()).then(send);
+    const settled = sent.catch(() => undefined);
+    writes.current.set(key, settled);
+    void settled.then(() => {
+      if (writes.current.get(key) === settled) writes.current.delete(key);
+    });
+    return sent;
+  }, []);
 
   const changePending = useCallback(
     (change: (map: Map<string, PendingToggle>) => void) => {
@@ -187,20 +203,26 @@ export function TasksPage() {
 
   // A list fetched before the latest write settled may predate it, and
   // an older response landing after a newer one would roll the list back:
-  // either is dropped, as the fetch that follows is fresher.
+  // either is dropped, as the fetch that follows is fresher. After a write
+  // (`live`), the service worker's cached lists may predate it too, so
+  // they are refused and the lists kept as the write left them; opening
+  // the page and coming back to it take the cache, which is how the lists
+  // show offline.
   const lastIssued = useRef(0);
   const lastApplied = useRef(0);
   const writesSettled = useRef(0);
   const loaded = useRef({ open: false, done: false });
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (live = false) => {
     lastIssued.current += 1;
     const request = lastIssued.current;
     const writesAtIssue = writesSettled.current;
-    const [open, done] = await Promise.allSettled([
-      getTasks(),
-      getDoneTasks(doneListSince()),
-    ]);
+    const since = doneListSince();
+    const [open, done] = await Promise.allSettled(
+      live
+        ? [getLiveTasks(), getLiveDoneTasks(since)]
+        : [getTasks(), getDoneTasks(since)],
+    );
     if (request < lastApplied.current || writesAtIssue !== writesSettled.current)
       return;
     lastApplied.current = request;
@@ -274,7 +296,7 @@ export function TasksPage() {
 
   const writeSettled = useCallback(() => {
     writesSettled.current += 1;
-    void refresh();
+    void refresh(true);
   }, [refresh]);
 
   const undo = useCallback(
@@ -286,25 +308,31 @@ export function TasksPage() {
       setNotice(null);
       const { before } = entry;
       applyWritten(before);
-      // Nothing to take back when the write itself failed.
-      if ((await entry.write) === null) return;
+      let task: TaskItem | null;
       try {
-        const { task } = await setTaskDone({
-          path: before.path,
-          line: before.line,
-          text: before.text,
-          done: before.done,
-          // An untick taken back keeps the day the task was done.
-          date: before.done ? before.done_date : null,
+        task = await queueWrite(key, async () => {
+          // Nothing to take back when the write itself failed.
+          if ((await entry.write) === null) return null;
+          const result = await setTaskDone({
+            path: before.path,
+            line: before.line,
+            text: before.text,
+            done: before.done,
+            // An untick taken back keeps the day the task was done.
+            date: before.done ? before.done_date : null,
+          });
+          return result.task;
         });
-        applyWritten(task);
       } catch (err) {
         setNotice(failedWriteMessage(err, before.done));
-      } finally {
         writeSettled();
+        return;
       }
+      if (task === null) return;
+      applyWritten(task);
+      writeSettled();
     },
-    [applyWritten, dropPending, writeSettled],
+    [applyWritten, dropPending, writeSettled, queueWrite],
   );
 
   const toggle = useCallback(
@@ -320,13 +348,15 @@ export function TasksPage() {
       const done = !task.done;
       const date = done ? localIsoDate() : null;
       const token = { undone: false };
-      const write = setTaskDone({
-        path: task.path,
-        line: task.line,
-        text: task.text,
-        done,
-        date,
-      })
+      const write = queueWrite(key, () =>
+        setTaskDone({
+          path: task.path,
+          line: task.line,
+          text: task.text,
+          done,
+          date,
+        }),
+      )
         .then(({ task: written }) => {
           if (!token.undone) applyWritten(written);
           return written;
@@ -349,17 +379,30 @@ export function TasksPage() {
         write,
       };
       changePending((map) => map.set(key, entry));
+      // The row leaves once its Undo window is over and its write has
+      // landed, not before: until then the list still holds the task as
+      // it was. A failed write has already put the row back.
       timers.current.set(
         key,
         window.setTimeout(() => {
-          if (pendingRef.current.get(key)?.token !== token) return;
-          dropPending(key);
-          // A task added here and then ticked has nothing left to show.
-          if (done) setAddedKeys((keys) => withoutKey(keys, key));
+          void write.then(() => {
+            if (pendingRef.current.get(key)?.token !== token) return;
+            dropPending(key);
+            // A task added here and then ticked has nothing left to show.
+            if (done) setAddedKeys((keys) => withoutKey(keys, key));
+          });
         }, UNDO_MS),
       );
     },
-    [canWrite, undo, applyWritten, dropPending, writeSettled, changePending],
+    [
+      canWrite,
+      undo,
+      applyWritten,
+      dropPending,
+      writeSettled,
+      changePending,
+      queueWrite,
+    ],
   );
 
   const handleAdd = useCallback(

@@ -1496,6 +1496,12 @@ a {
   font-size: 0.9rem;
 }
 
+/* A failed copy in the unsaved-text panel, whose muted paragraph color
+   would otherwise win. */
+.unsaved-text p.error-text {
+  color: var(--danger);
+}
+
 /* R5: always-visible while offline, distinct from `.error-text` -- this
    isn't a failure state, it's an expected mode the user needs to notice
    at a glance without it reading as alarming. */

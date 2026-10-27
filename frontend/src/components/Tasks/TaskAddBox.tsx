@@ -22,13 +22,15 @@ export function TaskAddBox({ onAdd, disabled = false }: TaskAddBoxProps) {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     // Whitespace alone adds nothing, and says nothing either.
-    if (busy.current || disabled || !text.trim()) return;
+    const submitted = text.trim();
+    if (busy.current || disabled || !submitted) return;
     busy.current = true;
     setAdding(true);
     setError(null);
     try {
-      await onAdd(text.trim());
-      setText("");
+      await onAdd(submitted);
+      // Only the text sent goes: what was typed meanwhile is the next task.
+      setText((current) => (current.trim() === submitted ? "" : current));
     } catch (err) {
       setError(`The task wasn't added: ${errorMessage(err)}`);
     } finally {

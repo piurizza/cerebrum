@@ -105,6 +105,8 @@ export function NoteViewPage() {
   // toggle would fight the in-flight request.
   const [loadError, setLoadError] = useState<unknown>(null);
   const [conflictOpen, setConflictOpen] = useState(false);
+  // The refused save found the note deleted, not changed.
+  const [conflictDeleted, setConflictDeleted] = useState(false);
   const [conflictError, setConflictError] = useState<string | null>(null);
   // The edits a Reload took out of the editor, kept on screen to copy
   // until dismissed.
@@ -121,6 +123,11 @@ export function NoteViewPage() {
   // The note and line a `?line=` was last acted on, so later renders (an
   // edit, a tick) don't scroll back to it.
   const openedAt = useRef<string | null>(null);
+  // The note open and the buffer as it is now, for a write's answer to
+  // check once it lands: the user may have opened another note or typed
+  // while it was in flight.
+  const openPath = useRef(path);
+  const buffer = useRef(content);
   const editorRef = useRef<HTMLDivElement>(null);
   const { isZen, toggleZen } = useZenMode();
   const { theme, toggleTheme } = useTheme();
@@ -143,10 +150,12 @@ export function NoteViewPage() {
     // already-loaded note B. Mirrors AuthContext.tsx's mount-effect
     // cancellation pattern (review finding #6, 2026-08-31 code review).
     let cancelled = false;
+    openPath.current = path;
     setLoading(true);
     setLoadError(null);
     setSaveError(null);
     setConflictOpen(false);
+    setConflictDeleted(false);
     setConflictError(null);
     setTaskNotice(null);
     setTaskError(null);
@@ -180,19 +189,43 @@ export function NoteViewPage() {
 
   const isDirty = content !== savedContent;
 
-  // The server re-renders frontmatter on a write, so its content, not the
-  // buffer's, is the new base.
-  const adoptSavedNote = useCallback((note: Note) => {
-    setSavedContent(note.content);
-    setContent(note.content);
-    setUpdated(note.updated);
-    setBaseVersion(note.version);
+  useLayoutEffect(() => {
+    buffer.current = content;
+  }, [content]);
+
+  // The editor's changes reach the ref at once, not on the next render, so
+  // an answer landing in between still sees them.
+  const handleEditorChange = useCallback((text: string) => {
+    buffer.current = text;
+    setContent(text);
   }, []);
 
-  // A note fetched again replaces the one shown, buffer included.
+  // The note a write or fetch returned, for the buffer `sent` was taken
+  // from. The server re-renders frontmatter on a write, so its content, not
+  // the buffer's, is the new base. Anything typed since `sent` stays,
+  // unsaved, with the note's own change folded in. When the two overlap,
+  // nothing is adopted: the base stays where it was, so the next save is
+  // refused and the conflict dialog asks, instead of that save silently
+  // undoing the note's change. Returns whether the note was adopted.
+  const adoptSavedNote = useCallback((note: Note, sent: string): boolean => {
+    let next = note.content;
+    if (buffer.current !== sent) {
+      const merged = mergeNote(sent, buffer.current, note.content);
+      if (!merged.ok) return false;
+      next = merged.text;
+    }
+    buffer.current = next;
+    setContent(next);
+    setSavedContent(note.content);
+    setUpdated(note.updated);
+    setBaseVersion(note.version);
+    return true;
+  }, []);
+
+  // A note fetched again replaces the one shown, title included.
   const adoptReloadedNote = useCallback(
-    (note: Note) => {
-      adoptSavedNote(note);
+    (note: Note, sent: string) => {
+      if (!adoptSavedNote(note, sent)) return;
       setTitle(note.title);
       setCreated(note.created);
     },
@@ -204,12 +237,15 @@ export function NoteViewPage() {
   // otherwise). The note it returns becomes the base of the next save, so
   // that save isn't refused because of the tick. When the task isn't where
   // the preview put it any more, nothing is written and the note reloads.
+  // An answer that lands once another note is open is dropped.
   const handleToggleTask = useCallback(
     async ({ line, text, done }: { line: number; text: string; done: boolean }) => {
       if (ticking.current || !canWrite || isDirty) return;
       ticking.current = true;
       setTaskNotice(null);
       setTaskError(null);
+      const clicked = content;
+      const stillOpen = () => openPath.current === path;
       try {
         const { note } = await setTaskDone({
           path,
@@ -218,16 +254,20 @@ export function NoteViewPage() {
           done,
           date: done ? localIsoDate() : null,
         });
-        adoptSavedNote(note);
+        if (stillOpen()) adoptSavedNote(note, clicked);
       } catch (err) {
+        if (!stillOpen()) return;
         if (!isTaskChangedError(err)) {
           setTaskError(errorMessage(err));
           return;
         }
         try {
-          adoptReloadedNote(await getLiveNote(path));
+          const fresh = await getLiveNote(path);
+          if (!stillOpen()) return;
+          adoptReloadedNote(fresh, clicked);
           setTaskNotice(TASK_CHANGED_MESSAGE);
         } catch (reloadErr) {
+          if (!stillOpen()) return;
           // A note that is gone shows as one that can't be opened.
           if (reloadErr instanceof ApiError && reloadErr.status === 404) {
             setLoadError(reloadErr);
@@ -239,7 +279,7 @@ export function NoteViewPage() {
         ticking.current = false;
       }
     },
-    [path, canWrite, isDirty, adoptSavedNote, adoptReloadedNote],
+    [path, content, canWrite, isDirty, adoptSavedNote, adoptReloadedNote],
   );
 
   // Hidden on a read-only vault (the checkboxes only show their state),
@@ -286,22 +326,35 @@ export function NoteViewPage() {
   // version the buffer started from, so a file changed elsewhere since is
   // refused rather than overwritten. A refused save is merged with the file
   // as it is now and saved once more; when the changes overlap, or that
-  // second save is refused too, the conflict dialog takes over. Throws on
-  // any other failure, for the caller to report.
+  // second save is refused too, the conflict dialog takes over; a note
+  // deleted elsewhere can't be merged with, so it asks at once. Throws on
+  // any other failure, for the caller to report. Anything typed while the
+  // save is in flight stays, unsaved (adoptSavedNote).
   const handleSave = useCallback(async (): Promise<SaveOutcome> => {
     setSaving(true);
+    const sent = content;
     try {
       let note: Note;
       try {
-        note = await putNote(path, content, { baseVersion });
+        note = await putNote(path, sent, { baseVersion });
       } catch (err) {
         if (!(err instanceof NoteConflictError)) throw err;
-        // Rejects with CachedNoteError when only the offline cache answers:
-        // merging against a copy older than the file would only be refused
-        // again, so the buffer stays dirty instead.
-        const fresh = await getLiveNote(path);
-        const merged = mergeNote(savedContent, content, fresh.content);
+        let fresh: Note;
+        try {
+          // Rejects with CachedNoteError when only the offline cache
+          // answers: merging against a copy older than the file would only
+          // be refused again, so the buffer stays dirty instead.
+          fresh = await getLiveNote(path);
+        } catch (fetchErr) {
+          if (!(fetchErr instanceof ApiError && fetchErr.status === 404))
+            throw fetchErr;
+          setConflictDeleted(true);
+          setConflictOpen(true);
+          return "conflict";
+        }
+        const merged = mergeNote(savedContent, sent, fresh.content);
         if (!merged.ok) {
+          setConflictDeleted(false);
           setConflictOpen(true);
           return "conflict";
         }
@@ -310,11 +363,12 @@ export function NoteViewPage() {
         } catch (retryErr) {
           // Changed yet again: one automatic merge only, then ask.
           if (!(retryErr instanceof NoteConflictError)) throw retryErr;
+          setConflictDeleted(false);
           setConflictOpen(true);
           return "conflict";
         }
       }
-      adoptSavedNote(note);
+      adoptSavedNote(note, sent);
       return "saved";
     } finally {
       setSaving(false);
@@ -339,8 +393,10 @@ export function NoteViewPage() {
     setSaving(true);
     try {
       const fresh = await getLiveNote(path);
-      setUnsavedText(content);
-      adoptReloadedNote(fresh);
+      // All of the buffer, so all of it is replaced.
+      const replaced = buffer.current;
+      setUnsavedText(replaced);
+      adoptReloadedNote(fresh, replaced);
       setSaveError(null);
       setConflictOpen(false);
     } catch (err) {
@@ -348,14 +404,15 @@ export function NoteViewPage() {
     } finally {
       setSaving(false);
     }
-  }, [path, content, adoptReloadedNote]);
+  }, [path, adoptReloadedNote]);
 
-  // Keep mine: unconditional on purpose, the user chose to overwrite.
+  // Keep mine: unconditional on purpose, the user chose to overwrite (or,
+  // for a note deleted elsewhere, to save it again).
   const handleConflictKeepMine = useCallback(async () => {
     setConflictError(null);
     setSaving(true);
     try {
-      adoptSavedNote(await putNote(path, content));
+      adoptSavedNote(await putNote(path, content), content);
       setSaveError(null);
       setConflictOpen(false);
     } catch (err) {
@@ -512,6 +569,7 @@ export function NoteViewPage() {
       )}
       {conflictOpen && (
         <SaveConflictDialog
+          deleted={conflictDeleted}
           error={conflictError}
           busy={saving}
           isOffline={!canWrite}
@@ -576,7 +634,7 @@ export function NoteViewPage() {
         {mode === "edit" ? (
           <MarkdownEditor
             value={content}
-            onChange={setContent}
+            onChange={handleEditorChange}
             currentPath={path}
             readOnly={!canWrite}
           />

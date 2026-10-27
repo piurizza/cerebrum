@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface SaveConflictDialogProps {
+  /** The note was deleted elsewhere rather than changed: there is nothing
+   * to reload, and Keep mine saves it again. */
+  deleted?: boolean;
   error?: string | null;
   busy?: boolean;
   /** Disables both choices while a write or fetch can't reach the server;
@@ -14,10 +17,12 @@ interface SaveConflictDialogProps {
 
 /** Shown when a save was refused because the note changed elsewhere and
  * the change overlaps the unsaved edits, so no automatic merge was
- * possible (R16). Each choice says what it throws away. Same
+ * possible (R16), or because the note was deleted elsewhere. Each choice
+ * says what it throws away. Same
  * overlay/backdrop/Escape structure as `UnsavedChangesDialog`; Escape maps
  * to Cancel, which leaves the buffer as it is, unsaved. */
 export function SaveConflictDialog({
+  deleted = false,
   error,
   busy,
   isOffline = false,
@@ -38,6 +43,8 @@ export function SaveConflictDialog({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onCancel, busy, isTopmost]);
 
+  const title = deleted ? "This note was deleted" : "This note changed";
+
   return (
     <div className="modal-overlay">
       <button
@@ -52,32 +59,53 @@ export function SaveConflictDialog({
         className="modal"
         role="dialog"
         aria-modal="true"
-        aria-label="This note changed"
+        aria-label={title}
       >
-        <h2 className="modal-title">This note changed</h2>
-        <p>
-          The note was changed somewhere else since you opened it, and those changes
-          touch the same lines as your unsaved edits.
-        </p>
-        <ul className="save-conflict-choices">
-          <li>
-            <strong>Reload</strong> opens the note as it is now and discards your
-            unsaved edits from the editor. Your text stays on screen to copy.
-          </li>
-          <li>
-            <strong>Keep mine</strong> saves your version over the note and discards the
-            other changes.
-          </li>
-        </ul>
+        <h2 className="modal-title">{title}</h2>
+        {deleted ? (
+          <>
+            <p>
+              The note was deleted somewhere else since you opened it, so your unsaved
+              edits have nowhere to go.
+            </p>
+            <ul className="save-conflict-choices">
+              <li>
+                <strong>Keep mine</strong> saves your version as the note again.
+              </li>
+              <li>
+                <strong>Cancel</strong> leaves your edits in the editor, unsaved.
+              </li>
+            </ul>
+          </>
+        ) : (
+          <>
+            <p>
+              The note was changed somewhere else since you opened it, and those changes
+              touch the same lines as your unsaved edits.
+            </p>
+            <ul className="save-conflict-choices">
+              <li>
+                <strong>Reload</strong> opens the note as it is now and discards your
+                unsaved edits from the editor. Your text stays on screen to copy.
+              </li>
+              <li>
+                <strong>Keep mine</strong> saves your version over the note and discards
+                the other changes.
+              </li>
+            </ul>
+          </>
+        )}
         <div className="modal-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onReload}
-            disabled={busy || isOffline}
-          >
-            Reload
-          </button>
+          {!deleted && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onReload}
+              disabled={busy || isOffline}
+            >
+              Reload
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-danger-outline"
@@ -110,9 +138,18 @@ interface UnsavedTextPanelProps {
  * dismissed (R16). */
 export function UnsavedTextPanel({ text, onDismiss }: UnsavedTextPanelProps) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
+  // The clipboard can refuse (no permission), or be missing altogether on
+  // a plain-http origin; the text is still there to select by hand.
   async function handleCopy() {
-    await navigator.clipboard.writeText(text);
+    setCopyFailed(false);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      setCopyFailed(true);
+      return;
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }
@@ -136,6 +173,11 @@ export function UnsavedTextPanel({ text, onDismiss }: UnsavedTextPanelProps) {
           Dismiss
         </button>
       </div>
+      {copyFailed && (
+        <p className="error-text" role="alert">
+          Couldn't copy -- select the text above and copy it yourself.
+        </p>
+      )}
     </section>
   );
 }

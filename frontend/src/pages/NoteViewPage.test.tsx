@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, CachedNoteError, NoteConflictError } from "../api/client";
@@ -70,7 +77,7 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useNavigate: () => mockNavigate,
-    useParams: () => ({ "*": TEST_PATH }),
+    useParams: () => ({ "*": routePath }),
     useBlocker: () => mockUseBlocker(),
     useSearchParams: () => [searchParams, vi.fn()],
   };
@@ -78,6 +85,19 @@ vi.mock("react-router-dom", async () => {
 
 // The note route's query string (`?line=N` opens a note at a task).
 let searchParams = new URLSearchParams();
+// The note open; a test that opens another sets it and re-renders.
+let routePath = TEST_PATH;
+
+// A promise settled by the test, for a request still in flight.
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 const mockUseOffline =
   vi.fn<() => { isOffline: boolean; lastSyncedAt: string | null }>();
@@ -175,6 +195,7 @@ beforeEach(() => {
   capturedHeaderProps = null;
   mockSetTaskDone.mockReset();
   searchParams = new URLSearchParams();
+  routePath = TEST_PATH;
   realPreview = false;
   mockGetVaultSettings.mockReset();
   // Never fetched: counts as writable.
@@ -526,6 +547,118 @@ describe("NoteViewPage guarded save", () => {
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   });
 
+  it("reports a merged save refused for another reason inline, without the dialog", async () => {
+    await openNote();
+    mockPutNote
+      .mockRejectedValueOnce(new NoteConflictError("The note changed"))
+      .mockRejectedValueOnce(new ApiError("This vault is read-only", 403));
+    mockGetLiveNote.mockResolvedValue(
+      makeNote({ content: `${BASE}${TASK}\n`, version: "fresh" }),
+    );
+
+    await typeInEditor("# A\n\nFirst line, edited\nLast line\n");
+    pressCtrlS();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This vault is read-only",
+    );
+    expect(mockPutNote).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(capturedEditorProps.value).toBe("# A\n\nFirst line, edited\nLast line\n");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
+
+  it("keeps what was typed while a save was in flight, unsaved on the saved base", async () => {
+    await openNote();
+    const save = deferred<Note>();
+    mockPutNote.mockReturnValueOnce(save.promise);
+
+    await typeInEditor(`${BASE}One\n`);
+    pressCtrlS();
+    await typeInEditor(`${BASE}One\nTwo\n`);
+    await act(async () =>
+      save.resolve(makeNote({ content: `${BASE}One\n`, version: "saved-1" })),
+    );
+
+    expect(capturedEditorProps.value).toBe(`${BASE}One\nTwo\n`);
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+
+    mockPutNote.mockResolvedValueOnce(
+      makeNote({ content: `${BASE}One\nTwo\n`, version: "saved-2" }),
+    );
+    pressCtrlS();
+    await waitFor(() => expect(mockPutNote).toHaveBeenCalledTimes(2));
+    expect(lastPutOptions()).toEqual({ baseVersion: "saved-1" });
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+  });
+
+  it("keeps what was typed while a merged save was in flight, with the merge folded in", async () => {
+    await openNote();
+    const mine = "# A\n\nFirst line, edited\nLast line\n";
+    const merged = `${mine}${TASK}\n`;
+    const retry = deferred<Note>();
+    mockPutNote
+      .mockRejectedValueOnce(new NoteConflictError("The note changed"))
+      .mockReturnValueOnce(retry.promise);
+    mockGetLiveNote.mockResolvedValue(
+      makeNote({ content: `${BASE}${TASK}\n`, version: "fresh" }),
+    );
+
+    await typeInEditor(mine);
+    pressCtrlS();
+    await waitFor(() => expect(mockPutNote).toHaveBeenCalledTimes(2));
+    await typeInEditor(`${mine}More\n`);
+    await act(async () =>
+      retry.resolve(makeNote({ content: merged, version: "merged" })),
+    );
+
+    // The task the merge brought in stays, and so does the typing.
+    expect(capturedEditorProps.value).toBe(`${mine}More\n${TASK}\n`);
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+
+    mockPutNote.mockImplementationOnce(async (_path, content) => makeNote({ content }));
+    pressCtrlS();
+    await waitFor(() => expect(mockPutNote).toHaveBeenCalledTimes(3));
+    expect(lastPutOptions()).toEqual({ baseVersion: "merged" });
+  });
+
+  describe("when the note was deleted elsewhere", () => {
+    async function saveIntoDeleted() {
+      await openNote();
+      mockPutNote.mockRejectedValueOnce(new NoteConflictError("The note changed"));
+      mockGetLiveNote.mockRejectedValue(new ApiError("Note not found", 404));
+      await typeInEditor(`${BASE}Mine\n`);
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      return screen.findByRole("dialog", { name: "This note was deleted" });
+    }
+
+    it("asks, saying the note is gone, instead of failing every save", async () => {
+      const dialog = await saveIntoDeleted();
+
+      expect(dialog).toHaveTextContent(/deleted somewhere else/);
+      expect(dialog).toHaveTextContent(
+        /Keep mine.*saves your version as the note again/,
+      );
+      // Reloading a note that is gone would only fail.
+      expect(within(dialog).queryByRole("button", { name: "Reload" })).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    });
+
+    it("Keep mine saves the note again with an unconditional save", async () => {
+      await saveIntoDeleted();
+      mockPutNote.mockResolvedValueOnce(
+        makeNote({ content: `${BASE}Mine\n`, version: "recreated" }),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Keep mine" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(mockPutNote.mock.calls[1]).toEqual([TEST_PATH, `${BASE}Mine\n`]);
+      expect(screen.getByText("Saved")).toBeInTheDocument();
+    });
+  });
+
   it("sends the renamed note's version after a rename through the path header", async () => {
     await openNote();
     act(() =>
@@ -609,6 +742,34 @@ describe("NoteViewPage guarded save", () => {
       expect(screen.getByText("Saved")).toBeInTheDocument();
     });
 
+    it("Reload from the offline cache keeps the dialog open and the buffer", async () => {
+      const dialog = await saveIntoConflict();
+      mockGetLiveNote.mockRejectedValue(new CachedNoteError());
+
+      fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "Offline -- your changes aren't saved yet.",
+      );
+      expect(screen.getByRole("dialog", { name: "This note changed" })).toBe(dialog);
+      expect(capturedEditorProps.value).toBe(MINE);
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: "Your unsaved text" })).toBeNull();
+    });
+
+    it("Keep mine that fails says why in the dialog and leaves the buffer unsaved", async () => {
+      const dialog = await saveIntoConflict();
+      mockPutNote.mockRejectedValueOnce(new ApiError("Disk full", 500));
+
+      fireEvent.click(screen.getByRole("button", { name: "Keep mine" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("Disk full");
+      expect(screen.getByRole("dialog", { name: "This note changed" })).toBe(dialog);
+      expect(mockPutNote.mock.calls[1]).toEqual([TEST_PATH, MINE]);
+      expect(capturedEditorProps.value).toBe(MINE);
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    });
+
     it("Cancel leaves the buffer as it was, unsaved", async () => {
       await saveIntoConflict();
 
@@ -683,8 +844,43 @@ describe("NoteViewPage preview tasks", () => {
   async function openNote(content = CONTENT) {
     realPreview = true;
     mockGetNote.mockResolvedValue(makeNote({ content }));
-    render(<NoteViewPage />);
+    const view = render(<NoteViewPage />);
     await screen.findByTestId("markdown-preview");
+    return view;
+  }
+
+  // Opens note B while note A's tick is still in flight.
+  async function openOtherNote(view: ReturnType<typeof render>) {
+    routePath = "notes/b.md";
+    mockGetNote.mockResolvedValue(
+      makeNote({
+        path: "notes/b.md",
+        content: "# B\n- [ ] Feed the cat\n",
+        version: "b-1",
+      }),
+    );
+    view.rerender(<NoteViewPage />);
+    await screen.findByRole("checkbox", { name: "Feed the cat" });
+  }
+
+  async function expectNoteB() {
+    expect(screen.getByRole("checkbox", { name: "Feed the cat" })).toBeInTheDocument();
+    expect(screen.queryByText(/Water the herbs/)).toBeNull();
+    expect(screen.queryByText(TASK_CHANGED_MESSAGE)).toBeNull();
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+    // Note B saves against its own version.
+    mockPutNote.mockImplementation(async (path, content) =>
+      makeNote({ path, content, version: "b-2" }),
+    );
+    await typeInEditor("# B\n- [ ] Feed the cat\nMore\n");
+    pressCtrlS();
+    await waitFor(() =>
+      expect(mockPutNote).toHaveBeenCalledWith(
+        "notes/b.md",
+        "# B\n- [ ] Feed the cat\nMore\n",
+        { baseVersion: "b-1" },
+      ),
+    );
   }
 
   function checkbox() {
@@ -731,6 +927,88 @@ describe("NoteViewPage preview tasks", () => {
     );
     await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
     expect(mockGetLiveNote).not.toHaveBeenCalled();
+  });
+
+  it("ignores a tick's answer once another note is open", async () => {
+    const view = await openNote();
+    const tick = deferred<{ note: Note; task: TaskItem }>();
+    mockSetTaskDone.mockReturnValue(tick.promise);
+    fireEvent.click(checkbox());
+
+    await openOtherNote(view);
+    await act(async () => tick.resolve(written(TICKED, "version-2")));
+
+    await expectNoteB();
+  });
+
+  it("ignores a refused tick's reload once another note is open", async () => {
+    const view = await openNote();
+    const tick = deferred<{ note: Note; task: TaskItem }>();
+    mockSetTaskDone.mockReturnValue(tick.promise);
+    mockGetLiveNote.mockResolvedValue(
+      makeNote({ content: "# A\n- [ ] Moved task\n", version: "version-9" }),
+    );
+    fireEvent.click(checkbox());
+
+    await openOtherNote(view);
+    await act(async () =>
+      tick.reject(new ApiError("The note changed since the task was loaded", 409)),
+    );
+
+    await expectNoteB();
+  });
+
+  it("keeps what was typed while a tick was in flight, with the tick folded in", async () => {
+    await openNote();
+    const tick = deferred<{ note: Note; task: TaskItem }>();
+    mockSetTaskDone.mockReturnValue(tick.promise);
+    fireEvent.click(checkbox());
+
+    // A line away from the task's, so the two merge.
+    const retitle = (text: string) => text.replace("title: A", "title: Garden");
+    await typeInEditor(retitle(CONTENT));
+    await act(async () => tick.resolve(written(TICKED, "version-2")));
+
+    expect(capturedEditorProps.value).toBe(retitle(TICKED));
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    mockPutNote.mockImplementation(async (_path, content) =>
+      makeNote({ content, version: "version-3" }),
+    );
+    pressCtrlS();
+    await waitFor(() =>
+      expect(mockPutNote).toHaveBeenCalledWith(TEST_PATH, retitle(TICKED), {
+        baseVersion: "version-2",
+      }),
+    );
+  });
+
+  it("keeps typing on the ticked line as it is, so its save is refused, not lost", async () => {
+    await openNote();
+    const tick = deferred<{ note: Note; task: TaskItem }>();
+    mockSetTaskDone.mockReturnValue(tick.promise);
+    fireEvent.click(checkbox());
+
+    const typed = "---\ntitle: A\n---\n# A\n- [ ] Water the herbs and the roses\n";
+    await typeInEditor(typed);
+    await act(async () => tick.resolve(written(TICKED, "version-2")));
+
+    expect(capturedEditorProps.value).toBe(typed);
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    // Saved against the version before the tick, the server refuses it and
+    // the conflict dialog asks, rather than the tick being overwritten.
+    mockPutNote.mockRejectedValue(new NoteConflictError("The note changed"));
+    mockGetLiveNote.mockResolvedValue(
+      makeNote({ content: TICKED, version: "version-2" }),
+    );
+    pressCtrlS();
+    expect(
+      await screen.findByRole("dialog", { name: "This note changed" }),
+    ).toBeInTheDocument();
+    expect(mockPutNote.mock.calls[0]).toEqual([
+      TEST_PATH,
+      typed,
+      { baseVersion: "version-1" },
+    ]);
   });
 
   it("disables the checkboxes with a Save first hint while the buffer is dirty", async () => {

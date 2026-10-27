@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TaskAddBox } from "./TaskAddBox";
@@ -19,6 +19,45 @@ describe("TaskAddBox", () => {
     await user.type(input, "Buy nails");
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(onAdd).toHaveBeenLastCalledWith("Buy nails");
+  });
+
+  it("keeps what was typed while the add was in flight", async () => {
+    const user = userEvent.setup();
+    let land: () => void = () => {};
+    const onAdd = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    render(<TaskAddBox onAdd={onAdd} />);
+
+    const input = screen.getByRole("textbox", { name: "New task" });
+    await user.type(input, "Order timber{Enter}");
+    await user.clear(input);
+    await user.type(input, "Buy nails");
+    await act(async () => land());
+
+    expect(onAdd).toHaveBeenCalledWith("Order timber");
+    expect(input).toHaveValue("Buy nails");
+  });
+
+  it("empties the box when only spacing changed while the add was in flight", async () => {
+    const user = userEvent.setup();
+    let land: () => void = () => {};
+    const onAdd = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    render(<TaskAddBox onAdd={onAdd} />);
+
+    const input = screen.getByRole("textbox", { name: "New task" });
+    await user.type(input, "Order timber{Enter} ");
+    await act(async () => land());
+
+    expect(input).toHaveValue("");
   });
 
   it("adds nothing for an empty or whitespace-only entry", async () => {

@@ -437,8 +437,9 @@ export function getNote(path: string): Promise<Note> {
   return request<Note>(`/notes/${encodeNotePath(path)}`);
 }
 
-// Rejected by getLiveNote() when the service worker answered from its
-// cache because the server couldn't be reached (`X-SW-Cache-Fallback`).
+// Rejected by getLiveNote() and the live task lists when the service
+// worker answered from its cache because the server couldn't be reached
+// (`X-SW-Cache-Fallback`).
 export class CachedNoteError extends Error {
   constructor() {
     super("The server can't be reached right now.");
@@ -446,16 +447,21 @@ export class CachedNoteError extends Error {
   }
 }
 
-// getNote() for when only the file as it is now will do, such as merging a
-// save the server refused: a cached copy may be older than the file that
-// refused it. fetchWithToken() has already reported the outage either way.
-export async function getLiveNote(path: string): Promise<Note> {
-  const notePath = `/notes/${encodeNotePath(path)}`;
-  const response = await fetchWithRetry(notePath);
+// A GET that refuses the service worker's cached answer.
+// fetchWithToken() has already reported the outage either way.
+async function liveRequest<T>(path: string): Promise<T> {
+  const response = await fetchWithRetry(path);
   if (response.headers.get("X-SW-Cache-Fallback")) {
     throw new CachedNoteError();
   }
-  return toResult<Note>(response, notePath);
+  return toResult<T>(response, path);
+}
+
+// getNote() for when only the file as it is now will do, such as merging a
+// save the server refused: a cached copy may be older than the file that
+// refused it.
+export function getLiveNote(path: string): Promise<Note> {
+  return liveRequest<Note>(`/notes/${encodeNotePath(path)}`);
 }
 
 // Without options the save is unconditional. `baseVersion` is the `version`
@@ -513,6 +519,17 @@ export function getTasks(): Promise<TaskItem[]> {
 // first. A task ticked without a date isn't listed.
 export function getDoneTasks(since: string): Promise<TaskItem[]> {
   return request<TaskItem[]>(`/tasks/done?since=${encodeURIComponent(since)}`);
+}
+
+// The task lists for right after a write: the service worker's cache may
+// still hold the lists from before it, so a cached answer is refused with
+// a CachedNoteError rather than shown.
+export function getLiveTasks(): Promise<TaskItem[]> {
+  return liveRequest<TaskItem[]>("/tasks");
+}
+
+export function getLiveDoneTasks(since: string): Promise<TaskItem[]> {
+  return liveRequest<TaskItem[]>(`/tasks/done?since=${encodeURIComponent(since)}`);
 }
 
 // Appends `- [ ] <text>` to the daily note for `date`, which the server

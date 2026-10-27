@@ -9,8 +9,8 @@ import {
   doneListSince,
   hasActiveFilters,
   NO_FILTERS,
+  taskFilter,
   taskFolders,
-  taskMatchesFilters,
 } from "./taskList";
 
 function task(path: string, text = "Water the herbs", extra: Partial<TaskItem> = {}) {
@@ -39,36 +39,35 @@ describe("taskFolders", () => {
   });
 });
 
-describe("taskMatchesFilters", () => {
+describe("taskFilter", () => {
   it("keeps everything when no filter is set", () => {
-    expect(taskMatchesFilters(task("a.md"), NO_FILTERS)).toBe(true);
+    expect(taskFilter(NO_FILTERS)(task("a.md"))).toBe(true);
   });
 
   it("matches the shared tag selection against the note's tags", () => {
     const garden = task("a.md", "Rake", { tags: ["garden/veg"] });
     const untagged = task("b.md");
-    const filters = { ...NO_FILTERS, chips: [{ tag: "garden", excluded: false }] };
-    expect(taskMatchesFilters(garden, filters)).toBe(true);
-    expect(taskMatchesFilters(untagged, filters)).toBe(false);
+    const matches = taskFilter({
+      ...NO_FILTERS,
+      chips: [{ tag: "garden", excluded: false }],
+    });
+    expect(matches(garden)).toBe(true);
+    expect(matches(untagged)).toBe(false);
   });
 
   it("includes a folder's subfolders, but not a folder that only starts the same", () => {
-    const filters = { ...NO_FILTERS, folder: "work" };
-    expect(taskMatchesFilters(task("work/a.md"), filters)).toBe(true);
-    expect(taskMatchesFilters(task("work/clients/acme.md"), filters)).toBe(true);
-    expect(taskMatchesFilters(task("workshop/a.md"), filters)).toBe(false);
-    expect(taskMatchesFilters(task("a.md"), filters)).toBe(false);
+    const matches = taskFilter({ ...NO_FILTERS, folder: "work" });
+    expect(matches(task("work/a.md"))).toBe(true);
+    expect(matches(task("work/clients/acme.md"))).toBe(true);
+    expect(matches(task("workshop/a.md"))).toBe(false);
+    expect(matches(task("a.md"))).toBe(false);
   });
 
   it("needs every word of the word filter in the text, in any case and order", () => {
     const timber = task("a.md", "Order **timber** for the Shed");
-    expect(taskMatchesFilters(timber, { ...NO_FILTERS, words: "shed timber" })).toBe(
-      true,
-    );
-    expect(taskMatchesFilters(timber, { ...NO_FILTERS, words: "  tim  " })).toBe(true);
-    expect(taskMatchesFilters(timber, { ...NO_FILTERS, words: "shed nails" })).toBe(
-      false,
-    );
+    expect(taskFilter({ ...NO_FILTERS, words: "shed timber" })(timber)).toBe(true);
+    expect(taskFilter({ ...NO_FILTERS, words: "  tim  " })(timber)).toBe(true);
+    expect(taskFilter({ ...NO_FILTERS, words: "shed nails" })(timber)).toBe(false);
   });
 });
 

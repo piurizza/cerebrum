@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.5.0](https://github.com/piurizza/cerebrum/compare/v0.4.0...v0.5.0) (2026-10-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* ignore hidden folders and files when indexing and watching the vault ([#68](https://github.com/piurizza/cerebrum/issues/68))
+
+### Features
+
+* a working task list you can add to, tick and filter ([#83](https://github.com/piurizza/cerebrum/issues/83)) ([f5065e8](https://github.com/piurizza/cerebrum/commit/f5065e8cd125e1edbf26e287959aa7debc107a4b))
+* **auth:** sign in with an OpenID Connect provider ([#65](https://github.com/piurizza/cerebrum/issues/65)) ([ac47a0f](https://github.com/piurizza/cerebrum/commit/ac47a0fabe46aa76a66d9b7ca777bc45aac66351))
+* **desktop:** switch servers from the app's menu ([#80](https://github.com/piurizza/cerebrum/issues/80)) ([0e23359](https://github.com/piurizza/cerebrum/commit/0e23359727ec547ed6134e4fd46760aaffe56e83))
+* **frontend:** a Home link back to the tag front page ([#81](https://github.com/piurizza/cerebrum/issues/81)) ([cdbc1c5](https://github.com/piurizza/cerebrum/commit/cdbc1c54baf6c2209a5dd00ae94845e298ad4843))
+* ignore hidden folders and files when indexing and watching the vault ([#68](https://github.com/piurizza/cerebrum/issues/68)) ([f772e2a](https://github.com/piurizza/cerebrum/commit/f772e2a5ccfc9a7131cc099b77b75b4eead8932d))
+* make the accounts database location configurable (CEREBRUM_AUTH_DB_PATH) ([#64](https://github.com/piurizza/cerebrum/issues/64)) ([fdb1ee6](https://github.com/piurizza/cerebrum/commit/fdb1ee632755e8cab4f56e1f4970ea7750f90434))
+* pick tags in the search box and browse them on the front page ([#71](https://github.com/piurizza/cerebrum/issues/71)) ([a790290](https://github.com/piurizza/cerebrum/commit/a790290e0cf0aaf687f00c16784b7e250c2d7845))
+* read-only vault mode (CEREBRUM_VAULT_READ_ONLY) ([#66](https://github.com/piurizza/cerebrum/issues/66)) ([7c29937](https://github.com/piurizza/cerebrum/commit/7c29937cdd06ae19ec66cc4d08b8cf52bc7a7e2c))
+
+
+### Bug Fixes
+
+* **auth:** tie access tokens and sign-in flows to their instance, require an expiry ([#79](https://github.com/piurizza/cerebrum/issues/79)) ([6bde6ac](https://github.com/piurizza/cerebrum/commit/6bde6ac8b3f4a56af87c4362f2d4c32163405dd5))
+* **deps:** update vulnerable dependencies and scan lockfiles for advisories ([#74](https://github.com/piurizza/cerebrum/issues/74)) ([a02557d](https://github.com/piurizza/cerebrum/commit/a02557dfb1644db544897ea46d7b57c0aefb0aff))
+* follow markdown links and images to names with spaces ([#77](https://github.com/piurizza/cerebrum/issues/77)) ([a4bf80f](https://github.com/piurizza/cerebrum/commit/a4bf80ffc5e4eda971cac5b2903c1d5512c542b2))
+* keep a password admin, start a second read-only instance, reject hidden note folders ([#70](https://github.com/piurizza/cerebrum/issues/70)) ([37c8c45](https://github.com/piurizza/cerebrum/commit/37c8c45814bccb14b20f4b5c0b39b96894c97f2f))
+* save the loaded note on Cmd+S pressed right after it opens ([#69](https://github.com/piurizza/cerebrum/issues/69)) ([e7b1078](https://github.com/piurizza/cerebrum/commit/e7b107880b5ec14ee878ed304bc037e27fc40749))
+* settings a Docker .env couldn't set, LOG_LEVEL, and the upload limit ([#75](https://github.com/piurizza/cerebrum/issues/75)) ([1acf4f5](https://github.com/piurizza/cerebrum/commit/1acf4f524a3f3393531b5b0709e5ef0e23bc4f98))
+* sign in with an identity provider behind Tailscale serve or a reverse proxy ([#78](https://github.com/piurizza/cerebrum/issues/78)) ([94905b8](https://github.com/piurizza/cerebrum/commit/94905b87538e4b842d752a620fef64cff0afe9ab))
+
 ## [0.4.0](https://github.com/piurizza/cerebrum/compare/v0.3.0...v0.4.0) (2026-10-21)
 
 

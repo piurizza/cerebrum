@@ -10,6 +10,14 @@ id = "GHSA-wrw7-89jp-8q8g"
 ignoreUntil = 2027-04-30T00:00:00Z
 reason = "glib 0.18 comes from Tauri's GTK3 stack; VariantStrIter is unused"
 
+# block-buffer 0.10 (via digest 0.10 in Tauri's hashing crates). The bug needs a
+# panic caught inside a hash callback; nothing here catches one. The fix is in
+# 0.12, which digest 0.10 can't use.
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+ignoreUntil = 2027-04-30T00:00:00Z
+reason = "block-buffer 0.10 comes from digest 0.10 in Tauri's stack; no caught panics in hashing"
+
 # Unmaintained-crate notices (no vulnerability, no fixed version): a build-time
 # proc macro under glib, and the unic-* crates under urlpattern
 # (tauri-plugin-http, tauri-utils).

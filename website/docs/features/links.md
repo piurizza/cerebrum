@@ -19,6 +19,12 @@ understands:
 
 The path is relative to the note you're writing in.
 
+A file name with spaces is written percent-encoded, as
+`[My Note](My%20Note.md)`, and `[x](<My Note.md>)` works too. A bare space,
+as in `[x](My Note.md)`, isn't a link in markdown, so Cerebrum doesn't follow
+it either. The picker, pasted images and renames always write the encoded
+form.
+
 ## Wikilinks
 
 Cerebrum also reads Obsidian-style wikilinks, so a vault imported from Obsidian
@@ -67,11 +73,6 @@ place, unresolved.
 
 ## Known limits
 
-- **File names with spaces.** A markdown link only counts when its target has
-  no spaces: `[x](my-note.md)` works, but `[x](My Note.md)`,
-  `[x](My%20Note.md)` and `[x](<My Note.md>)` are not followed. Wikilinks
-  such as `[[My Note]]` work with any name. Prefer file
-  names without spaces, or `CEREBRUM_LINK_FORMAT=wikilink`.
 - Links inside notes in hidden folders, such as `.trash/`, are not updated
   when the note they point at moves.
 - Relative wikilinks such as `[[../Note]]` are not supported.

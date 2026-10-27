@@ -6,19 +6,19 @@ it an HTTPS address. HTTPS keeps your password and API tokens private on the
 network, and phones need a **trusted** certificate to install the app and keep
 it working offline.
 
-Most people should use **Tailscale serve**. Choose another option if you sign
-in through an identity provider, or already have a domain and a reverse proxy.
+Most people should use **Tailscale serve**. Choose another option if you
+already have a domain and a reverse proxy.
 
-| Option | Trusted by phones | Needs | Identity-provider sign-in |
-|---|---|---|---|
-| [Tailscale serve](#tailscale-serve) | Yes | A Tailscale account | No |
-| [Tailscale certificate on the built-in HTTPS port](#tailscale-certificate-on-the-built-in-https-port) | Yes | A Tailscale account, a monthly renewal | Yes |
-| [Reverse proxy with a domain](#reverse-proxy-with-a-domain) | Yes | A domain, a proxy such as Caddy | No |
-| [Built-in self-signed certificate](#built-in-self-signed-certificate) | No | Nothing | Yes, after accepting the warning |
+| Option | Trusted by phones | Needs |
+|---|---|---|
+| [Tailscale serve](#tailscale-serve) | Yes | A Tailscale account |
+| [Tailscale certificate on the built-in HTTPS port](#tailscale-certificate-on-the-built-in-https-port) | Yes | A Tailscale account, a monthly renewal |
+| [Reverse proxy with a domain](#reverse-proxy-with-a-domain) | Yes | A domain, a proxy such as Caddy |
+| [Built-in self-signed certificate](#built-in-self-signed-certificate) | No | Nothing |
 
-"No": behind a proxy that handles HTTPS in front of Cerebrum, sign-in
-with an [identity provider](identity-provider.md) builds its return address
-with `http://`, and the provider rejects it. Password sign-in works.
+Sign-in with an [identity provider](identity-provider.md) works with all of
+them; on the self-signed certificate, only after accepting the browser's
+warning.
 
 ## Tailscale serve
 
@@ -103,6 +103,10 @@ notes.example.com {
 
 This needs the domain to point at your server and, for Let's Encrypt, the
 proxy to be reachable from the internet or to use a DNS challenge.
+
+Caddy tells Cerebrum the request came over HTTPS on its own. With nginx, add
+`proxy_set_header X-Forwarded-Proto $scheme;`, or sign-in with an identity
+provider sends an `http://` return address and the provider refuses it.
 
 !!! warning
     If the proxy is reachable from the internet, so is Cerebrum: its sign-in
